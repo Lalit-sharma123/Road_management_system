@@ -1,0 +1,47 @@
+# Smart Road Damage Detection and Analysis System - Python Dependencies
+# Python 3.12 Compatible
+
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.7.4
+pydantic-settings==2.3.4
+
+# Database & ORM
+sqlalchemy==2.0.31
+alembic==1.13.1
+asyncpg==0.29.0
+aiosqlite==0.20.0
+psycopg2-binary==2.9.9
+
+# Security & Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+bcrypt==4.1.3
+
+# Computer Vision & Deep Learning
+opencv-python-headless==4.9.0.80
+ultralytics==8.2.35
+torch==2.3.1
+torchvision==0.18.1
+numpy==1.26.4
+pillow==10.3.0
+
+# Async Tasks & Queue (Optional / Production)
+celery==5.4.0
+redis==5.0.6
+
+# GPS & Metadata
+exifread==3.0.0
+geopy==2.4.1
+
+# Data Analysis & Export
+pandas==2.2.2
+openpyxl==3.1.5
+reportlab==4.2.2
+matplotlib==3.9.0
+
+# Testing & Dev
+pytest==8.2.2
+pytest-asyncio==0.23.7
+httpx==0.27.0
