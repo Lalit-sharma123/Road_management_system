@@ -87,6 +87,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [fps, setFps] = useState<number>(24);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
+  // Active Session Guard Ref
+  const activeSessionIdRef = useRef<string | null>(null);
+
   // GPS state
   const [currentGps, setCurrentGps] = useState<{ lat: number; lng: number }>({ lat: 28.4595, lng: 77.0266 });
   const routePointsRef = useRef<[number, number][]>([]);
@@ -116,7 +119,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
   // 1. Elapsed timer and Session Reset on videoId change
   useEffect(() => {
-    // Reset all state when videoId changes
+    // Reset all state and session guard when videoId changes
+    activeSessionIdRef.current = null;
     setCurrentFrameUrl(null);
     setFrameNumber(0);
     setTimestamp(0);
@@ -367,7 +371,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
         // Handle backend session reset message
         if (msg.type === 'session_reset') {
-          if (msg.video_id === videoId) {
+          if (!msg.video_id || msg.video_id === videoId) {
+            if (msg.session_id) {
+              activeSessionIdRef.current = msg.session_id;
+            }
             setCurrentFrameUrl(null);
             setFrameNumber(0);
             setProgress(0);
@@ -380,12 +387,23 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             setHelmetCount(0);
             setNumberPlateCount(0);
             setTimelineEvents([]);
+            setSelectedTimelineEvent(null);
             routePointsRef.current = [];
             damageLayerGroupRef.current?.clearLayers();
             polylineRef.current?.setLatLngs([]);
             setStatusText(msg.message || 'Fresh detection session initialized.');
           }
           return;
+        }
+
+        // Strict Session ID validation: if session_id is present, ensure it matches active session
+        if (msg.session_id) {
+          if (!activeSessionIdRef.current) {
+            activeSessionIdRef.current = msg.session_id;
+          } else if (activeSessionIdRef.current !== msg.session_id) {
+            // Superseded or stale frame from older session: drop immediately
+            return;
+          }
         }
 
         // Calculate live FPS

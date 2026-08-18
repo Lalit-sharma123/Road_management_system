@@ -32,6 +32,58 @@ router = APIRouter(prefix="/process", tags=["Processing Engine"])
 detector_instance = YOLODamageDetector()
 
 
+# Global Session Manager and System Cleanup for Complete Isolation between Consecutive Uploads
+def cleanup_system_resources(exclude_video_id: Optional[str] = None):
+    """
+    Clears all previous temporary files, cached frame buffers, OpenCV handles,
+    GPU memory, and forces Python garbage collection.
+    """
+    # 1. Clear old files in UPLOAD_DIR
+    try:
+        if os.path.exists(settings.UPLOAD_DIR):
+            for fname in os.listdir(settings.UPLOAD_DIR):
+                if exclude_video_id and exclude_video_id in fname:
+                    continue
+                fpath = os.path.join(settings.UPLOAD_DIR, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception as e:
+                        print(f"Warning deleting old upload file {fpath}: {e}")
+    except Exception as e:
+        print(f"Warning in cleanup UPLOAD_DIR: {e}")
+
+    # 2. Clear old files in PROCESSED_DIR (processed videos, old thumbnails, temporary frame dumps)
+    try:
+        if os.path.exists(settings.PROCESSED_DIR):
+            for fname in os.listdir(settings.PROCESSED_DIR):
+                if exclude_video_id and exclude_video_id in fname:
+                    continue
+                fpath = os.path.join(settings.PROCESSED_DIR, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception as e:
+                        print(f"Warning deleting old processed file {fpath}: {e}")
+    except Exception as e:
+        print(f"Warning in cleanup PROCESSED_DIR: {e}")
+
+    # 3. Clear deduplication & OCR caches
+    HelmetANPRService.reset_dedup_cache()
+
+    # 4. Release PyTorch CUDA memory if available
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
+    # 5. Force garbage collection
+    gc.collect()
+
+
 # WebSocket Manager for Live Processing Stages with Video & Session Channel Isolation
 class ConnectionManager:
     def __init__(self):
@@ -49,7 +101,13 @@ class ConnectionManager:
             del self.active_connections[websocket]
 
     async def broadcast(self, message: Dict[str, Any]):
+        msg_session_id = message.get("session_id")
         msg_video_id = message.get("video_id")
+
+        # Session filtering: If a message is from an older or superseded session, drop it immediately
+        if global_session_manager.active_session_id and msg_session_id and msg_session_id != global_session_manager.active_session_id:
+            return
+
         payload = json.dumps(message)
         dead = []
         for connection, info in list(self.active_connections.items()):
@@ -75,7 +133,7 @@ class SessionManager:
         self.active_task: Optional[asyncio.Task] = None
 
     async def start_new_session(self, video_id: str) -> Tuple[str, asyncio.Event]:
-        # 1. Stop previous video processing immediately
+        # 1. Stop previous video processing immediately & clean system resources
         await self.cancel_current_session()
 
         # 2. Generate a new unique session ID
@@ -115,7 +173,7 @@ class SessionManager:
         if self.active_task and not self.active_task.done():
             self.active_task.cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(self.active_task), timeout=0.3)
+                await asyncio.wait_for(asyncio.shield(self.active_task), timeout=0.4)
             except Exception:
                 pass
             self.active_task = None
@@ -126,6 +184,13 @@ class SessionManager:
 
         processing_progress_state["is_processing"] = False
         processing_progress_state["status"] = "Idle"
+        processing_progress_state["current_frame"] = 0
+        processing_progress_state["progress_percent"] = 0.0
+        processing_progress_state["pothole_count"] = 0
+        processing_progress_state["crack_count"] = 0
+        processing_progress_state["road_health_index"] = 100.0
+
+        cleanup_system_resources()
 
 global_session_manager = SessionManager()
 
@@ -250,6 +315,7 @@ async def execute_video_processing_task(
             number_plate_count = 0
             helmet_violations_count = 0
             violations_list = []
+            frame_detections: List[Dict[str, Any]] = []
 
             # Reset deduplication cache for this new video session
             HelmetANPRService.reset_dedup_cache(video.id)
@@ -261,6 +327,7 @@ async def execute_video_processing_task(
                     break
 
                 frames_processed_count += 1
+                frame_detections = []
 
                 # Multi-Model YOLO detection on preprocessed frame
                 raw_detections = detector_instance.detect(
@@ -268,7 +335,6 @@ async def execute_video_processing_task(
                     conf_threshold=confidence_threshold
                 )
                 has_damage = len(raw_detections) > 0
-                frame_detections = []
 
                 for det in raw_detections:
                     sev_level, sev_score = SeverityAnalysisService.calculate_detection_severity(
@@ -399,6 +465,7 @@ async def execute_video_processing_task(
                             timestamp_seconds=timestamp_sec,
                             evidence_image_path=v_data.get("evidence_image_path"),
                             evidence_image_url=v_data.get("evidence_image_url"),
+                            plate_crop_url=v_data.get("plate_crop_url"),
                             vehicle_type=v_data["vehicle_type"],
                             latitude=v_data["latitude"],
                             longitude=v_data["longitude"],

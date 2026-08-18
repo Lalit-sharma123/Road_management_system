@@ -13,7 +13,7 @@ class DistanceEstimator:
     def __init__(
         self,
         camera_height_meters: float = 1.3,
-        pitch_angle_degrees: float = 15.0,
+        pitch_angle_degrees: float = 4.0,
         focal_length_px: float = 800.0,
         default_frame_width: int = 1280,
         default_frame_height: int = 720

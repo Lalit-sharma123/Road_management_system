@@ -43,15 +43,21 @@ class Settings(BaseSettings):
     REPORTS_DIR: str = str(BACKEND_DIR / "reports")
     WEIGHTS_DIR: str = str(BACKEND_DIR / "weights")
     
-    # YOLO Model Filenames
+    # YOLO Model Filenames (4 Dedicated Specialized Models)
     DAMAGE_MODEL_NAME: str = "best.pt"
     VEHICLE_MODEL_NAME: str = "yolov8n.pt"
-    HELMET_PLATE_MODEL_NAME: str = "helmet_numberplate.pt"
+    HELMET_MODEL_NAME: str = "helmet.pt"
+    NUMBERPLATE_MODEL_NAME: str = "numberplate.pt"
+    HELMET_PLATE_MODEL_NAME: str = "helmet_numberplate.pt"  # backwards compatibility alias
     
     # Backwards compatibility attributes
     YOLO_MODEL_PATH: str = str(ROOT_DIR / "best.pt")
     FALLBACK_YOLO_MODEL: str = str(ROOT_DIR / "yolov8n.pt")
     
+    # Performance & Inference Optimization
+    USE_FP16: bool = True
+    USE_CUDA_IF_AVAILABLE: bool = True
+    NUM_INFERENCE_THREADS: int = 4
     CONFIDENCE_THRESHOLD: float = 0.35
     IOU_THRESHOLD: float = 0.45
     FRAME_SKIP: int = 5  # Process every 5th frame for performance

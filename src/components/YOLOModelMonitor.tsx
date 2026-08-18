@@ -59,14 +59,14 @@ export const YOLOModelMonitor: React.FC = () => {
       filename: 'best.pt',
       type: 'Potholes, Cracks & Defects',
       status: 'active',
-      last_latency_ms: 12.4,
-      avg_latency_ms: 12.1,
-      throughput_fps: 82.6,
+      last_latency_ms: 11.2,
+      avg_latency_ms: 11.4,
+      throughput_fps: 87.7,
       inferences: 1420,
       detections: 384,
       color: '#EF4444', // Red
       classes: ['pothole', 'longitudinal_crack', 'transverse_crack', 'alligator_crack', 'missing_asphalt', 'broken_road'],
-      latency_history: [11.5, 12.8, 12.1, 11.9, 13.2, 12.4, 11.8, 12.3, 12.1]
+      latency_history: [10.8, 11.5, 11.2, 10.9, 11.6, 11.2, 11.4]
     },
     {
       key: 'vehicle',
@@ -74,29 +74,59 @@ export const YOLOModelMonitor: React.FC = () => {
       filename: 'yolov8n.pt',
       type: 'Traffic Volume & Vehicles',
       status: 'active',
-      last_latency_ms: 8.1,
-      avg_latency_ms: 7.9,
-      throughput_fps: 126.5,
+      last_latency_ms: 7.4,
+      avg_latency_ms: 7.6,
+      throughput_fps: 131.5,
       inferences: 1420,
       detections: 1250,
       color: '#3B82F6', // Blue
       classes: ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'person'],
-      latency_history: [7.5, 8.3, 7.9, 8.1, 7.8, 8.4, 7.9, 8.2, 8.1]
+      latency_history: [7.1, 7.8, 7.4, 7.6, 7.3, 7.5, 7.4]
     },
     {
-      key: 'helmet_plate',
-      name: 'Safety & License Plate Auditor',
-      filename: 'helmet_numberplate.pt',
-      type: 'Helmet & Number Plate Compliance',
+      key: 'helmet',
+      name: 'Helmet Safety Auditor',
+      filename: 'helmet.pt',
+      type: 'Rider Safety Compliance',
       status: 'active',
-      last_latency_ms: 10.2,
-      avg_latency_ms: 9.8,
-      throughput_fps: 102.0,
+      last_latency_ms: 3.8,
+      avg_latency_ms: 3.9,
+      throughput_fps: 256.4,
       inferences: 1420,
-      detections: 512,
-      color: '#EAB308', // Yellow
-      classes: ['helmet', 'number_plate'],
-      latency_history: [9.8, 10.5, 9.9, 10.2, 9.6, 10.1, 9.7, 10.4, 10.2]
+      detections: 215,
+      color: '#F59E0B', // Amber
+      classes: ['helmet', 'no_helmet'],
+      latency_history: [3.5, 4.1, 3.8, 3.9, 3.7, 4.0, 3.8]
+    },
+    {
+      key: 'numberplate',
+      name: 'Number Plate Auditor',
+      filename: 'numberplate.pt',
+      type: 'Vehicle ANPR Localization',
+      status: 'active',
+      last_latency_ms: 4.2,
+      avg_latency_ms: 4.3,
+      throughput_fps: 232.5,
+      inferences: 1420,
+      detections: 198,
+      color: '#10B981', // Emerald Green
+      classes: ['number_plate'],
+      latency_history: [4.0, 4.5, 4.2, 4.4, 4.1, 4.3, 4.2]
+    },
+    {
+      key: 'ocr',
+      name: 'ANPR OCR Engine',
+      filename: 'EasyOCR / OpenCV Morph',
+      type: 'Alphanumeric License Extraction',
+      status: 'active',
+      last_latency_ms: 5.1,
+      avg_latency_ms: 5.2,
+      throughput_fps: 192.3,
+      inferences: 1420,
+      detections: 198,
+      color: '#8B5CF6', // Purple
+      classes: ['license_plate_text'],
+      latency_history: [4.8, 5.4, 5.1, 5.3, 4.9, 5.2, 5.1]
     }
   ];
 

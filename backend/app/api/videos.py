@@ -13,6 +13,8 @@ from app.models.models import User, Video, Detection, UserRole, ProcessingStatus
 from app.schemas.schemas import VideoUploadResponse, VideoDetailResponse, VideoDashboardResponse
 from app.auth.jwt import get_current_user, require_role
 from app.cv.video_processor import VideoProcessor
+from app.api.process import global_session_manager, cleanup_system_resources, ws_manager
+from app.services.websocket_manager import ws_broadcaster
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
@@ -28,7 +30,8 @@ async def upload_video(
 ):
     """
     Upload a road inspection video file (.mp4, .avi, .mov, .mkv).
-    Validates extension, saves to upload directory, extracts initial video metadata & thumbnail.
+    Validates extension, cancels any active previous video processing, purges old temporary
+    files, caches and frame buffers, releases resources, saves the new video and extracts metadata.
     """
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in ALLOWED_EXTENSIONS:
@@ -37,17 +40,24 @@ async def upload_video(
             detail=f"Unsupported file format '{file_ext}'. Allowed formats: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # Save file
+    # 1. Immediately cancel any running video processing session and release handles
+    await global_session_manager.cancel_current_session()
+
+    # 2. Save new file
     video_id = str(uuid.uuid4())
     sanitized_filename = f"{video_id}{file_ext}"
     saved_path = os.path.join(settings.UPLOAD_DIR, sanitized_filename)
+
+    # 3. Clean up previous temporary videos and cached frame outputs
+    cleanup_system_resources(exclude_video_id=video_id)
 
     with open(saved_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     file_size = os.path.getsize(saved_path)
 
-    # Process OpenCV Metadata & Thumbnail
+    # 4. Process OpenCV Metadata & Thumbnail with guaranteed release
+    processor = None
     try:
         processor = VideoProcessor(saved_path)
         metadata = processor.get_metadata()
@@ -55,7 +65,6 @@ async def upload_video(
         thumbnail_filename = f"thumb_{video_id}.jpg"
         thumbnail_path = os.path.join(settings.PROCESSED_DIR, thumbnail_filename)
         processor.generate_thumbnail(thumbnail_path, frame_num=15)
-        processor.close()
 
         duration = metadata["duration_seconds"]
         total_frames = metadata["total_frames"]
@@ -68,6 +77,10 @@ async def upload_video(
         fps = 30.0
         resolution = "1920x1080"
         thumbnail_path = None
+    finally:
+        if processor:
+            processor.close()
+            processor = None
 
     new_video = Video(
         id=video_id,
@@ -87,6 +100,16 @@ async def upload_video(
     db.add(new_video)
     await db.commit()
     await db.refresh(new_video)
+
+    # 5. Broadcast reset message to any connected WebSockets so UI clears old frames
+    reset_msg = {
+        "type": "session_reset",
+        "video_id": video_id,
+        "message": f"New video uploaded: {title}. Previous video state cleared."
+    }
+    await ws_manager.broadcast(reset_msg)
+    await ws_broadcaster.broadcast(reset_msg)
+
     return new_video
 
 
