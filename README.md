@@ -2,25 +2,35 @@
 
 ## Project Overview
 
-Smart Road Damage Detection and Traffic Monitoring System is an end-to-end computer vision and web-based analytical platform designed for automated road surface inspection and live traffic surveillance.
+Smart Road Damage Detection and Traffic Monitoring System is an end-to-end computer vision and web-based analytical platform designed for automated road surface inspection, live traffic surveillance, and safety compliance enforcement.
 
-The system ingests live camera feeds, uploaded video files, and static images to perform real-time multi-model YOLO inference. It detects road surface defects (potholes, cracks, broken roads, missing asphalt), classifies vehicles, and identifies traffic compliance objects (helmets and vehicle number plates). The processed detections are visualized through a real-time web dashboard featuring live counters, trend charts, and exportable inspection reports.
+The system ingests live camera feeds, uploaded video files, and static images to perform real-time multi-model YOLO inference. It detects road surface defects (potholes, cracks, broken roads, missing asphalt), classifies vehicles, evaluates rider helmet safety, localizes license plates, and extracts vehicle registration numbers via OCR. The processed detections are visualized through a real-time web dashboard featuring live counters, interactive Leaflet GPS mapping, automated E-Challan citation generation, and exportable inspection reports.
 
 ---
 
-## Features
+## Key Features
 
 - **Live Camera Detection**: Stream live webcam or network CCTV video feeds with real-time multi-model inference and sub-30ms overlay rendering.
-- **Video Upload & Analysis**: Upload video files (MP4, AVI, MOV) for frame-by-frame analysis and detection logging.
-- **Image Inspection**: Drag-and-drop single or batch image upload workspace for instant detection and coordinate extraction.
-- **Multi-Model Inference Pipeline**: Concurrent execution of three distinct YOLO models in memory per frame without model reload overhead.
+- **Robust Video Upload & Isolated Processing Pipeline**:
+  - Full session isolation: uploading a new video cancels previous processing, purges old frame buffers, flushes GPU memory, releases OpenCV video handles, and resets all telemetry.
+  - Unique session ID tracking ensuring zero frame bleed between consecutive uploads.
+- **High-Performance Multi-Model AI Inference Pipeline**:
+  - `best.pt`: Dedicated road surface damage detection.
+  - `yolov8n.pt`: Traffic volume and vehicle classification.
+  - `helmet.pt`: Rider helmet safety compliance verification.
+  - `numberplate.pt`: High-precision vehicle license plate localization.
+  - **Neural OCR Engine**: EasyOCR / OpenCV Morphological ANPR triggered specifically on license plate crops.
+- **Automatic Helmet Violation & E-Challan Engine**:
+  - Detects non-helmet motorcycle riders and correlates them with vehicle license plates.
+  - Generates official E-Challans (`ECH-2026-XXXXXX`) with cooldown deduplication.
+  - Saves dual evidence snapshots: full citation snapshot and high-resolution license plate crop.
 - **Color-Coded Visual Bounding Boxes**:
   - 🔴 **Red**: Road Damage Defects (`#FF3B30`)
-  - 🔵 **Blue**: Vehicles (`#2563EB`)
-  - 🟡 **Yellow**: Helmets (`#FFD60A`)
-  - 🟢 **Green**: Number Plates (`#34C759`)
-- **Real-time Dashboard**: Live telemetry metrics displaying total detections, road damage count, vehicle count, helmet count, number plate count, processing FPS, and latency.
-- **Interactive Analytics & Charts**: Real-time distribution and time-series charts visualizing defect categories and vehicle density.
+  - 🔵 **Blue / Cyan**: Vehicles (`#2563EB`)
+  - 🟡 **Yellow / Gold**: Helmets & Safety (`#FFD60A`)
+  - 🟢 **Green**: License Plates (`#34C759`)
+- **Real-Time GPS Trajectory & Interactive Map**: Live vehicle tracking and geotagged damage markers with severity classification.
+- **Real-Time Dashboard & Telemetry**: Live counters, road health index calculation, processing FPS, latency monitors, and time-series defect charts.
 - **Audit Report Export**: Export detailed inspection records and detection analytics in PDF, Excel (`.xlsx`), and CSV formats.
 
 ---
@@ -35,6 +45,8 @@ The system ingests live camera feeds, uploaded video files, and static images to
 | **TypeScript (5.8)** | Type safety and component interface definitions |
 | **Vite (6.2)** | Frontend development server and asset bundler |
 | **Tailwind CSS (4.1)** | Utility-first responsive UI styling engine |
+| **Leaflet (1.9)** | Interactive mapping for GPS trajectories and damage markers |
+| **Recharts (2.15)** | Analytics, defect distribution, and telemetry trend charts |
 | **Lucide React** | Dashboard iconography |
 
 ### Backend
@@ -44,88 +56,76 @@ The system ingests live camera feeds, uploaded video files, and static images to
 | **FastAPI (0.111)** | Asynchronous Python web framework |
 | **Python (3.12)** | Core backend runtime language |
 | **Ultralytics YOLO (8.2)** | Deep learning object detection engine |
+| **EasyOCR / PyTesseract** | Neural Optical Character Recognition for ANPR |
 | **OpenCV (4.9)** | Video frame extraction, image decoding, and bounding box drawing |
 | **PyTorch (2.3)** | Tensor computing library for deep neural network execution |
+| **SQLAlchemy (2.0) & AsyncPG** | Asynchronous ORM and PostgreSQL / SQLite database driver |
 | **Uvicorn (0.30)** | ASGI web server runtime |
 
-### Libraries
-
-| Category | Libraries |
-| :--- | :--- |
-| **Data & Reports** | NumPy, Pandas, ReportLab, openpyxl |
-| **Database & ORM** | SQLAlchemy, AsyncPG, Alembic |
-| **Frontend Visualization** | Recharts, Leaflet, Motion |
-
 ---
 
-## YOLO Models
+## AI Multi-Model Inference Architecture
 
-The detection engine concurrently runs three trained YOLO models loaded once during server initialization:
+The detection engine concurrently executes dedicated models loaded once during server initialization:
 
-### Model 1: `best.pt`
+```text
+                               ┌─► [best.pt] ─────────► Road Damage (Potholes, Cracks, Asphalt)
+                               │
+[Incoming Video / Camera Frame]─┼─► [yolov8n.pt] ──────► Vehicles & Pedestrians (Motorcycle, Car, Truck)
+                               │
+                               └─► [Rider ROI] ───────► [helmet.pt] ──► Safety Compliance (Helmet vs No-Helmet)
+                                                               │
+                                                               ▼ (If No Helmet Detected)
+                                                        [numberplate.pt] ──► Plate ROI Crop
+                                                               │
+                                                               ▼
+                                                        [OCR Engine] ────► Alphanumeric Plate Text & E-Challan
+```
 
-- **Purpose**: Road Damage Detection
-- **Classes**:
-  - `pothole`
-  - `longitudinal_crack`
-  - `transverse_crack`
-  - `alligator_crack`
-  - `missing_asphalt`
-  - `broken_road`
+### Models & Strict Responsibilities
 
----
+1. **`best.pt`**: Road Damage Detection
+   - Classes: `pothole`, `longitudinal_crack`, `transverse_crack`, `alligator_crack`, `missing_asphalt`, `broken_road`
+2. **`yolov8n.pt`**: Vehicle & Pedestrian Detection
+   - Classes: `car`, `truck`, `bus`, `motorcycle`, `bicycle`, `person`
+3. **`helmet.pt`**: Safety Compliance
+   - Classes: `helmet`, `no_helmet`
+4. **`numberplate.pt`**: Vehicle Registration Localization
+   - Classes: `number_plate`, `plate`
+5. **OCR Engine (EasyOCR / Morphological ANPR)**:
+   - Extracted text: Standard registration codes (e.g., `DL01AB1234`, `MH12DE1432`, `HR26DQ5519`)
 
-### Model 2: `yolov8n.pt`
+### Model Weight File Placement
 
-- **Purpose**: Vehicle Detection
-- **Classes**:
-  - `car`
-  - `truck`
-  - `bus`
-  - `motorcycle`
-  - `bicycle`
-  - `person`
-
----
-
-### Model 3: `helmet_numberplate.pt`
-
-- **Purpose**: Helmet Detection and Number Plate Detection
-- **Classes**:
-  - `helmet`
-  - `number_plate`
-
----
-
-### Model File Location
-
-All model weight files must be placed directly in the project root directory or inside the `backend/` directory:
+Place model weight files directly in the project root directory or inside `backend/`:
 
 ```text
 smart-road-damage-system/
 ├── best.pt
 ├── yolov8n.pt
-└── helmet_numberplate.pt
+├── helmet.pt
+└── numberplate.pt
 ```
-
-**Exact Folder Paths**:
-- `/best.pt` (or `/backend/best.pt`)
-- `/yolov8n.pt` (or `/backend/yolov8n.pt`)
-- `/helmet_numberplate.pt` (or `/backend/helmet_numberplate.pt`)
-
-### Model Loader Implementation
-
-All three models are initialized and managed by the `YOLODamageDetector` class located in:
-
-```text
-/backend/app/yolo/detector.py
-```
-
-The `_load_all_models()` method loads `best.pt`, `yolov8n.pt`, and `helmet_numberplate.pt` into memory at server startup to ensure zero per-frame reloading latency.
 
 ---
 
-## Installation
+## Video Processing & Session Isolation Pipeline
+
+To guarantee that previous frames never bleed into newly uploaded videos:
+
+1. **Automatic Old Session Cancellation**: Uploading a new video or calling `POST /api/v1/process/stop` terminates active background tasks.
+2. **Resource Release & Memory Flushing**:
+   - Releases OpenCV `VideoCapture` and `VideoWriter` file handles immediately.
+   - Flushes PyTorch CUDA memory (`torch.cuda.empty_cache()`).
+   - Cleans old temporary videos and thumbnails from `/uploads` and `/processed`.
+   - Executes Python garbage collection (`gc.collect()`).
+3. **Session ID Tagging**: Every session is assigned a unique identifier (`sess_<video_id>_<timestamp>_<uuid>`).
+4. **WebSocket Session Filtering**: The backend WebSocket manager and frontend client drop any messages or frames that do not match the active `session_id`.
+5. **Frontend State Reset**: Receives `session_reset` broadcasts to instantly clear video canvas, overlays, GPS routes, and counters.
+
+---
+
+## Installation & Setup
 
 ### Prerequisites
 - Python 3.10+
@@ -133,68 +133,51 @@ The `_load_all_models()` method loads `best.pt`, `yolov8n.pt`, and `helmet_numbe
 
 ### Backend Setup
 
-1. Navigate to the root directory and create a Python virtual environment:
+1. Create and activate a virtual environment:
    ```bash
    python -m venv venv
+   # Linux / macOS
+   source venv/bin/activate
+   # Windows
+   venv\Scripts\activate
    ```
 
-2. Activate the virtual environment:
-   - **Linux / macOS**:
-     ```bash
-     source venv/bin/activate
-     ```
-   - **Windows**:
-     ```cmd
-     venv\Scripts\activate
-     ```
-
-3. Install required Python packages:
+2. Install Python dependencies:
    ```bash
    pip install -r backend/requirements.txt
    ```
 
 ### Frontend Setup
 
-1. Install frontend npm dependencies from the root directory:
+1. Install frontend dependencies:
    ```bash
    npm install
    ```
 
 ---
 
-## Running the Project
+## Running the Application
 
-### Starting the Backend
-
-From the project root directory with the virtual environment activated:
+### 1. Start the Backend API Server
 
 ```bash
 cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The FastAPI interactive documentation will be available at `http://localhost:8000/docs`.
+FastAPI interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
 
-### Starting the Frontend
-
-From the root directory in a separate terminal:
+### 2. Start the Frontend Development Server
 
 ```bash
 npm run dev
 ```
 
-The React frontend interface will be available at `http://localhost:3000`.
-
-### Camera Stream Verification
-
-To test live camera detection:
-1. Open `http://localhost:3000` in your browser.
-2. Grant browser camera permissions when prompted.
-3. Switch to the **Hardware Webcam** or **CCTV Stream** tab under the Live Processing view.
+The web dashboard interface will be accessible at `http://localhost:3000`.
 
 ---
 
-## Project Structure
+## Project Directory Structure
 
 ```text
 smart-road-damage-system/
@@ -202,73 +185,93 @@ smart-road-damage-system/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── analytics.py        # Analytics trends & severity distribution API
-│   │   │   ├── auth.py             # Auth endpoints
+│   │   │   ├── auth.py             # JWT authentication & user roles API
 │   │   │   ├── cameras.py          # Real-time webcam & CCTV frame inference API
 │   │   │   ├── dashboard.py        # Dashboard KPI summary aggregator API
-│   │   │   ├── logs.py             # Inference activity logs API
-│   │   │   ├── models_api.py       # YOLO model metadata API
-│   │   │   ├── process.py          # Video pipeline processing API
+│   │   │   ├── logs.py             # System activity & audit logging API
+│   │   │   ├── models_api.py       # YOLO model registry & telemetry API
+│   │   │   ├── process.py          # Video pipeline processing & SessionManager API
 │   │   │   ├── reports.py          # PDF, Excel, CSV report generation API
-│   │   │   ├── users_api.py        # User management API
-│   │   │   └── videos.py           # Video upload & CRUD management API
+│   │   │   ├── users_api.py        # User account management API
+│   │   │   ├── videos.py           # Video upload, metadata, and cleanup API
+│   │   │   ├── violations.py       # Traffic violations & E-Challan management API
+│   │   │   └── ws_routes.py        # Live WebSocket telemetry routes
 │   │   ├── config/
-│   │   │   └── config.py           # Central application settings
+│   │   │   └── config.py           # Central application settings & paths
 │   │   ├── cv/
-│   │   │   └── video_processor.py  # OpenCV frame drawing and bounding box overlays
+│   │   │   └── video_processor.py  # OpenCV video decoding, filtering & annotation
 │   │   ├── database/
-│   │   │   └── database.py         # Database connection session manager
+│   │   │   └── database.py         # SQLAlchemy async engine & session maker
+│   │   ├── driver/
+│   │   │   └── camera.py           # Driver assistance forward camera module
 │   │   ├── models/
-│   │   │   └── models.py           # Database entities schema
+│   │   │   └── models.py           # SQLAlchemy database ORM entities
 │   │   ├── schemas/
-│   │   │   └── schemas.py          # Pydantic data validation models
+│   │   │   └── schemas.py          # Pydantic data schemas & DTOs
 │   │   ├── services/
-│   │   │   ├── camera_manager.py   # Live camera background stream manager
-│   │   │   └── report_generator.py # ReportLab PDF and Excel report builder
+│   │   │   ├── gps_service.py      # GPS trajectory & interpolation engine
+│   │   │   ├── helmet_anpr_service.py # Helmet compliance, ANPR & E-Challan service
+│   │   │   ├── report_generator.py # ReportLab PDF & openpyxl report generator
+│   │   │   ├── severity_service.py # Perspective distance & Road Health Index
+│   │   │   └── websocket_manager.py # Broadcast manager for live subscribers
 │   │   ├── yolo/
-│   │   │   └── detector.py         # Multi-model YOLO detector engine
-│   │   └── main.py                 # FastAPI application entrypoint
-│   ├── Dockerfile                  # Container definition
-│   ├── docker-compose.yml          # Multi-container service configuration
-│   └── requirements.txt            # Backend Python dependencies
+│   │   │   └── detector.py         # Unified Multi-Model AI pipeline engine
+│   │   └── main.py                 # FastAPI application factory
+│   ├── Dockerfile                  # Production container specification
+│   ├── docker-compose.yml          # Multi-service container orchestrator
+│   └── requirements.txt            # Python dependencies
 ├── src/
 │   ├── components/
 │   │   ├── AnalyticsCharts.tsx     # Recharts defect breakdown & trend visualizers
-│   │   ├── AnalyticsView.tsx       # Overall analytics tab view
-│   │   ├── BackendCodeViewer.tsx   # Integrated source code viewer
-│   │   ├── CameraLiveGridView.tsx  # Multi-camera live grid feed
-│   │   ├── CameraManagementView.tsx# Camera management list
-│   │   ├── CVPipelineView.tsx      # Computer vision workflow diagram view
-│   │   ├── DashboardOverview.tsx   # Primary KPI cards dashboard
-│   │   ├── DetectionTable.tsx      # Tabular list of active detections
-│   │   ├── DetectionTimeline.tsx   # Chronological event timeline
-│   │   ├── ExportButtons.tsx       # Report export triggers
-│   │   ├── GpsMappingView.tsx      # Map view for geotagged detections
-│   │   ├── LiveProcessing.tsx      # Live webcam and camera processing view
-│   │   ├── ModelManagementView.tsx # Model status overview
-│   │   ├── Navbar.tsx              # Application header navigation
-│   │   ├── ReportsView.tsx         # Report generation workspace
-│   │   ├── ResultsDashboard.tsx    # Processing result metrics summary
-│   │   ├── SettingsView.tsx        # System configuration panel
-│   │   ├── StatsCards.tsx          # Real-time counter cards
-│   │   ├── UserManagementView.tsx  # User account management
-│   │   ├── VideoComparison.tsx     # Original vs Processed video view
-│   │   ├── VideoUploadAndProcessor.tsx # Video file uploader and processor
-│   │   └── YOLODetectorView.tsx    # Single image upload workspace
-│   ├── App.tsx                     # Main React application component
-│   ├── index.css                   # Global styles and Tailwind imports
-│   ├── main.tsx                    # React application entrypoint
-│   └── types.ts                    # Frontend TypeScript interface definitions
+│   │   ├── AnalyticsView.tsx       # Road health analytics view
+│   │   ├── BackendCodeViewer.tsx   # Built-in source code viewer
+│   │   ├── CameraLiveGridView.tsx  # Multi-camera CCTV grid
+│   │   ├── CameraManagementView.tsx# CCTV camera registry
+│   │   ├── CVPipelineView.tsx      # Computer vision workflow visualizer
+│   │   ├── DashboardOverview.tsx   # Main KPI metrics & summary cards
+│   │   ├── DetectionTable.tsx      # Paginated detection records table
+│   │   ├── DetectionTimeline.tsx   # Chronological detection event stream
+│   │   ├── DriverModeView.tsx      # Heads-up driver hazard assistance view
+│   │   ├── ExportButtons.tsx       # PDF/Excel/CSV export action triggers
+│   │   ├── GpsMappingView.tsx      # Interactive Leaflet GPS map
+│   │   ├── LiveProcessing.tsx      # Live video stream and webcam detection canvas
+│   │   ├── ModelManagementView.tsx # YOLO model configuration view
+│   │   ├── Navbar.tsx              # System navigation bar & user switcher
+│   │   ├── ReportsView.tsx         # Comprehensive PDF/XLSX report builder
+│   │   ├── ResultsDashboard.tsx    # Inspection results and damage summary
+│   │   ├── SettingsView.tsx        # System configuration & threshold adjustments
+│   │   ├── StatsCards.tsx          # Real-time counter widgets
+│   │   ├── UserManagementView.tsx  # User RBAC & audit log manager
+│   │   ├── VideoComparison.tsx     # Side-by-side original vs processed comparison
+│   │   ├── VideoUploadAndProcessor.tsx # Video uploader with stage tracker
+│   │   ├── ViolationsView.tsx      # Traffic violations & E-Challan inspector
+│   │   ├── YOLODetectorView.tsx    # Single image inference playground
+│   │   └── YOLOModelMonitor.tsx    # Model latency & throughput monitor
+│   ├── services/
+│   │   ├── apiClient.ts            # Axios HTTP client configuration
+│   │   ├── authService.ts          # Authentication service
+│   │   ├── violationService.ts     # E-Challan & violations client service
+│   │   └── videoService.ts         # Video upload & WebSocket service
+│   ├── types/
+│   │   └── inspection.ts           # Shared TypeScript type definitions
+│   ├── App.tsx                     # Main React application shell
+│   ├── index.css                   # Global styles & Tailwind CSS imports
+│   └── main.tsx                    # React DOM entrypoint
+├── tests/
+│   ├── test_backend_integrity.py   # Backend unit & integration test suite
+│   └── test_e2e_frontend_flow.ts   # Frontend workflow tests
 ├── best.pt                         # Road damage YOLO model weights
 ├── yolov8n.pt                      # Vehicle YOLO model weights
-├── helmet_numberplate.pt           # Helmet & Number plate YOLO model weights
-├── package.json                    # Node.js dependencies and scripts
+├── helmet.pt                       # Helmet compliance YOLO model weights
+├── numberplate.pt                  # License plate YOLO model weights
+├── package.json                    # Frontend dependencies & scripts
 ├── vite.config.ts                  # Vite build configuration
-└── README.md                       # Project documentation
+└── README.md                       # System documentation
 ```
 
 ---
 
-## API Documentation
+## API Reference
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -277,11 +280,16 @@ smart-road-damage-system/
 | `POST` | `/api/v1/auth/register` | User account registration |
 | `GET` | `/api/v1/auth/me` | Retrieve current authenticated user profile |
 | `GET` | `/api/v1/videos` | Fetch list of uploaded inspection videos |
-| `POST` | `/api/v1/videos/upload` | Upload video file (MP4, AVI, MOV) for processing |
-| `GET` | `/api/v1/videos/{video_id}` | Retrieve video details and processing status |
+| `POST` | `/api/v1/videos/upload` | Upload video file (MP4, AVI, MOV), cancels old sessions and cleans cache |
+| `GET` | `/api/v1/videos/{video_id}` | Retrieve video details, analytics, and processing status |
 | `DELETE` | `/api/v1/videos/{video_id}` | Delete inspection video record |
-| `POST` | `/api/v1/process/run` | Execute YOLO video detection pipeline |
-| `WS` | `/api/v1/process/ws/{client_id}` | WebSocket stream for live video processing progress |
+| `POST` | `/api/v1/process/run` | Execute YOLO multi-model video detection pipeline |
+| `POST` | `/api/v1/process/stop` | Stop running video processing and release all resources |
+| `GET` | `/api/v1/process/status` | Get live status and frame counters of active pipeline |
+| `WS` | `/api/v1/process/ws/{client_id}` | WebSocket stream for real-time video frames and telemetry |
+| `GET` | `/api/v1/violations` | List recorded helmet violations and E-Challan citations |
+| `GET` | `/api/v1/violations/{id}` | Get specific violation details and evidence snapshot URLs |
+| `POST` | `/api/v1/violations/{id}/pay` | Update fine payment status for a challan |
 | `GET` | `/api/v1/cameras` | Fetch active CCTV/camera streams |
 | `POST` | `/api/v1/cameras/detect-frame` | Real-time base64 webcam frame multi-model inference |
 | `WS` | `/api/v1/cameras/ws/detect-frame` | WebSocket stream for camera frame inference |
@@ -294,64 +302,20 @@ smart-road-damage-system/
 
 ---
 
-## Real-time Detection Flow
+## Verification & Testing
 
-```text
-Camera (Webcam / CCTV)
-       │
-       ▼
-Backend (FastAPI & OpenCV Frame Extractor)
-       │
-       ▼
-YOLO Models (best.pt + yolov8n.pt + helmet_numberplate.pt)
-       │
-       ▼
-Frontend (React Overlay Canvas & State Store)
-       │
-       ▼
-Dashboard (Live Counters, FPS, Latency & Charts)
+To run the automated backend integrity test suite:
+
+```bash
+python3 tests/test_backend_integrity.py
 ```
 
----
-
-## Dashboard
-
-The Dashboard components fetch data directly from the backend API endpoints:
-
-- **Summary Cards (Total Detections, Damages, Vehicles, Helmets, Number Plates)**: Data is fetched via `GET /api/v1/dashboard/summary` or updated via live WebSocket streams (`/api/v1/cameras/ws/detect-frame`).
-- **Defect Trends & Category Breakdown**: Charts rendered in `AnalyticsCharts.tsx` consume structured data from `GET /api/v1/analytics/trends` and `GET /api/v1/analytics/severity-distribution`.
-- **Live Latency & FPS Monitor**: Measured in real-time on incoming WebSocket and REST responses from `/api/v1/cameras/detect-frame`.
-
----
-
-## Troubleshooting
-
-### 1. Model Weights File Not Found
-- **Issue**: Log message shows weights file not found or running in heuristic mode.
-- **Solution**: Ensure `best.pt`, `yolov8n.pt`, and `helmet_numberplate.pt` are saved in the project root directory (`/`) or inside `backend/`.
-
-### 2. Camera Access Denied
-- **Issue**: Webcam fails to start in browser.
-- **Solution**: Check browser permissions and grant access to media devices. Ensure the site is running on `localhost` or HTTPS.
-
-### 3. PyTorch CUDA Acceleration
-- **Issue**: Low FPS during live stream inference.
-- **Solution**: Verify GPU availability in PyTorch. Install PyTorch with CUDA support if an NVIDIA GPU is available:
-  ```bash
-  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-  ```
-
-### 4. Port Conflicts
-- **Issue**: `Address already in use` error when starting FastAPI or Vite.
-- **Solution**: Free ports 8000 (Backend) or 3000 (Frontend) or change port flags in Uvicorn / Vite scripts.
-
-### 5. Missing Dependencies
-- **Issue**: `ModuleNotFoundError` during backend execution or `Module not found` in frontend.
-- **Solution**: Re-run `pip install -r backend/requirements.txt` inside the Python virtual environment and `npm install` in the root folder.
-
-### 6. Backend Startup Failures
-- **Issue**: Backend crashes on startup.
-- **Solution**: Check standard console logs. Verify folder permissions for `uploads/`, `processed/`, and `reports/` directories.
+Tests verify:
+- Python AST syntax and module imports
+- Distance estimation and pinhole camera math
+- Helmet compliance, license plate regex, and citation deduplication
+- Multi-model pipeline telemetry and inference targets
+- Video upload session isolation, cancellation, and resource cleanup
 
 ---
 
