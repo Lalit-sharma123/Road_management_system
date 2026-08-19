@@ -32,7 +32,7 @@ interface CameraManagementViewProps {
 }
 
 export const CameraManagementView: React.FC<CameraManagementViewProps> = ({
-  cameras,
+  cameras = [],
   currentRole,
   onAddCamera,
   onUpdateCamera,
@@ -40,6 +40,7 @@ export const CameraManagementView: React.FC<CameraManagementViewProps> = ({
   onSelectCameraForLive,
   showToast
 }) => {
+  const safeCameras = Array.isArray(cameras) ? cameras : [];
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -118,7 +119,7 @@ export const CameraManagementView: React.FC<CameraManagementViewProps> = ({
     setIsModalOpen(false);
   };
 
-  const filteredCameras = cameras.filter((cam) => {
+  const filteredCameras = safeCameras.filter((cam) => {
     const matchesSearch =
       cam.camera_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (cam.location_name && cam.location_name.toLowerCase().includes(searchTerm.toLowerCase())) ||

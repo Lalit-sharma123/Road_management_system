@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { DashboardOverview } from './components/DashboardOverview';
 import { VideoUploadAndProcessor } from './components/VideoUploadAndProcessor';
@@ -23,6 +23,8 @@ import { initialModels, initialUsers, initialAuditLogs } from './data/mockModels
 import { InspectionVideo, UserRole, DetectionModel, UserAccount, AuditLog, CameraDevice } from './types/inspection';
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { authService, UserProfile } from './services/authService';
+import { videoService } from './services/videoService';
+import { cameraService, modelService, userService, logService } from './services/systemService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -31,8 +33,21 @@ export default function App() {
   const [videos, setVideos] = useState<InspectionVideo[]>(sampleVideos);
   const [selectedVideo, setSelectedVideo] = useState<InspectionVideo>(sampleVideos[0]);
 
-  // Restore JWT Session on page mount
+  // Model Switcher & Registry State
+  const [models, setModels] = useState<DetectionModel[]>(initialModels);
+  const [currentModel, setCurrentModel] = useState<DetectionModel>(initialModels[4]); // YOLO11 Extra Large
+  const [isSwitchingModel, setIsSwitchingModel] = useState<boolean>(false);
+
+  // User Accounts & Audit Logs State
+  const [users, setUsers] = useState<UserAccount[]>(initialUsers);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
+
+  // Cameras State & Handlers
+  const [cameras, setCameras] = useState<CameraDevice[]>(sampleCameras);
+
+  // Initial fetch from backend APIs
   useEffect(() => {
+    // Restore JWT Session
     const token = authService.getStoredToken();
     if (token) {
       authService.getMe()
@@ -41,11 +56,58 @@ export default function App() {
           setCurrentRole(user.role);
         })
         .catch(() => {
-          console.warn('Stored token invalid or expired.');
           authService.logout();
           setCurrentUser(null);
         });
     }
+
+    // Fetch initial videos
+    videoService.listVideos()
+      .then((serverVideos) => {
+        if (Array.isArray(serverVideos) && serverVideos.length > 0) {
+          setVideos(serverVideos);
+          setSelectedVideo(serverVideos[0]);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch initial cameras
+    cameraService.listCameras()
+      .then((serverCameras) => {
+        if (Array.isArray(serverCameras) && serverCameras.length > 0) {
+          setCameras(serverCameras);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch initial models
+    modelService.listModels()
+      .then((serverModels) => {
+        if (Array.isArray(serverModels) && serverModels.length > 0) {
+          setModels(serverModels);
+          const active = serverModels.find(m => m.is_default || m.enabled) || serverModels[0];
+          if (active) setCurrentModel(active);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch initial users
+    userService.listUsers()
+      .then((serverUsers) => {
+        if (Array.isArray(serverUsers) && serverUsers.length > 0) {
+          setUsers(serverUsers);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch audit logs
+    logService.listLogs()
+      .then((serverLogs) => {
+        if (Array.isArray(serverLogs) && serverLogs.length > 0) {
+          setAuditLogs(serverLogs);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleLogout = () => {
@@ -61,34 +123,33 @@ export default function App() {
     showToast('Authenticated', `Welcome back, ${user.full_name || user.username}!`);
   };
 
-  // Model Switcher & Registry State
-  const [models, setModels] = useState<DetectionModel[]>(initialModels);
-  const [currentModel, setCurrentModel] = useState<DetectionModel>(initialModels[4]); // YOLO11 Extra Large
-  const [isSwitchingModel, setIsSwitchingModel] = useState<boolean>(false);
-
-  // User Accounts & Audit Logs State
-  const [users, setUsers] = useState<UserAccount[]>(initialUsers);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
-
-  // Cameras State & Handlers
-  const [cameras, setCameras] = useState<CameraDevice[]>(sampleCameras);
-
-  const handleAddCamera = (newCamData: Omit<CameraDevice, 'id' | 'created_at' | 'updated_at'>) => {
-    const newCam: CameraDevice = {
-      ...newCamData,
-      id: `cam-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    setCameras([newCam, ...cameras]);
+  const handleAddCamera = async (newCamData: Omit<CameraDevice, 'id' | 'created_at' | 'updated_at'>) => {
+    const createdCam = await cameraService.createCamera(newCamData);
+    setCameras([createdCam, ...cameras]);
+    logService.createLog({
+      action: 'CAMERA_ADDED',
+      category: 'CAMERA',
+      details: `Added new camera stream: ${createdCam.camera_name}`,
+      user_email: currentUser?.email || 'admin@roadvision.ai'
+    }).catch(() => {});
+    showToast('Camera Added', `Registered ${createdCam.camera_name} in camera fleet.`);
   };
 
-  const handleUpdateCamera = (updatedCam: CameraDevice) => {
-    setCameras(cameras.map((c) => (c.id === updatedCam.id ? updatedCam : c)));
+  const handleUpdateCamera = async (updatedCam: CameraDevice) => {
+    const res = await cameraService.updateCamera(updatedCam.id, updatedCam);
+    setCameras(cameras.map((c) => (c.id === updatedCam.id ? res : c)));
+    showToast('Camera Updated', `Updated configuration for ${updatedCam.camera_name}`);
   };
 
-  const handleDeleteCamera = (camId: string) => {
+  const handleDeleteCamera = async (camId: string) => {
+    await cameraService.deleteCamera(camId);
     setCameras(cameras.filter((c) => c.id !== camId));
+    logService.createLog({
+      action: 'CAMERA_DELETED',
+      category: 'CAMERA',
+      details: `Deregistered camera ID ${camId}`,
+      user_email: currentUser?.email || 'admin@roadvision.ai'
+    }).catch(() => {});
     showToast('Camera Removed', 'Deregistered camera feed from system.');
   };
 

@@ -70,8 +70,21 @@ export const videoService = {
   },
 
   async listVideos(): Promise<InspectionVideo[]> {
-    const response = await apiClient.get<InspectionVideo[]>('/videos');
-    return response.data;
+    try {
+      const response = await apiClient.get<any>('/videos');
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+      if (response.data && Array.isArray(response.data.items)) {
+        return response.data.items;
+      }
+      if (response.data && Array.isArray(response.data.videos)) {
+        return response.data.videos;
+      }
+      return [];
+    } catch {
+      return [];
+    }
   },
 
   connectWebSocket(

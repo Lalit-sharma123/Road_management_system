@@ -65,8 +65,14 @@ export const ViolationsView: React.FC<ViolationsViewProps> = ({
         violationService.getViolationStats()
       ]);
 
-      setViolations(listRes.items);
-      setStats(statsRes);
+      if (listRes && Array.isArray(listRes.items)) {
+        setViolations(listRes.items);
+      } else {
+        setViolations([]);
+      }
+      if (statsRes) {
+        setStats(statsRes);
+      }
     } catch (err) {
       console.warn('Error fetching violations:', err);
     } finally {

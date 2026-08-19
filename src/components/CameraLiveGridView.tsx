@@ -324,10 +324,11 @@ const CameraStreamCard: React.FC<{
 };
 
 export const CameraLiveGridView: React.FC<CameraLiveGridViewProps> = ({
-  cameras,
+  cameras = [],
   onSelectCamera,
   showToast
 }) => {
+  const safeCameras = Array.isArray(cameras) ? cameras : [];
   const [gridLayout, setGridLayout] = useState<'1x1' | '2x2' | '3x3'>('2x2');
   const [activeFilter, setActiveFilter] = useState<'all' | 'online' | 'alerts'>('all');
   const [mutedStates, setMutedStates] = useState<Record<string, boolean>>({});
@@ -337,7 +338,7 @@ export const CameraLiveGridView: React.FC<CameraLiveGridViewProps> = ({
     setMutedStates((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const filteredCameras = cameras.filter((c) => {
+  const filteredCameras = safeCameras.filter((c) => {
     if (activeFilter === 'online') return c.status === 'online' || c.status === 'busy';
     if (activeFilter === 'alerts') return (c.detection_count || 0) > 5;
     return true;

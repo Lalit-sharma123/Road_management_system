@@ -264,6 +264,13 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
         markersLayerRef.current?.addLayer(leafletMarker);
       });
     }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
   }, [filteredMarkers, selectedMarker, severityFilter, categoryFilter]);
 
   const handleCenterOnMarker = (marker: GPSDamageMarker) => {

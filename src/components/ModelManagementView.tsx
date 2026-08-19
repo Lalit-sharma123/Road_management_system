@@ -36,7 +36,7 @@ interface ModelManagementViewProps {
 
 export const ModelManagementView: React.FC<ModelManagementViewProps> = ({
   currentRole,
-  models,
+  models = [],
   currentModel,
   onSelectModel,
   onToggleModelEnabled,
@@ -45,6 +45,7 @@ export const ModelManagementView: React.FC<ModelManagementViewProps> = ({
   onDeleteModel,
   isSwitching
 }) => {
+  const safeModels = Array.isArray(models) ? models : [];
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newModelName, setNewModelName] = useState('');
@@ -57,7 +58,7 @@ export const ModelManagementView: React.FC<ModelManagementViewProps> = ({
 
   const isAdmin = currentRole === 'admin';
 
-  const filteredModels = models.filter(m => 
+  const filteredModels = safeModels.filter(m => 
     m.display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.model_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.description.toLowerCase().includes(searchTerm.toLowerCase())

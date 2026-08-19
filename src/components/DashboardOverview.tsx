@@ -80,11 +80,12 @@ interface DashboardOverviewProps {
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
-  videos,
+  videos = [],
   onSelectVideo,
   onNavigate,
   currentRole: _currentRole
 }) => {
+  const safeVideos = Array.isArray(videos) ? videos : [];
   const [summaryData, setSummaryData] = useState<DashboardSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +98,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       ]);
 
       let baseSummary: DashboardSummaryData = {
-        total_inspections: videos.length,
+        total_inspections: safeVideos.length,
         total_distance_km: 4.8,
         average_health_score: 82.4,
         total_defects_found: 18,
@@ -112,7 +113,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         total_violations_count: 4,
         total_fines_amount: 4000,
         paid_fines_amount: 1000,
-        recent_videos: videos.slice(0, 5).map(v => ({
+        recent_videos: safeVideos.slice(0, 5).map(v => ({
           id: v.id,
           title: v.title,
           status: v.status,
@@ -167,7 +168,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   }, []);
 
   // Compute metrics directly from real backend dashboard API response
-  const activeVideo = videos[0];
+  const activeVideo = safeVideos[0];
   const healthScore = summaryData?.average_health_score ?? (activeVideo?.analytics?.road_health_score || 82.4);
   const criticalCount = summaryData?.critical_hazards ?? 0;
   const roadDamageCount = summaryData?.road_damage_count ?? 18;
@@ -177,7 +178,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const totalDetections = summaryData?.total_detections ?? (roadDamageCount + vehicleCount + helmetCount + numberPlateCount);
   const averageConfidence = summaryData?.average_confidence ?? 0.88;
   const totalDistance = summaryData?.total_distance_km ?? 4.8;
-  const totalInspections = summaryData?.total_inspections ?? videos.length;
+  const totalInspections = summaryData?.total_inspections ?? safeVideos.length;
 
   // Road damage breakdown from backend
   const damageByType = summaryData?.damage_by_type || {
@@ -765,7 +766,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#2A2A2A] bg-[#0F0F0F]">
-              {videos.map((vid) => (
+              {safeVideos.map((vid) => (
                 <tr key={vid.id} className="hover:bg-[#1A1A1A] transition-colors">
                   <td className="px-4 py-3 text-white">
                     <div className="flex items-center space-x-3">

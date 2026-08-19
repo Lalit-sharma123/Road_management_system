@@ -26,12 +26,14 @@ interface UserManagementViewProps {
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({
   currentRole,
-  users,
+  users = [],
   onAddUser,
   onDeleteUser,
   onChangeUserRole,
-  auditLogs
+  auditLogs = []
 }) => {
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeLogs = Array.isArray(auditLogs) ? auditLogs : [];
   const [showAddModal, setShowAddModal] = useState(false);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -73,7 +75,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     );
   }
 
-  const filteredUsers = users.filter(u => 
+  const filteredUsers = safeUsers.filter(u => 
     u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.role.toLowerCase().includes(searchTerm.toLowerCase())
@@ -184,7 +186,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
           </div>
 
           <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-            {auditLogs.map((log) => (
+            {safeLogs.map((log) => (
               <div key={log.id} className="bg-[#141414] border border-[#222] p-2.5 text-[10px] space-y-1">
                 <div className="flex justify-between items-center">
                   <span className="text-[#FF9500] font-bold">{log.action}</span>

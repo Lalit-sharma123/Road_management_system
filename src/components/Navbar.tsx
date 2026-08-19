@@ -45,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   currentRole,
   setCurrentRole,
-  models,
+  models = [],
   currentModel,
   onSelectModel,
   isSwitchingModel,
@@ -53,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onLoginSuccess
 }) => {
+  const safeModels = Array.isArray(models) ? models : [];
   const isAdmin = currentRole === 'admin';
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -88,7 +89,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const handleModelDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedName = e.target.value;
-    const targetModel = models.find(m => m.model_name === selectedName);
+    const targetModel = safeModels.find(m => m.model_name === selectedName);
     if (targetModel && isAdmin) {
       onSelectModel(targetModel);
     }
@@ -180,7 +181,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     !isAdmin ? 'text-[#AAA] cursor-not-allowed' : 'text-white hover:text-[#FF3B30]'
                   }`}
                 >
-                  {models.map((model) => (
+                  {safeModels.map((model) => (
                     <option key={model.id} value={model.model_name} className="bg-[#1A1A1A] text-white">
                       {model.display_name} ({model.version}) {!model.enabled ? '[DISABLED]' : ''}
                     </option>
