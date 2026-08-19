@@ -32,6 +32,7 @@ export const videoService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 180000,
       onUploadProgress: (progressEvent) => {
         if (progressEvent.total && onProgress) {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -50,6 +51,8 @@ export const videoService = {
       frame_skip: params.frame_skip ?? 2,
       enable_histogram_equalization: params.enable_histogram_equalization ?? true,
       enable_gaussian_blur: params.enable_gaussian_blur ?? true,
+    }, {
+      timeout: 60000,
     });
     return response.data;
   },

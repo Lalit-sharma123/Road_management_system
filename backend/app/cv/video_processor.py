@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-from typing import List, Tuple, Generator, Dict, Any
+from typing import List, Tuple, Generator, Dict, Any, Optional
 
 
 class VideoProcessor:
@@ -52,7 +52,7 @@ class VideoProcessor:
     def extract_frames_generator(
         self,
         frame_skip: int = 5,
-        target_size: Tuple[int, int] = (1280, 720),
+        target_size: Optional[Tuple[int, int]] = None,
         enable_histogram_eq: bool = True,
         enable_gaussian_blur: bool = True
     ) -> Generator[Tuple[int, float, np.ndarray, np.ndarray], None, None]:
@@ -76,8 +76,8 @@ class VideoProcessor:
 
             timestamp_sec = current_frame / self.fps if self.fps > 0 else 0.0
 
-            # Resize if required
-            if (self.width, self.height) != target_size:
+            # Resize if target_size explicitly specified and different from native
+            if target_size is not None and (self.width, self.height) != target_size:
                 frame_resized = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
             else:
                 frame_resized = frame.copy()
