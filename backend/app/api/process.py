@@ -131,6 +131,7 @@ class SessionManager:
         self.active_video_id: Optional[str] = None
         self.cancel_event: Optional[asyncio.Event] = None
         self.active_task: Optional[asyncio.Task] = None
+        self.is_paused: bool = False
 
     async def start_new_session(self, video_id: str) -> Tuple[str, asyncio.Event]:
         # 1. Stop previous video processing immediately & clean system resources
@@ -141,6 +142,7 @@ class SessionManager:
         self.active_session_id = session_id
         self.active_video_id = video_id
         self.cancel_event = asyncio.Event()
+        self.is_paused = False
 
         # 3. Reset global processing state completely
         processing_progress_state["is_processing"] = True
@@ -149,7 +151,7 @@ class SessionManager:
         processing_progress_state["current_frame"] = 0
         processing_progress_state["total_frames"] = 0
         processing_progress_state["progress_percent"] = 0.0
-        processing_progress_state["status"] = "Processing"
+        processing_progress_state["status"] = "Initializing Models"
         processing_progress_state["pothole_count"] = 0
         processing_progress_state["crack_count"] = 0
         processing_progress_state["road_health_index"] = 100.0
@@ -166,7 +168,36 @@ class SessionManager:
 
         return session_id, self.cancel_event
 
+    async def pause_session(self):
+        self.is_paused = True
+        processing_progress_state["status"] = "Paused"
+        pause_msg = {
+            "type": "status",
+            "stage": "Paused",
+            "session_id": self.active_session_id,
+            "video_id": self.active_video_id,
+            "message": "AI detection pipeline paused by user.",
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        await ws_manager.broadcast(pause_msg)
+        await ws_broadcaster.broadcast(pause_msg)
+
+    async def resume_session(self):
+        self.is_paused = False
+        processing_progress_state["status"] = "Detecting"
+        resume_msg = {
+            "type": "status",
+            "stage": "Detecting",
+            "session_id": self.active_session_id,
+            "video_id": self.active_video_id,
+            "message": "AI detection pipeline resumed.",
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        await ws_manager.broadcast(resume_msg)
+        await ws_broadcaster.broadcast(resume_msg)
+
     async def cancel_current_session(self):
+        self.is_paused = False
         if self.cancel_event and not self.cancel_event.is_set():
             self.cancel_event.set()
 
@@ -324,6 +355,13 @@ async def execute_video_processing_task(
                 # 🛑 Check cancellation flag or session superseding
                 if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
                     print(f"🛑 [Session {session_id}] Cancellation detected for video {video_id}. Halting loop immediately.")
+                    break
+
+                # ⏸️ Handle pause state asynchronously
+                while global_session_manager.is_paused and not cancel_event.is_set() and global_session_manager.active_session_id == session_id:
+                    await asyncio.sleep(0.15)
+
+                if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
                     break
 
                 frames_processed_count += 1
@@ -555,17 +593,23 @@ async def execute_video_processing_task(
 
                 base_lat = 28.4595 + (frame_num * 0.00008)
                 base_lon = 77.0266 + (frame_num * 0.00009)
-                current_progress = min(98, max(5, int((frames_processed_count / max(1, total_expected_frames / max(1, frame_skip))) * 95)))
+                total_batches = max(1, total_expected_frames / max(1, frame_skip))
+                current_progress = min(98, max(5, int((frames_processed_count / total_batches) * 95)))
                 live_road_health = round(max(20.0, 100.0 - (road_damage_count * 4.0)), 1)
+                remaining_frames = max(0, total_batches - frames_processed_count)
+                effective_fps = max(1.0, float(processor.fps or 30.0) / max(1, frame_skip))
+                eta_sec = max(0, round(remaining_frames / effective_fps, 1))
 
                 ws_frame_msg = {
                     "type": "frame",
                     "session_id": session_id,
                     "video_id": video.id,
+                    "stage": "Detecting",
                     "frame_number": frame_num,
                     "total_frames": total_expected_frames,
                     "timestamp": round(float(timestamp_sec), 2),
                     "elapsed_time": round(float(timestamp_sec), 2),
+                    "eta_seconds": eta_sec,
                     "fps": round(float(processor.fps or 30.0), 1),
                     "progress": current_progress,
                     "image_data": frame_base64,
@@ -763,6 +807,31 @@ async def process_video_pipeline(
     }
 
 
+@router.post("/pause")
+async def pause_video_processing():
+    """
+    Pauses the active video detection stream and holds frame position.
+    """
+    await global_session_manager.pause_session()
+    return {
+        "status": "paused",
+        "message": "AI detection session paused."
+    }
+
+
+@router.post("/resume")
+async def resume_video_processing():
+    """
+    Resumes the paused video detection stream.
+    """
+    await global_session_manager.resume_session()
+    return {
+        "status": "resumed",
+        "message": "AI detection session resumed."
+    }
+
+
+@router.post("/cancel")
 @router.post("/stop")
 async def stop_video_processing():
     """

@@ -10,6 +10,7 @@ import {
   Crosshair, 
   BarChart2, 
   Play, 
+  Pause,
   Square,
   Camera,
   RefreshCw,
@@ -19,7 +20,9 @@ import {
   Sparkles,
   List,
   Car,
-  FileText
+  FileText,
+  Download,
+  FileCheck
 } from 'lucide-react';
 import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
@@ -56,10 +59,18 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
   const [currentFrameUrl, setCurrentFrameUrl] = useState<string | null>(null);
   const [frameNumber, setFrameNumber] = useState<number>(0);
+  const [totalFrames, setTotalFrames] = useState<number>(video?.total_frames || 0);
   const [timestamp, setTimestamp] = useState<number>(0);
   const [progress, setProgress] = useState<number>(0);
   const [statusText, setStatusText] = useState<string>('Connecting to Live AI Processing Stream...');
+  const [activeStage, setActiveStage] = useState<string>('Initializing Models');
   const [roadHealth, setRoadHealth] = useState<number>(100);
+  const [etaSeconds, setEtaSeconds] = useState<number>(0);
+
+  // Playback & Pause/Resume State
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
   // Category counts
   const [potholeCount, setPotholeCount] = useState<number>(0);
@@ -70,6 +81,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [vehicleCount, setVehicleCount] = useState<number>(0);
   const [helmetCount, setHelmetCount] = useState<number>(0);
   const [numberPlateCount, setNumberPlateCount] = useState<number>(0);
+  const [helmetViolationsCount, setHelmetViolationsCount] = useState<number>(0);
 
   // Hardware Webcam State
   const [webcamActive, setWebcamActive] = useState<boolean>(false);
@@ -84,7 +96,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<LiveDetectionItem | null>(null);
 
   // Performance telemetry
-  const [fps, setFps] = useState<number>(24);
+  const [fps, setFps] = useState<number>(30);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
   // Active Session Guard Ref
@@ -95,7 +107,6 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const routePointsRef = useRef<[number, number][]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const webcamWsRef = useRef<WebSocket | null>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -123,9 +134,14 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     activeSessionIdRef.current = null;
     setCurrentFrameUrl(null);
     setFrameNumber(0);
+    setTotalFrames(video?.total_frames || 0);
     setTimestamp(0);
     setProgress(0);
     setElapsedSeconds(0);
+    setEtaSeconds(0);
+    setIsPaused(false);
+    setIsCompleted(false);
+    setIsCancelling(false);
     setPotholeCount(0);
     setCrackCount(0);
     setBrokenRoadCount(0);
@@ -134,10 +150,12 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     setVehicleCount(0);
     setHelmetCount(0);
     setNumberPlateCount(0);
+    setHelmetViolationsCount(0);
     setRoadHealth(100);
     setTimelineEvents([]);
     setSelectedTimelineEvent(null);
     setStatusText('Connecting to isolated live processing stream...');
+    setActiveStage('Initializing Models');
     routePointsRef.current = [];
     frameTimesRef.current = [];
 
@@ -197,6 +215,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       }
 
       setWebcamActive(true);
+      setActiveStage('Detecting');
       setStatusText('Live Webcam Stream Active — Multi-Model Inference Running');
 
       // Refresh devices list to populate device labels
@@ -304,7 +323,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     };
   }, []);
 
-  // 2. Leaflet Map Initialization
+  // 6. Leaflet Map Initialization
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -357,7 +376,38 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     return '#34C759';                             // Green (Low)
   };
 
-  // 3. WebSocket Realtime Engine
+  // 7. Pause / Resume / Cancel Controls
+  const handleTogglePause = async () => {
+    try {
+      if (!isPaused) {
+        await videoService.pauseProcessingPipeline();
+        setIsPaused(true);
+        setStatusText('Inference pipeline paused. Frames held.');
+      } else {
+        await videoService.resumeProcessingPipeline();
+        setIsPaused(false);
+        setStatusText('Inference pipeline resumed. Processing live frames...');
+      }
+    } catch (err) {
+      console.warn('Failed to toggle pause:', err);
+    }
+  };
+
+  const handleCancelProcessing = async () => {
+    setIsCancelling(true);
+    try {
+      await videoService.cancelProcessingPipeline();
+      setStatusText('AI detection session cancelled by user.');
+      setIsPaused(false);
+      setProgress(0);
+    } catch (err) {
+      console.warn('Failed to cancel processing:', err);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  // 8. WebSocket Realtime Engine
   useEffect(() => {
     const clientId = `live-${videoId}-${Date.now()}`;
 
@@ -386,12 +436,14 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             setVehicleCount(0);
             setHelmetCount(0);
             setNumberPlateCount(0);
+            setHelmetViolationsCount(0);
             setTimelineEvents([]);
             setSelectedTimelineEvent(null);
             routePointsRef.current = [];
             damageLayerGroupRef.current?.clearLayers();
             polylineRef.current?.setLatLngs([]);
             setStatusText(msg.message || 'Fresh detection session initialized.');
+            setActiveStage('Initializing Models');
           }
           return;
         }
@@ -415,12 +467,23 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           if (delta > 0) setFps(Math.round(1000 / delta));
         }
 
-        // Status / Progress updates
-        if (msg.stage || msg.message) {
-          setStatusText(msg.message || `Stage: ${msg.stage}`);
+        // Status / Stage / Progress updates
+        if (msg.stage) {
+          setActiveStage(msg.stage);
+          if (msg.stage === 'Paused') setIsPaused(true);
+          if (msg.stage === 'Detecting') setIsPaused(false);
+        }
+        if (msg.message) {
+          setStatusText(msg.message);
         }
         if (msg.progress !== undefined) {
           setProgress(msg.progress);
+        }
+        if (msg.total_frames) {
+          setTotalFrames(msg.total_frames);
+        }
+        if (msg.eta_seconds !== undefined) {
+          setEtaSeconds(msg.eta_seconds);
         }
         if (msg.road_health !== undefined) {
           setRoadHealth(msg.road_health);
@@ -428,6 +491,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
         // Frame Payload Processing
         if (msg.type === 'frame' || msg.image_url || msg.image_data || msg.image_base64) {
+          setActiveStage('Detecting');
           let frameImgUrl = '';
           if (msg.image_data) {
             frameImgUrl = msg.image_data.startsWith('data:') ? msg.image_data : `data:image/jpeg;base64,${msg.image_data}`;
@@ -479,6 +543,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             if (typeof msg.counts.vehicle === 'number') setVehicleCount(msg.counts.vehicle);
             if (typeof msg.counts.helmet === 'number') setHelmetCount(msg.counts.helmet);
             if (typeof msg.counts.number_plate === 'number') setNumberPlateCount(msg.counts.number_plate);
+            if (typeof msg.counts.helmet_violations === 'number') setHelmetViolationsCount(msg.counts.helmet_violations);
           }
 
           // Handle incoming detections on frame
@@ -537,24 +602,20 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         }
 
         // Completion Handling
-        if (msg.type === 'finished' || msg.progress === 100 || msg.stage === 'Finished') {
+        if (msg.type === 'finished' || msg.progress === 100 || msg.stage === 'Finished' || msg.stage === 'Completed') {
           setProgress(100);
-          setStatusText('YOLO Frame Processing Completed! Navigating to full analytics report...');
+          setIsCompleted(true);
+          setActiveStage('Completed');
+          setStatusText('YOLO Real-Time Detection Completed! Output video and analytics saved.');
 
-          setTimeout(async () => {
-            try {
-              const completeRecord = await videoService.getVideoDetails(videoId);
-              if (onProcessingComplete) onProcessingComplete(completeRecord);
-            } catch (e) {
-              console.warn('Could not fetch complete details after WS finished:', e);
-            }
-            onNavigate('results');
-          }, 1500);
+          videoService.getVideoDetails(videoId).then((details) => {
+            if (onProcessingComplete) onProcessingComplete(details);
+          }).catch(() => {});
         }
       },
       (err) => {
         console.warn('Live Processing WS Connection Notice:', err);
-        setStatusText('Inference pipeline running. Receiving CCTV video frames...');
+        setStatusText('Inference pipeline running. Receiving live YOLO video stream...');
       }
     );
 
@@ -562,15 +623,16 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
     // Fallback polling interval to guarantee status updates if WebSocket misses a packet
     const pollInterval = setInterval(async () => {
-      if (!videoId) return;
+      if (!videoId || isCompleted) return;
       try {
         const details = await videoService.getVideoDetails(videoId);
         if (details.status === 'completed') {
           setProgress(100);
-          setStatusText('YOLO Frame Processing Completed! Navigating to full analytics report...');
+          setIsCompleted(true);
+          setActiveStage('Completed');
+          setStatusText('YOLO Frame Processing Completed!');
           clearInterval(pollInterval);
           if (onProcessingComplete) onProcessingComplete(details);
-          setTimeout(() => onNavigate('results'), 1500);
         } else if (details.status === 'failed') {
           setStatusText('Video processing encountered an error.');
           clearInterval(pollInterval);
@@ -592,15 +654,28 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       if (wsRef.current) wsRef.current.close();
       clearInterval(pollInterval);
     };
-  }, [videoId]);
+  }, [videoId, isCompleted]);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
-    const s = secs % 60;
+    const s = Math.floor(secs % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const totalDetectionsCount = potholeCount + crackCount + brokenRoadCount + missingAsphaltCount;
+  const stagesList = ['Uploading', 'Initializing Models', 'Detecting', 'Saving Output', 'Completed'];
+
+  const getStageIndex = (st: string) => {
+    const norm = st.toLowerCase();
+    if (norm.includes('upload')) return 0;
+    if (norm.includes('init') || norm.includes('model') || norm.includes('extract')) return 1;
+    if (norm.includes('detect') || norm.includes('yolo') || norm.includes('run') || norm.includes('process')) return 2;
+    if (norm.includes('sav') || norm.includes('report') || norm.includes('generat')) return 3;
+    if (norm.includes('complete') || norm.includes('finish')) return 4;
+    return 2;
+  };
+
+  const currentStageIdx = getStageIndex(activeStage);
 
   return (
     <div className="space-y-6 text-[#E0E0E0] font-mono">
@@ -623,7 +698,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             }`}
           >
             <Radio className="w-3.5 h-3.5" />
-            <span>CCTV WebSocket Stream</span>
+            <span>Uploaded Video Realtime Stream</span>
           </button>
 
           <button
@@ -638,7 +713,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             }`}
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>Hardware Webcam (USB / Laptop)</span>
+            <span>Live Hardware CCTV / Webcam</span>
           </button>
         </div>
 
@@ -687,6 +762,37 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         )}
       </div>
 
+      {/* Pipeline Stage Progress Breadcrumbs */}
+      <div className="bg-[#141414] border border-[#2A2A2A] p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-1.5 text-[#888] uppercase text-[11px] font-bold">
+          <Sparkles className="w-3.5 h-3.5 text-[#2563EB]" />
+          <span>Pipeline Stage:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {stagesList.map((stg, idx) => {
+            const isDone = idx < currentStageIdx;
+            const isCurrent = idx === currentStageIdx;
+            return (
+              <div key={stg} className="flex items-center gap-1.5">
+                <span
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1 ${
+                    isCurrent
+                      ? 'bg-[#2563EB] text-white border-blue-400 shadow-[0_0_8px_rgba(37,99,235,0.4)] animate-pulse'
+                      : isDone
+                      ? 'bg-[#34C759]/20 text-[#34C759] border-emerald-600/40'
+                      : 'bg-[#1A1A1A] text-[#666] border-[#333]'
+                  }`}
+                >
+                  {isDone && <CheckCircle2 className="w-3 h-3" />}
+                  {stg}
+                </span>
+                {idx < stagesList.length - 1 && <span className="text-[#444]">→</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Webcam Error Warning Banner */}
       {webcamError && (
         <div className="p-3 bg-[#FF3B30]/15 border border-[#FF3B30] text-xs text-[#FF3B30] flex items-center justify-between gap-2">
@@ -709,34 +815,52 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           <div className="flex items-center gap-2 text-xs text-[#2563EB] uppercase tracking-widest mb-1">
             <Radio className="w-4 h-4 text-[#FF3B30] animate-pulse" />
             <span className="font-bold">
-              {streamSource === 'hardware_webcam' ? 'REALTIME WEBCAM MULTI-MODEL INFERENCE' : 'REALTIME AI CCTV INFERENCE STREAM'}
+              {streamSource === 'hardware_webcam' ? 'REALTIME WEBCAM MULTI-MODEL INFERENCE' : 'REALTIME FRAME-BY-FRAME YOLO DETECTION'}
             </span>
-            <span className="bg-[#FF3B30] text-white text-[9px] px-1.5 py-0.5 rounded font-bold animate-ping">LIVE</span>
+            <span className={`text-white text-[9px] px-1.5 py-0.5 rounded font-bold ${isPaused ? 'bg-[#FF9500]' : 'bg-[#FF3B30] animate-ping'}`}>
+              {isPaused ? 'PAUSED' : 'LIVE'}
+            </span>
           </div>
           <h2 className="text-lg font-bold text-white uppercase">{video?.title || `Inspection Video #${videoId}`}</h2>
           <p className="text-xs text-[#888]">{statusText}</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Action Controls: Pause, Resume, Stop, Results */}
+        <div className="flex flex-wrap items-center gap-3">
           <div className="bg-[#1A1A1A] border border-[#333] px-3 py-1.5 text-right">
             <p className="text-[9px] text-[#888] uppercase">Inference Speed</p>
-            <p className="text-xs font-bold text-[#34C759]">{fps} FPS {latencyMs > 0 ? `// ${latencyMs}ms` : '// CUDA_0'}</p>
+            <p className="text-xs font-bold text-[#34C759]">{fps} FPS {latencyMs > 0 ? `// ${latencyMs}ms` : '// IN_MEMORY'}</p>
           </div>
           <div className="bg-[#1A1A1A] border border-[#333] px-3 py-1.5 text-right">
             <p className="text-[9px] text-[#888] uppercase">Elapsed Time</p>
             <p className="text-xs font-bold text-[#FFD60A]">{formatTime(elapsedSeconds)}</p>
           </div>
+
+          {/* Pause / Resume Control */}
           <button
-            onClick={async () => {
-              await videoService.stopProcessingPipeline().catch(() => {});
-              setStatusText('Processing stopped by user. Session terminated.');
-            }}
+            onClick={handleTogglePause}
+            className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 transition-all font-mono ${
+              isPaused
+                ? 'bg-[#34C759] hover:bg-emerald-600 text-black border-emerald-400'
+                : 'bg-[#1A1A1A] hover:bg-[#252525] text-[#FFD60A] border-[#FFD60A]/40'
+            }`}
+            title={isPaused ? 'Resume detection stream' : 'Pause detection stream'}
+          >
+            {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
+            <span>{isPaused ? 'Resume' : 'Pause'}</span>
+          </button>
+
+          {/* Cancel / Stop Control */}
+          <button
+            onClick={handleCancelProcessing}
+            disabled={isCancelling}
             className="px-3 py-2 bg-[#1A1A1A] hover:bg-red-950/40 text-[#FF3B30] hover:text-red-400 text-xs font-bold uppercase tracking-wider border border-[#333] hover:border-red-500/50 flex items-center gap-1.5 transition-all font-mono"
-            title="Halt current inference loop and purge frame queue"
+            title="Halt current inference loop and cancel task"
           >
             <Square className="w-3.5 h-3.5 fill-current" />
-            <span>Stop</span>
+            <span>{isCancelling ? 'Stopping...' : 'Cancel'}</span>
           </button>
+
           <button
             onClick={() => onNavigate('results')}
             className="px-4 py-2 bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-bold uppercase tracking-wider border border-blue-400 flex items-center gap-1.5 transition-all shadow-[0_0_12px_rgba(37,99,235,0.4)] font-mono"
@@ -747,6 +871,45 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         </div>
       </div>
 
+      {/* Completion Banner with Actions */}
+      {isCompleted && (
+        <div className="bg-gradient-to-r from-emerald-950/50 via-[#141414] to-blue-950/50 border-2 border-[#34C759] p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-[0_0_20px_rgba(52,199,89,0.2)]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#34C759]/20 border border-[#34C759] flex items-center justify-center flex-shrink-0">
+              <CheckCircle2 className="w-6 h-6 text-[#34C759]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">Video Detection Complete!</h3>
+              <p className="text-xs text-[#AAA]">All frames processed, annotated MP4 video generated, and analytics persisted to database.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`/processed/processed_${videoId}.mp4`}
+              download={`processed_${videoId}.mp4`}
+              className="px-3.5 py-2 bg-[#1A1A1A] hover:bg-[#2A2A2A] text-white text-xs font-bold uppercase tracking-wider border border-[#444] flex items-center gap-1.5 transition-all"
+            >
+              <Download className="w-3.5 h-3.5 text-[#34C759]" />
+              <span>Download Processed Video</span>
+            </a>
+            <button
+              onClick={() => onNavigate('report')}
+              className="px-3.5 py-2 bg-[#1A1A1A] hover:bg-[#2A2A2A] text-white text-xs font-bold uppercase tracking-wider border border-[#444] flex items-center gap-1.5 transition-all"
+            >
+              <FileCheck className="w-3.5 h-3.5 text-[#FFD60A]" />
+              <span>Detection Report</span>
+            </button>
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className="px-4 py-2 bg-[#34C759] hover:bg-emerald-600 text-black text-xs font-bold uppercase tracking-wider font-bold border border-emerald-400 flex items-center gap-1.5 transition-all"
+            >
+              <BarChart2 className="w-3.5 h-3.5" />
+              <span>Analytics Summary</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Center Area: Large AI Video Player & Right Telemetry */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Large AI Video Player Canvas */}
@@ -756,14 +919,16 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             <div className="flex items-center space-x-3">
               <span className="bg-[#FF3B30] text-white px-2 py-0.5 font-bold uppercase text-[10px] flex items-center gap-1">
                 <Crosshair className="w-3 h-3" />
-                FRAME_{frameNumber || 1}
+                FRAME_{frameNumber || 1} {totalFrames > 0 ? `/ ${totalFrames}` : ''}
               </span>
               <span className="text-[#AAA] font-mono">TIMESTAMP: {timestamp.toFixed(2)}s</span>
             </div>
             <div className="flex items-center space-x-3 text-[11px]">
-              <span className="text-[#34C759] font-bold">INFERENCE: ACTIVE</span>
+              <span className={`font-bold ${isPaused ? 'text-[#FF9500]' : 'text-[#34C759]'}`}>
+                {isPaused ? 'STATUS: PAUSED' : 'INFERENCE: ACTIVE'}
+              </span>
               <span className="text-[#666]">|</span>
-              <span className="text-[#FF9500] font-bold">TOTAL DETECTIONS: {totalDetectionsCount}</span>
+              <span className="text-[#FF9500] font-bold">TOTAL DETECTIONS: {totalDetectionsCount + vehicleCount + numberPlateCount}</span>
             </div>
           </div>
 
@@ -779,7 +944,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               <div className="flex flex-col items-center justify-center p-8 text-center space-y-3">
                 <Activity className="w-12 h-12 text-[#2563EB] animate-spin" />
                 <p className="text-sm font-bold text-white uppercase">Awaiting YOLO Model Live Feed...</p>
-                <p className="text-xs text-[#666]">Streaming frame detections over WebSocket</p>
+                <p className="text-xs text-[#666]">Streaming frame detections over WebSocket in real time</p>
               </div>
             )}
 
@@ -790,14 +955,22 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             <div className="absolute bottom-4 right-4 border-r-2 border-b-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80" />
           </div>
 
-          {/* Progress Bar Footer */}
+          {/* Progress Bar & ETA Footer */}
           <div className="bg-[#141414] border-t border-[#2A2A2A] p-3 space-y-2">
-            <div className="flex justify-between text-xs">
+            <div className="flex flex-wrap justify-between items-center text-xs gap-2">
               <span className="text-white font-bold uppercase flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-[#2563EB]" />
-                Inspection Progress: {progress}%
+                Inspection Progress: {progress}% {totalFrames > 0 ? `(${frameNumber} / ${totalFrames} Frames)` : ''}
               </span>
-              <span className="text-[#AAA]">GPS: {currentGps.lat.toFixed(4)}, {currentGps.lng.toFixed(4)}</span>
+              <div className="flex items-center gap-4 text-[#AAA]">
+                {etaSeconds > 0 && !isCompleted && (
+                  <span className="text-[#FFD60A] font-bold flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-[#FFD60A]" />
+                    ETA: {formatTime(etaSeconds)}
+                  </span>
+                )}
+                <span>GPS: {currentGps.lat.toFixed(4)}, {currentGps.lng.toFixed(4)}</span>
+              </div>
             </div>
             <div className="w-full bg-[#222] h-2.5 overflow-hidden border border-[#333]">
               <div 
@@ -872,6 +1045,17 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               </div>
             </div>
 
+            {/* Violations Count Card */}
+            {helmetViolationsCount > 0 && (
+              <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/40 p-2.5 flex items-center justify-between">
+                <span className="text-[#FF3B30] font-bold text-xs uppercase flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-[#FF3B30]" />
+                  Safety Violations
+                </span>
+                <span className="text-[#FF3B30] font-mono font-bold text-sm">{helmetViolationsCount}</span>
+              </div>
+            )}
+
             {/* Road Health Score Gauge */}
             <div className="bg-[#1A1A1A] border border-[#2A2A2A] p-3 flex items-center justify-between">
               <div>
@@ -931,7 +1115,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
         {timelineEvents.length === 0 ? (
           <div className="p-6 text-center text-[#666] text-xs">
-            No road damage defects detected yet. Streaming inspection frames...
+            No road damage defects detected yet. Streaming inspection frames in real time...
           </div>
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">

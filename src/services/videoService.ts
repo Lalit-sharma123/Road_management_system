@@ -62,6 +62,21 @@ export const videoService = {
     return response.data;
   },
 
+  async pauseProcessingPipeline(): Promise<{ status: string; message: string }> {
+    const response = await apiClient.post<{ status: string; message: string }>('/process/pause');
+    return response.data;
+  },
+
+  async resumeProcessingPipeline(): Promise<{ status: string; message: string }> {
+    const response = await apiClient.post<{ status: string; message: string }>('/process/resume');
+    return response.data;
+  },
+
+  async cancelProcessingPipeline(): Promise<{ status: string; message: string }> {
+    const response = await apiClient.post<{ status: string; message: string }>('/process/cancel');
+    return response.data;
+  },
+
   async getVideoDetails(videoId: string): Promise<InspectionVideo> {
     const response = await apiClient.get<InspectionVideo>(`/videos/${videoId}`);
     return response.data;
