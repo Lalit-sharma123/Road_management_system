@@ -76,24 +76,43 @@ class Settings(BaseSettings):
 
     def resolve_model_path(self, model_filename: str) -> Path:
         """
-        Centralized model path resolver.
-        Searches candidate locations in order:
-        1. PROJECT_ROOT / model_filename
-        2. BACKEND_DIR / model_filename
-        3. WEIGHTS_DIR / model_filename
-        4. Current working directory / model_filename
-        Returns the first existing Path, or candidate path 1.
+        Centralized model path resolver using pathlib.Path.
+        Ensures YOLO models are loaded from backend/weights/ regardless of working directory.
         """
-        candidates = [
-            self.PROJECT_ROOT / model_filename,
-            self.BASE_DIR / model_filename,
-            Path(self.WEIGHTS_DIR) / model_filename,
-            Path.cwd() / model_filename,
+        if not model_filename:
+            return Path(self.WEIGHTS_DIR) / "best.pt"
+
+        # If already an existing absolute or direct path
+        direct_path = Path(model_filename)
+        if direct_path.is_file():
+            return direct_path.resolve()
+
+        # Clean filename from any redundant directory prefixes
+        clean_name = direct_path.name
+
+        weights_dir_path = Path(self.WEIGHTS_DIR).resolve()
+        backend_dir_path = self.BASE_DIR.resolve()
+        project_root_path = self.PROJECT_ROOT.resolve()
+        cwd_path = Path.cwd().resolve()
+
+        candidates: List[Path] = [
+            weights_dir_path / clean_name,
+            backend_dir_path / "weights" / clean_name,
+            project_root_path / "backend" / "weights" / clean_name,
+            project_root_path / "weights" / clean_name,
+            cwd_path / "backend" / "weights" / clean_name,
+            cwd_path / "weights" / clean_name,
+            backend_dir_path / clean_name,
+            project_root_path / clean_name,
+            cwd_path / clean_name,
         ]
+
         for candidate in candidates:
             if candidate.is_file():
                 return candidate
-        return candidates[0]
+
+        # Default fallback to primary backend/weights location
+        return weights_dir_path / clean_name
 
 
 settings = Settings()

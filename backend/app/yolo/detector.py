@@ -204,12 +204,12 @@ class YOLODamageDetector:
             if best_path.is_file():
                 try:
                     self.damage_model = YOLO(str(best_path))
-                    print(f"[YOLO Engine] Loaded Road Damage YOLO model from: {best_path}")
+                    print(f"[YOLO Engine] Loaded Road Damage model from: {best_path}")
                 except Exception as e:
                     print(f"[YOLO Engine] Notice loading damage model '{best_path}': {e}")
                     self.damage_model = None
             else:
-                print(f"[YOLO Engine] Damage model weights '{best_path}' not found on disk. Falling back to CV heuristics.")
+                print(f"[YOLO Engine] Damage model weights '{best_path}' not found on disk. Running in CV heuristic mode.")
                 self.damage_model = None
 
             # 2. Vehicle Model (yolov8n.pt)
@@ -217,61 +217,45 @@ class YOLODamageDetector:
             if veh_path.is_file():
                 try:
                     self.vehicle_model = YOLO(str(veh_path))
-                    print(f"[YOLO Engine] Loaded Vehicle Detection YOLO model from: {veh_path}")
+                    print(f"[YOLO Engine] Loaded Vehicle Detection model from: {veh_path}")
                 except Exception as ve:
                     print(f"[YOLO Engine] Notice loading vehicle model '{veh_path}': {ve}")
                     self.vehicle_model = None
             else:
-                try:
-                    self.vehicle_model = YOLO(settings.VEHICLE_MODEL_NAME)
-                    print(f"[YOLO Engine] Loaded default Vehicle model '{settings.VEHICLE_MODEL_NAME}'")
-                except Exception as ve:
-                    print(f"[YOLO Engine] Could not load vehicle model: {ve}")
-                    self.vehicle_model = None
+                print(f"[YOLO Engine] Vehicle model weights '{veh_path}' not found on disk.")
+                self.vehicle_model = None
 
-            # 3. Helmet Model (helmet.pt)
+            # 3. Helmet Model (helmet.pt / helmet_numberplate.pt)
             helmet_path = settings.resolve_model_path(getattr(settings, "HELMET_MODEL_NAME", "helmet.pt"))
             if not helmet_path.is_file():
-                helmet_path = settings.resolve_model_path("helmet.pt")
+                helmet_path = settings.resolve_model_path("helmet_numberplate.pt")
 
             if helmet_path.is_file():
                 try:
                     self.helmet_model = YOLO(str(helmet_path))
-                    print(f"[YOLO Engine] Loaded Helmet Safety YOLO model from: {helmet_path}")
+                    print(f"[YOLO Engine] Loaded Helmet model from: {helmet_path}")
                 except Exception as he:
                     print(f"[YOLO Engine] Notice loading helmet model '{helmet_path}': {he}")
                     self.helmet_model = None
             else:
-                # Fallback check for unified helmet_numberplate.pt
-                hp_fallback = settings.resolve_model_path(getattr(settings, "HELMET_PLATE_MODEL_NAME", "helmet_numberplate.pt"))
-                if hp_fallback.is_file():
-                    try:
-                        self.helmet_model = YOLO(str(hp_fallback))
-                        print(f"[YOLO Engine] Loaded Helmet model from fallback '{hp_fallback}'")
-                    except Exception:
-                        self.helmet_model = None
+                print(f"[YOLO Engine] Helmet model weights not found in weights directory.")
+                self.helmet_model = None
 
-            # 4. Number Plate Model (numberplate.pt)
+            # 4. Number Plate Model (numberplate.pt / helmet_numberplate.pt)
             plate_path = settings.resolve_model_path(getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate.pt"))
             if not plate_path.is_file():
-                plate_path = settings.resolve_model_path("numberplate.pt")
+                plate_path = settings.resolve_model_path("helmet_numberplate.pt")
 
             if plate_path.is_file():
                 try:
                     self.plate_model = YOLO(str(plate_path))
-                    print(f"[YOLO Engine] Loaded Number Plate YOLO model from: {plate_path}")
+                    print(f"[YOLO Engine] Loaded Plate model from: {plate_path}")
                 except Exception as pe:
-                    print(f"[YOLO Engine] Notice loading numberplate model '{plate_path}': {pe}")
+                    print(f"[YOLO Engine] Notice loading plate model '{plate_path}': {pe}")
                     self.plate_model = None
             else:
-                # Fallback check for unified helmet_numberplate.pt
-                hp_fallback = settings.resolve_model_path(getattr(settings, "HELMET_PLATE_MODEL_NAME", "helmet_numberplate.pt"))
-                if hp_fallback.is_file():
-                    try:
-                        self.plate_model = YOLO(str(hp_fallback))
-                        print(f"[YOLO Engine] Loaded Plate model from fallback '{hp_fallback}'")
-                    except Exception:
-                        self.plate_model = None
+                print(f"[YOLO Engine] Number plate model weights not found in weights directory.")
+                self.plate_model = None
 
         except Exception as e:
             print(f"[YOLO Engine] Warning: Failed to load PyTorch Ultralytics YOLO models: {e}. Running in CV heuristic mode.")

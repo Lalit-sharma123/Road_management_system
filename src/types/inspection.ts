@@ -94,6 +94,10 @@ export interface InspectionVideo {
   resolution: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   thumbnail_url: string;
+  video_url?: string;
+  processed_video_url?: string;
+  file_path?: string;
+  processed_file_path?: string;
   created_at: string;
   analytics?: RoadAnalyticsData;
   gps_tracks?: GPSPoint[];

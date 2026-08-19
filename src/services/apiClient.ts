@@ -1,12 +1,14 @@
 import axios from 'axios';
 
-const envApiUrl = (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL;
-// Use configured environment URL or relative /api/v1 if running on same domain, fallback to localhost:8000
-const API_URL = envApiUrl || (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:8000/api/v1');
+const envApiUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || 
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL;
+
+// Use configured environment URL or relative /api/v1 for Vite proxy & reverse proxy compatibility
+const API_URL = envApiUrl || '/api/v1';
 
 export const apiClient = axios.create({
   baseURL: API_URL,
-  timeout: 3500,
+  timeout: 5000,
   headers: {
     'Content-Type': 'application/json',
   },

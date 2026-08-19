@@ -178,7 +178,7 @@ export const DetectionTimeline: React.FC<DetectionTimelineProps> = ({
   };
 
   const activeVideoUrl = getMediaUrl(
-    processedVideoUrl || video?.processed_file_path || video?.file_path
+    processedVideoUrl || video?.processed_video_url || (video as any)?.processed_file_path || video?.video_url || (video as any)?.file_path
   );
 
   // Handle timeline item selection & video seek

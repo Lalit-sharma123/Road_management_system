@@ -163,7 +163,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex flex-col">
             <span className="text-[9px] font-mono uppercase tracking-wider text-[#888] font-bold flex items-center gap-1">
               Detection Model
-              {!isAdmin && <Lock className="w-2.5 h-2.5 text-[#FF9500]" title="Admin Role Required to Switch Models" />}
+              {!isAdmin && (
+                <span title="Admin Role Required to Switch Models">
+                  <Lock className="w-2.5 h-2.5 text-[#FF9500]" />
+                </span>
+              )}
             </span>
 
             <div className="flex items-center gap-1">

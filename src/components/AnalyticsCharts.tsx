@@ -46,9 +46,9 @@ interface AnalyticsChartsProps {
 }
 
 export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData }) => {
-  const categoryCounts = dashboardData?.detection_summary?.category_counts || dashboardData?.damage_by_type || {};
+  const categoryCounts = dashboardData?.detection_summary?.category_counts || (dashboardData as any)?.damage_by_type || {};
   const severityCounts = dashboardData?.detection_summary?.severity_counts || {};
-  const vehicleCountsProp = dashboardData?.vehicle_summary?.vehicle_counts || dashboardData?.vehicles_by_type || {};
+  const vehicleCountsProp = dashboardData?.vehicle_summary?.vehicle_counts || (dashboardData as any)?.vehicles_by_type || {};
   const timeline = dashboardData?.timeline || [];
 
   // Separate Road Damage vs Vehicle Categories

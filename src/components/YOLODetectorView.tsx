@@ -140,7 +140,7 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({ video, onNav
               </span>
             </div>
             <div className="flex items-center space-x-2">
-              <span className="text-[#34C759] font-bold">MODEL: {currentModel?.name || 'YOLOv11 Large'}</span>
+              <span className="text-[#34C759] font-bold">MODEL: {currentModel?.display_name || currentModel?.model_name || (currentModel as any)?.name || 'YOLOv11 Large'}</span>
               <span className="text-[#666]">|</span>
               <span className="text-[#FF9500]">CONF &ge; {(confFilter * 100).toFixed(0)}%</span>
             </div>
@@ -313,7 +313,7 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({ video, onNav
           <div className="border border-[#2A2A2A] bg-[#141414] p-3 space-y-2 text-[10px]">
             <div className="flex justify-between text-[#888]">
               <span>ACTIVE MODEL:</span>
-              <span className="text-[#2563EB] font-bold">{currentModel?.name || 'YOLOv11 Extra Large'}</span>
+              <span className="text-[#2563EB] font-bold">{currentModel?.display_name || currentModel?.model_name || (currentModel as any)?.name || 'YOLOv11 Extra Large'}</span>
             </div>
             <div className="flex justify-between text-[#888]">
               <span>MODEL WEIGHTS:</span>
