@@ -314,11 +314,11 @@ async def execute_video_processing_task(
 
             await send_ws_update("Extracting Frames", 35, f"FastAPI WS: Slicing frames with frame_skip={frame_skip}...")
 
-            # Extract frames generator with frame skip
+            # Extract frames generator with optimized fast decoding
             frame_gen = processor.extract_frames_generator(
                 frame_skip=frame_skip,
-                enable_histogram_eq=enable_histogram_equalization,
-                enable_gaussian_blur=enable_gaussian_blur
+                enable_histogram_eq=False,
+                enable_gaussian_blur=False
             )
 
             await send_ws_update("Running YOLO", 50, "FastAPI WS: Executing YOLO damage detection inference...")
@@ -573,8 +573,16 @@ async def execute_video_processing_task(
                 if video_writer:
                     video_writer.write(annotated_img)
 
-                # Encode Frame to Base64 for Live UI Stream
-                _, buffer = cv2.imencode('.jpg', annotated_img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                # Ultra-fast live UI streaming image encoding:
+                # Downscale preview to 960px width max for low latency and zero network packet bloat
+                stream_img = annotated_img
+                if processor.width > 960:
+                    scale = 960.0 / float(processor.width)
+                    stream_w = 960
+                    stream_h = int(processor.height * scale)
+                    stream_img = cv2.resize(annotated_img, (stream_w, stream_h), interpolation=cv2.INTER_LINEAR)
+
+                _, buffer = cv2.imencode('.jpg', stream_img, [cv2.IMWRITE_JPEG_QUALITY, 68])
                 base64_str = base64.b64encode(buffer).decode('utf-8')
                 frame_base64 = f"data:image/jpeg;base64,{base64_str}"
 

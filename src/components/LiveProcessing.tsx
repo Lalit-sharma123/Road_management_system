@@ -102,6 +102,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [timelineEvents, setTimelineEvents] = useState<LiveDetectionItem[]>([]);
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<LiveDetectionItem | null>(null);
 
+  // Live Traffic Violations (No Helmet on Bike)
+  const [liveViolations, setLiveViolations] = useState<any[]>([]);
+  const [selectedViolation, setSelectedViolation] = useState<any | null>(null);
+  const [activeSideTab, setActiveSideTab] = useState<'counters' | 'violations' | 'map'>('counters');
+
   // Performance telemetry
   const [fps, setFps] = useState<number>(30);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
@@ -636,6 +641,37 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
             setTimelineEvents((prev) => [...newItems, ...prev.slice(0, 49)]);
           }
+
+          // Update live traffic violations from frame payload
+          if (Array.isArray(msg.violations) && msg.violations.length > 0) {
+            setLiveViolations(msg.violations);
+            setHelmetViolationsCount(msg.violations.length);
+          } else if (Array.isArray(msg.latest_violations) && msg.latest_violations.length > 0) {
+            setLiveViolations((prev) => {
+              const ids = new Set(prev.map(v => v.id || v.challan_number));
+              const combined = [...prev];
+              for (const v of msg.latest_violations) {
+                if (!ids.has(v.id || v.challan_number)) {
+                  combined.unshift(v);
+                  ids.add(v.id || v.challan_number);
+                }
+              }
+              return combined;
+            });
+          }
+        }
+
+        // Direct violation event
+        if (msg.type === 'violation' && msg.violation) {
+          setLiveViolations((prev) => {
+            const v = msg.violation;
+            const exists = prev.some(item => item.id === v.id || item.challan_number === v.challan_number);
+            if (!exists) {
+              setHelmetViolationsCount((c) => c + 1);
+              return [v, ...prev];
+            }
+            return prev;
+          });
         }
 
         // Completion Handling
@@ -1177,124 +1213,302 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         </div>
 
         {/* Right Telemetry & Live Counters */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Category Summary Cards */}
-          <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-3">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center justify-between border-b border-[#2A2A2A] pb-2">
-              <span className="flex items-center gap-1.5">
-                <BarChart2 className="w-4 h-4 text-[#FF3B30]" />
-                Live Multi-Model Counters
+        <div className="lg:col-span-4 space-y-4">
+          {/* Multi-Model Active Architecture Panel */}
+          <div className="bg-[#141414] border border-[#2A2A2A] p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#888] border-b border-[#2A2A2A] pb-1.5">
+              <span className="flex items-center gap-1.5 text-white">
+                <Layers className="w-3.5 h-3.5 text-[#2563EB]" />
+                Active Multi-Model Pipeline
               </span>
-              <span className="text-[#2563EB] font-mono font-bold">{totalDetectionsCount + vehicleCount + numberPlateCount} TOTAL</span>
-            </h3>
+              <span className="text-[#34C759] font-mono text-[9px]">4× MODELS LOADED</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+              <div className="bg-[#181818] p-1.5 border border-[#FF3B30]/30 rounded flex items-center justify-between">
+                <span className="text-[#FF3B30] font-bold">best.pt</span>
+                <span className="text-[9px] text-[#888]">Road Damage</span>
+              </div>
+              <div className="bg-[#181818] p-1.5 border border-[#2563EB]/30 rounded flex items-center justify-between">
+                <span className="text-[#60A5FA] font-bold">yolov8n.pt</span>
+                <span className="text-[9px] text-[#888]">Vehicles/Rider</span>
+              </div>
+              <div className="bg-[#181818] p-1.5 border border-[#FFD60A]/30 rounded flex items-center justify-between">
+                <span className="text-[#FFD60A] font-bold">helmet.pt</span>
+                <span className="text-[9px] text-[#888]">Helmet Safety</span>
+              </div>
+              <div className="bg-[#181818] p-1.5 border border-[#34C759]/30 rounded flex items-center justify-between">
+                <span className="text-[#34C759] font-bold">numberplate.pt</span>
+                <span className="text-[9px] text-[#888]">Plate ANPR</span>
+              </div>
+            </div>
+          </div>
 
-            {/* Damage Counters */}
-            <div className="space-y-1">
-              <p className="text-[10px] text-[#FF3B30] font-bold uppercase flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#FF3B30]" /> Road Damage Defects ({roadDamageCount || totalDetectionsCount})
-              </p>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
-                  <span className="text-[#AAA]">Potholes</span>
-                  <span className="text-[#FF3B30] font-bold font-mono">{potholeCount}</span>
+          {/* Tab Switcher for Sidebar */}
+          <div className="flex items-center bg-[#141414] border border-[#2A2A2A] p-1">
+            <button
+              onClick={() => setActiveSideTab('counters')}
+              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
+                activeSideTab === 'counters'
+                  ? 'bg-[#2563EB] text-white shadow'
+                  : 'text-[#888] hover:text-white'
+              }`}
+            >
+              Telemetry
+            </button>
+            <button
+              onClick={() => setActiveSideTab('violations')}
+              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center flex items-center justify-center gap-1.5 ${
+                activeSideTab === 'violations'
+                  ? 'bg-[#FF3B30] text-white shadow'
+                  : 'text-[#FF3B30]/80 hover:text-[#FF3B30]'
+              }`}
+            >
+              <span>Violations</span>
+              <span className="bg-black/40 px-1.5 py-0.2 rounded text-[9px]">
+                {liveViolations.length || helmetViolationsCount}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveSideTab('map')}
+              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
+                activeSideTab === 'map'
+                  ? 'bg-[#2563EB] text-white shadow'
+                  : 'text-[#888] hover:text-white'
+              }`}
+            >
+              GPS Map
+            </button>
+          </div>
+
+          {/* Tab 1: Counters & Telemetry */}
+          {activeSideTab === 'counters' && (
+            <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-3">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center justify-between border-b border-[#2A2A2A] pb-2">
+                <span className="flex items-center gap-1.5">
+                  <BarChart2 className="w-4 h-4 text-[#FF3B30]" />
+                  Live Multi-Model Counters
+                </span>
+                <span className="text-[#2563EB] font-mono font-bold">{totalDetectionsCount + vehicleCount + numberPlateCount} TOTAL</span>
+              </h3>
+
+              {/* Damage Counters */}
+              <div className="space-y-1">
+                <p className="text-[10px] text-[#FF3B30] font-bold uppercase flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[#FF3B30]" /> Road Damage Defects ({roadDamageCount || totalDetectionsCount})
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
+                    <span className="text-[#AAA]">Potholes</span>
+                    <span className="text-[#FF3B30] font-bold font-mono">{potholeCount}</span>
+                  </div>
+                  <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
+                    <span className="text-[#AAA]">Cracks</span>
+                    <span className="text-[#FF9500] font-bold font-mono">{crackCount}</span>
+                  </div>
+                  <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
+                    <span className="text-[#AAA]">Broken Road</span>
+                    <span className="text-[#FFD60A] font-bold font-mono">{brokenRoadCount}</span>
+                  </div>
+                  <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
+                    <span className="text-[#AAA]">Missing Asphalt</span>
+                    <span className="text-[#34C759] font-bold font-mono">{missingAsphaltCount}</span>
+                  </div>
                 </div>
-                <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
-                  <span className="text-[#AAA]">Cracks</span>
-                  <span className="text-[#FF9500] font-bold font-mono">{crackCount}</span>
+              </div>
+
+              {/* Vehicles, Helmets & Plates Counters */}
+              <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#2A2A2A]">
+                <div className="bg-[#1A1A1A] p-2 border border-[#2563EB]/40 flex justify-between items-center">
+                  <span className="text-[#2563EB] font-bold text-[10px] uppercase flex items-center gap-1">
+                    <Car className="w-3.5 h-3.5 text-[#2563EB]" />
+                    Vehicles
+                  </span>
+                  <span className="text-[#2563EB] font-bold font-mono text-sm">{vehicleCount}</span>
                 </div>
-                <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
-                  <span className="text-[#AAA]">Broken Road</span>
-                  <span className="text-[#FFD60A] font-bold font-mono">{brokenRoadCount}</span>
+
+                <div className="bg-[#1A1A1A] p-2 border border-[#FFD60A]/40 flex justify-between items-center">
+                  <span className="text-[#FFD60A] font-bold text-[10px] uppercase flex items-center gap-1">
+                    <Zap className="w-3.5 h-3.5 text-[#FFD60A]" />
+                    Helmets
+                  </span>
+                  <span className="text-[#FFD60A] font-bold font-mono text-sm">{helmetCount}</span>
                 </div>
-                <div className="bg-[#1A1A1A] p-2 border border-[#2A2A2A] flex justify-between items-center">
-                  <span className="text-[#AAA]">Missing Asphalt</span>
-                  <span className="text-[#34C759] font-bold font-mono">{missingAsphaltCount}</span>
+
+                <div className="bg-[#1A1A1A] p-2 border border-[#34C759]/40 flex justify-between items-center">
+                  <span className="text-[#34C759] font-bold text-[10px] uppercase flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-[#34C759]" />
+                    Plates
+                  </span>
+                  <span className="text-[#34C759] font-bold font-mono text-sm">{numberPlateCount}</span>
+                </div>
+              </div>
+
+              {/* Violations Count Alert Card */}
+              {(helmetViolationsCount > 0 || liveViolations.length > 0) && (
+                <div 
+                  onClick={() => setActiveSideTab('violations')}
+                  className="bg-[#FF3B30]/15 border border-[#FF3B30] p-2.5 flex items-center justify-between cursor-pointer hover:bg-[#FF3B30]/25 transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-[#FF3B30] animate-bounce" />
+                    <div>
+                      <p className="text-[#FF3B30] font-bold text-xs uppercase">No-Helmet Violations Recorded</p>
+                      <p className="text-[10px] text-[#AAA]">Click to view vehicle snapshots & license plates</p>
+                    </div>
+                  </div>
+                  <span className="bg-[#FF3B30] text-white px-2 py-0.5 rounded font-mono font-bold text-xs">
+                    {liveViolations.length || helmetViolationsCount}
+                  </span>
+                </div>
+              )}
+
+              {/* Road Health Score Gauge */}
+              <div className="bg-[#1A1A1A] border border-[#2A2A2A] p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] text-[#888] uppercase">Road Health Score</p>
+                  <p className="text-sm font-bold text-white">{roadHealth} / 100</p>
+                </div>
+                <div className={`px-2.5 py-1 text-[10px] font-bold uppercase border ${
+                  roadHealth > 75 ? 'bg-[#34C759]/20 text-[#34C759] border-[#34C759]' : 'bg-[#FF3B30]/20 text-[#FF3B30] border-[#FF3B30]'
+                }`}>
+                  {roadHealth > 75 ? 'GOOD / FAIR' : 'CRITICAL DAMAGE'}
                 </div>
               </div>
             </div>
+          )}
 
-            {/* Vehicles, Helmets & Plates Counters */}
-            <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#2A2A2A]">
-              <div className="bg-[#1A1A1A] p-2 border border-[#2563EB]/40 flex justify-between items-center">
-                <span className="text-[#2563EB] font-bold text-[10px] uppercase flex items-center gap-1">
-                  <Car className="w-3.5 h-3.5 text-[#2563EB]" />
-                  Vehicles
-                </span>
-                <span className="text-[#2563EB] font-bold font-mono text-sm">{vehicleCount}</span>
-              </div>
-
-              <div className="bg-[#1A1A1A] p-2 border border-[#FFD60A]/40 flex justify-between items-center">
-                <span className="text-[#FFD60A] font-bold text-[10px] uppercase flex items-center gap-1">
-                  <Zap className="w-3.5 h-3.5 text-[#FFD60A]" />
-                  Helmets
-                </span>
-                <span className="text-[#FFD60A] font-bold font-mono text-sm">{helmetCount}</span>
-              </div>
-
-              <div className="bg-[#1A1A1A] p-2 border border-[#34C759]/40 flex justify-between items-center">
-                <span className="text-[#34C759] font-bold text-[10px] uppercase flex items-center gap-1">
-                  <FileText className="w-3.5 h-3.5 text-[#34C759]" />
-                  Plates
-                </span>
-                <span className="text-[#34C759] font-bold font-mono text-sm">{numberPlateCount}</span>
-              </div>
-            </div>
-
-            {/* Violations Count Card */}
-            {helmetViolationsCount > 0 && (
-              <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/40 p-2.5 flex items-center justify-between">
-                <span className="text-[#FF3B30] font-bold text-xs uppercase flex items-center gap-1.5">
+          {/* Tab 2: Live Violations Captured Stream (Bike Rider No-Helmet + Vehicle License Plate) */}
+          {activeSideTab === 'violations' && (
+            <div className="bg-[#141414] border border-[#FF3B30]/40 p-3 space-y-3">
+              <div className="flex items-center justify-between border-b border-[#2A2A2A] pb-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#FF3B30] uppercase">
                   <ShieldAlert className="w-4 h-4 text-[#FF3B30]" />
-                  Safety Violations
+                  <span>Traffic Violations Stream ({liveViolations.length})</span>
+                </div>
+                <button
+                  onClick={() => onNavigate('violations')}
+                  className="text-[10px] font-mono text-[#60A5FA] hover:underline"
+                >
+                  Manage Challans →
+                </button>
+              </div>
+
+              {liveViolations.length === 0 ? (
+                <div className="p-6 text-center text-[#666] text-xs space-y-2">
+                  <ShieldAlert className="w-8 h-8 mx-auto text-[#444]" />
+                  <p>No helmet violations detected so far.</p>
+                  <p className="text-[10px] text-[#555]">Motorcycle riders without helmets will be recorded here with vehicle number plate & image snapshot.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  {liveViolations.map((v, idx) => (
+                    <div 
+                      key={v.id || idx}
+                      className="bg-[#181818] border border-[#FF3B30]/30 hover:border-[#FF3B30] p-2.5 transition-all space-y-2"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="bg-[#FF3B30] text-white text-[9px] font-bold px-1.5 py-0.5 uppercase tracking-wider font-mono">
+                          NO HELMET DETECTED
+                        </span>
+                        <span className="text-[#FFD60A] font-mono font-bold text-[10px]">
+                          ₹{v.fine_amount || 1000} FINE
+                        </span>
+                      </div>
+
+                      {/* Evidence Images */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Vehicle + Rider Snapshot */}
+                        <div className="relative aspect-video bg-black border border-[#333] overflow-hidden rounded">
+                          {v.evidence_image_url || v.evidence_image_base64 || v.vehicle_image_url ? (
+                            <img 
+                              src={v.evidence_image_url || v.evidence_image_base64 || v.vehicle_image_url} 
+                              alt="Vehicle Snapshot" 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[9px] text-[#666]">
+                              Vehicle Snapshot
+                            </div>
+                          )}
+                          <span className="absolute bottom-1 left-1 bg-black/80 text-[8px] text-white px-1 font-mono">
+                            Vehicle Crop
+                          </span>
+                        </div>
+
+                        {/* License Plate Crop */}
+                        <div className="relative aspect-video bg-black border border-[#333] overflow-hidden rounded flex items-center justify-center">
+                          {v.plate_crop_url || v.plate_crop_base64 ? (
+                            <img 
+                              src={v.plate_crop_url || v.plate_crop_base64} 
+                              alt="Plate Crop" 
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <div className="text-center p-1">
+                              <span className="text-[10px] font-mono font-bold text-[#34C759] tracking-wider block">
+                                {v.license_plate_number || 'DL 01 AB 1234'}
+                              </span>
+                              <span className="text-[8px] text-[#888]">ANPR OCR</span>
+                            </div>
+                          )}
+                          <span className="absolute bottom-1 right-1 bg-black/80 text-[8px] text-[#34C759] px-1 font-mono font-bold">
+                            {v.license_plate_number || 'DETECTED'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Details & Actions */}
+                      <div className="flex items-center justify-between text-[10px] text-[#888] font-mono pt-1 border-t border-[#222]">
+                        <div>
+                          <p className="text-white font-bold">{v.license_plate_number || 'PLATE_PENDING'}</p>
+                          <p className="text-[9px]">{v.challan_number || `ECH-2026-${idx+1}`}</p>
+                        </div>
+                        <button
+                          onClick={() => onNavigate('violations')}
+                          className="px-2 py-1 bg-[#2563EB] text-white text-[9px] font-bold uppercase hover:bg-blue-600 rounded"
+                        >
+                          Print E-Challan
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 3: Live Vehicle GPS Map */}
+          {activeSideTab === 'map' && (
+            <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-3">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-[#2A2A2A] pb-2 flex justify-between items-center">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-[#2563EB]" />
+                  Live Vehicle GPS Map
                 </span>
-                <span className="text-[#FF3B30] font-mono font-bold text-sm">{helmetViolationsCount}</span>
-              </div>
-            )}
+                <span className="text-[10px] text-[#34C759]">TRACKING</span>
+              </h3>
 
-            {/* Road Health Score Gauge */}
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] p-3 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] text-[#888] uppercase">Road Health Score</p>
-                <p className="text-sm font-bold text-white">{roadHealth} / 100</p>
-              </div>
-              <div className={`px-2.5 py-1 text-[10px] font-bold uppercase border ${
-                roadHealth > 75 ? 'bg-[#34C759]/20 text-[#34C759] border-[#34C759]' : 'bg-[#FF3B30]/20 text-[#FF3B30] border-[#FF3B30]'
-              }`}>
-                {roadHealth > 75 ? 'GOOD / FAIR' : 'CRITICAL DAMAGE'}
+              <div 
+                ref={mapContainerRef} 
+                className="w-full h-48 bg-[#0D0D0D] border border-[#2A2A2A] relative overflow-hidden" 
+              />
+
+              <div className="flex justify-between items-center text-[10px] text-[#888]">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[#FF3B30]" /> Critical
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[#FF9500]" /> High
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[#FFD60A]" /> Medium
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[#34C759]" /> Vehicle Route
+                </span>
               </div>
             </div>
-          </div>
-
-          {/* Interactive Leaflet GPS Map */}
-          <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-3">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-[#2A2A2A] pb-2 flex justify-between items-center">
-              <span className="flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-[#2563EB]" />
-                Live Vehicle GPS Map
-              </span>
-              <span className="text-[10px] text-[#34C759]">TRACKING</span>
-            </h3>
-
-            <div 
-              ref={mapContainerRef} 
-              className="w-full h-48 bg-[#0D0D0D] border border-[#2A2A2A] relative overflow-hidden" 
-            />
-
-            <div className="flex justify-between items-center text-[10px] text-[#888]">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#FF3B30]" /> Critical
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#FF9500]" /> High
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#FFD60A]" /> Medium
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#34C759]" /> Vehicle Route
-              </span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 

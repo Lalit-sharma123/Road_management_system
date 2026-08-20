@@ -199,12 +199,18 @@ class YOLODamageDetector:
         try:
             from ultralytics import YOLO
 
+            # Detect compute device
+            import torch
+            device = "cuda:0" if torch.cuda.is_available() and getattr(settings, "USE_CUDA_IF_AVAILABLE", True) else "cpu"
+            self.device = device
+
             # 1. Road Damage Model (best.pt)
             best_path = Path(self.model_path) if self.model_path and Path(self.model_path).is_file() else settings.resolve_model_path(settings.DAMAGE_MODEL_NAME)
             if best_path.is_file():
                 try:
                     self.damage_model = YOLO(str(best_path))
-                    print(f"[YOLO Engine] Loaded Road Damage model from: {best_path}")
+                    self.damage_model.to(device)
+                    print(f"[YOLO Engine] Loaded Road Damage model ({best_path}) on {device}")
                 except Exception as e:
                     print(f"[YOLO Engine] Notice loading damage model '{best_path}': {e}")
                     self.damage_model = None
@@ -217,7 +223,8 @@ class YOLODamageDetector:
             if veh_path.is_file():
                 try:
                     self.vehicle_model = YOLO(str(veh_path))
-                    print(f"[YOLO Engine] Loaded Vehicle Detection model from: {veh_path}")
+                    self.vehicle_model.to(device)
+                    print(f"[YOLO Engine] Loaded Vehicle Detection model ({veh_path}) on {device}")
                 except Exception as ve:
                     print(f"[YOLO Engine] Notice loading vehicle model '{veh_path}': {ve}")
                     self.vehicle_model = None
@@ -225,7 +232,7 @@ class YOLODamageDetector:
                 print(f"[YOLO Engine] Vehicle model weights '{veh_path}' not found on disk.")
                 self.vehicle_model = None
 
-            # 3. Helmet Model (helmet.pt / helmet_numberplate.pt)
+            # 3. Helmet Model (helmet.pt)
             helmet_path = settings.resolve_model_path(getattr(settings, "HELMET_MODEL_NAME", "helmet.pt"))
             if not helmet_path.is_file():
                 helmet_path = settings.resolve_model_path("helmet_numberplate.pt")
@@ -233,7 +240,8 @@ class YOLODamageDetector:
             if helmet_path.is_file():
                 try:
                     self.helmet_model = YOLO(str(helmet_path))
-                    print(f"[YOLO Engine] Loaded Helmet model from: {helmet_path}")
+                    self.helmet_model.to(device)
+                    print(f"[YOLO Engine] Loaded Helmet model ({helmet_path}) on {device}")
                 except Exception as he:
                     print(f"[YOLO Engine] Notice loading helmet model '{helmet_path}': {he}")
                     self.helmet_model = None
@@ -241,7 +249,7 @@ class YOLODamageDetector:
                 print(f"[YOLO Engine] Helmet model weights not found in weights directory.")
                 self.helmet_model = None
 
-            # 4. Number Plate Model (numberplate.pt / helmet_numberplate.pt)
+            # 4. Number Plate Model (numberplate.pt)
             plate_path = settings.resolve_model_path(getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate.pt"))
             if not plate_path.is_file():
                 plate_path = settings.resolve_model_path("helmet_numberplate.pt")
@@ -249,7 +257,8 @@ class YOLODamageDetector:
             if plate_path.is_file():
                 try:
                     self.plate_model = YOLO(str(plate_path))
-                    print(f"[YOLO Engine] Loaded Plate model from: {plate_path}")
+                    self.plate_model.to(device)
+                    print(f"[YOLO Engine] Loaded Plate model ({plate_path}) on {device}")
                 except Exception as pe:
                     print(f"[YOLO Engine] Notice loading plate model '{plate_path}': {pe}")
                     self.plate_model = None
@@ -280,6 +289,8 @@ class YOLODamageDetector:
                 source=frame,
                 conf=conf_threshold,
                 iou=iou_threshold,
+                imgsz=640,
+                half=(getattr(self, "device", "cpu") != "cpu"),
                 verbose=False
             )
             dt_ms = (time.perf_counter() - t0) * 1000.0
@@ -345,6 +356,8 @@ class YOLODamageDetector:
                 conf=conf_threshold,
                 iou=iou_threshold,
                 classes=[0, 1, 2, 3, 5, 7],
+                imgsz=640,
+                half=(getattr(self, "device", "cpu") != "cpu"),
                 verbose=False
             )
             dt_ms = (time.perf_counter() - t0) * 1000.0

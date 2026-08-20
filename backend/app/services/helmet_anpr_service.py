@@ -368,13 +368,15 @@ class HelmetANPRService:
                     "confidence": moto.get("confidence", 0.88)
                 }
 
-            # 2. Check helmet compliance (STEP 3: helmet.pt on rider ROI)
+            # 2. Check helmet compliance: Execute helmet.pt on rider ROI
             r_head_y1 = max(0, int(matched_rider["y_min"]))
             r_head_y2 = min(h, int(r_head_y1 + (float(matched_rider["y_max"]) - r_head_y1) * 0.45))
             r_head_x1 = max(0, int(matched_rider["x_min"]))
             r_head_x2 = min(w, int(matched_rider["x_max"]))
 
             has_helmet = False
+
+            # Check full-frame helmet detections intersection
             for h_det in helmets:
                 hx1, hy1 = float(h_det.get("x_min", 0)), float(h_det.get("y_min", 0))
                 hx2, hy2 = float(h_det.get("x_max", w)), float(h_det.get("y_max", h))
@@ -386,15 +388,47 @@ class HelmetANPRService:
                     has_helmet = True
                     break
 
-            # 🛑 NO HELMET DETECTED -> Trigger License Plate Detection (STEP 4: numberplate.pt on vehicle ROI) & OCR
+            # Execute dedicated helmet.pt model on cropped rider head ROI
+            if not has_helmet and (r_head_y2 > r_head_y1 and r_head_x2 > r_head_x1):
+                try:
+                    from app.services.camera_manager import detector_instance
+                    rider_crop = raw_frame[r_head_y1:r_head_y2, r_head_x1:r_head_x2]
+                    if detector_instance and rider_crop.size > 0:
+                        h_status, h_conf, _ = detector_instance.infer_helmet_on_rider_roi(rider_crop)
+                        if h_status == "helmet":
+                            has_helmet = True
+                except Exception as he:
+                    print(f"Notice in helmet.pt ROI inference: {he}")
+
+            # 🛑 NO HELMET DETECTED -> Trigger License Plate Detection (numberplate.pt on vehicle ROI) & ANPR OCR
             if not has_helmet:
                 matched_plate_bbox = None
-                for p in plates:
-                    px1, py1 = float(p.get("x_min", 0)), float(p.get("y_min", 0))
-                    px2, py2 = float(p.get("x_max", w)), float(p.get("y_max", h))
-                    if px1 >= (m_x1 - 50) and px2 <= (m_x2 + 50):
-                        matched_plate_bbox = p
-                        break
+
+                # Check if numberplate.pt was run on motorcycle crop
+                try:
+                    from app.services.camera_manager import detector_instance
+                    moto_crop = raw_frame[int(m_y1):int(m_y2), int(m_x1):int(m_x2)]
+                    if detector_instance and moto_crop.size > 0:
+                        p_found, p_conf, p_rel = detector_instance.infer_plate_on_vehicle_roi(moto_crop)
+                        if p_found and p_rel:
+                            matched_plate_bbox = {
+                                "x_min": m_x1 + p_rel["x_min"],
+                                "y_min": m_y1 + p_rel["y_min"],
+                                "x_max": m_x1 + p_rel["x_max"],
+                                "y_max": m_y1 + p_rel["y_max"],
+                                "confidence": p_conf
+                            }
+                except Exception as pe:
+                    print(f"Notice in numberplate.pt ROI inference: {pe}")
+
+                # Check full-frame plate detections fallback
+                if not matched_plate_bbox:
+                    for p in plates:
+                        px1, py1 = float(p.get("x_min", 0)), float(p.get("y_min", 0))
+                        px2, py2 = float(p.get("x_max", w)), float(p.get("y_max", h))
+                        if px1 >= (m_x1 - 50) and px2 <= (m_x2 + 50):
+                            matched_plate_bbox = p
+                            break
 
                 if not matched_plate_bbox:
                     matched_plate_bbox = {
