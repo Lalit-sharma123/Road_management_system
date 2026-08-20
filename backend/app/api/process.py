@@ -580,15 +580,22 @@ async def execute_video_processing_task(
 
                 formatted_detections = []
                 for det in frame_detections:
+                    x1 = int(det.get("x_min", 0))
+                    y1 = int(det.get("y_min", 0))
+                    x2 = int(det.get("x_max", 0))
+                    y2 = int(det.get("y_max", 0))
                     formatted_detections.append({
                         "category": det["category"],
                         "type": det.get("type", "damage"),
                         "confidence": round(float(det["confidence"]), 2),
-                        "severity": det["severity"].upper(),
-                        "x_min": int(det["x_min"]),
-                        "y_min": int(det["y_min"]),
-                        "x_max": int(det["x_max"]),
-                        "y_max": int(det["y_max"])
+                        "severity": det.get("severity", "high").upper(),
+                        "x_min": x1,
+                        "y_min": y1,
+                        "x_max": x2,
+                        "y_max": y2,
+                        "box": [x1, y1, x2, y2],
+                        "width": max(0, x2 - x1),
+                        "height": max(0, y2 - y1)
                     })
 
                 base_lat = 28.4595 + (frame_num * 0.00008)
@@ -607,6 +614,8 @@ async def execute_video_processing_task(
                     "stage": "Detecting",
                     "frame_number": frame_num,
                     "total_frames": total_expected_frames,
+                    "frame_width": int(processor.width or 1280),
+                    "frame_height": int(processor.height or 720),
                     "timestamp": round(float(timestamp_sec), 2),
                     "elapsed_time": round(float(timestamp_sec), 2),
                     "eta_seconds": eta_sec,

@@ -22,12 +22,19 @@ import {
   Car,
   FileText,
   Download,
-  FileCheck
+  FileCheck,
+  Eye,
+  EyeOff,
+  SlidersHorizontal,
+  Info,
+  X,
+  Target
 } from 'lucide-react';
 import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
 import { videoService } from '../services/videoService';
 import { apiClient } from '../services/apiClient';
+import { DetectionSvgOverlay, OverlayDetection } from './DetectionSvgOverlay';
 
 interface LiveDetectionItem {
   id: string;
@@ -98,6 +105,21 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   // Performance telemetry
   const [fps, setFps] = useState<number>(30);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  // SVG-based Bounding Box Overlay State
+  const [currentFrameDetections, setCurrentFrameDetections] = useState<OverlayDetection[]>([]);
+  const [frameWidth, setFrameWidth] = useState<number>(1280);
+  const [frameHeight, setFrameHeight] = useState<number>(720);
+  const [enableSvgOverlay, setEnableSvgOverlay] = useState<boolean>(true);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
+  const [showConfidence, setShowConfidence] = useState<boolean>(true);
+  const [showSeverity, setShowSeverity] = useState<boolean>(true);
+  const [showCornerBrackets, setShowCornerBrackets] = useState<boolean>(true);
+  const [showFill, setShowFill] = useState<boolean>(true);
+  const [overlayCategoryFilter, setOverlayCategoryFilter] = useState<string>('all');
+  const [minConfidenceThreshold, setMinConfidenceThreshold] = useState<number>(0.25);
+  const [selectedOverlayDetection, setSelectedOverlayDetection] = useState<OverlayDetection | null>(null);
+  const [showOverlayControls, setShowOverlayControls] = useState<boolean>(true);
 
   // Active Session Guard Ref
   const activeSessionIdRef = useRef<string | null>(null);
@@ -285,6 +307,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       if (data.vehicle_count !== undefined) setVehicleCount(data.vehicle_count);
       if (data.number_plate_count !== undefined) setNumberPlateCount(data.number_plate_count);
 
+      if (Array.isArray(data.detections)) {
+        setCurrentFrameDetections(data.detections);
+      }
+
       if (data.damage_by_type) {
         setPotholeCount(data.damage_by_type.pothole || 0);
         setCrackCount(
@@ -426,6 +452,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               activeSessionIdRef.current = msg.session_id;
             }
             setCurrentFrameUrl(null);
+            setCurrentFrameDetections([]);
+            setSelectedOverlayDetection(null);
             setFrameNumber(0);
             setProgress(0);
             setPotholeCount(0);
@@ -509,6 +537,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           }
           if (msg.timestamp !== undefined) {
             setTimestamp(msg.timestamp);
+          }
+          if (msg.frame_width) {
+            setFrameWidth(msg.frame_width);
+          }
+          if (msg.frame_height) {
+            setFrameHeight(msg.frame_height);
+          }
+          if (Array.isArray(msg.detections)) {
+            setCurrentFrameDetections(msg.detections);
           }
 
           // Live GPS update
@@ -932,14 +969,77 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             </div>
           </div>
 
-          {/* Main Frame Viewport */}
-          <div className="relative aspect-video bg-[#080808] flex items-center justify-center overflow-hidden">
+          {/* Main Frame Viewport with SVG Overlay */}
+          <div className="relative aspect-video bg-[#080808] flex items-center justify-center overflow-hidden group">
             {currentFrameUrl ? (
-              <img 
-                src={currentFrameUrl} 
-                alt="Live AI Frame Stream"
-                className="w-full h-full object-contain"
-              />
+              <div className="relative w-full h-full flex items-center justify-center">
+                <img 
+                  src={currentFrameUrl} 
+                  alt="Live AI Frame Stream"
+                  className="w-full h-full object-contain select-none"
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                      setFrameWidth(img.naturalWidth);
+                      setFrameHeight(img.naturalHeight);
+                    }
+                  }}
+                />
+
+                {/* SVG-based Dynamic Detection Overlay */}
+                {enableSvgOverlay && currentFrameDetections.length > 0 && (
+                  <DetectionSvgOverlay
+                    detections={currentFrameDetections}
+                    frameWidth={frameWidth}
+                    frameHeight={frameHeight}
+                    showLabels={showLabels}
+                    showConfidence={showConfidence}
+                    showSeverity={showSeverity}
+                    showCornerBrackets={showCornerBrackets}
+                    showFill={showFill}
+                    filterCategory={overlayCategoryFilter}
+                    minConfidence={minConfidenceThreshold}
+                    selectedDetectionId={selectedOverlayDetection?.id || null}
+                    onSelectDetection={(det) => setSelectedOverlayDetection(det)}
+                  />
+                )}
+
+                {/* Active Detection Inspector Overlay Pill */}
+                {selectedOverlayDetection && (
+                  <div className="absolute bottom-3 left-3 right-3 bg-[#111111]/95 backdrop-blur-md border border-[#2563EB] p-2.5 z-30 shadow-2xl flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded bg-[#2563EB]/20 border border-[#2563EB] flex items-center justify-center text-[#2563EB] font-bold">
+                        <Target className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white uppercase tracking-wider font-mono">
+                            {selectedOverlayDetection.category?.toUpperCase() || 'DETECTION'}
+                          </span>
+                          <span className="bg-[#2563EB] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
+                            {Math.round((selectedOverlayDetection.confidence || 0.85) * 100)}% CONF
+                          </span>
+                          {selectedOverlayDetection.severity && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#FF3B30]/20 text-[#FF3B30] border border-[#FF3B30]/40">
+                              {selectedOverlayDetection.severity.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-[#888] font-mono mt-0.5">
+                          BBOX: [{Math.round(selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0))}, {Math.round(selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0))}, {Math.round(selectedOverlayDetection.x_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[2] : 0))}, {Math.round(selectedOverlayDetection.y_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[3] : 0))}]
+                          {selectedOverlayDetection.width ? ` // DIM: ${Math.round(selectedOverlayDetection.width)}×${Math.round(selectedOverlayDetection.height || 0)}px` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedOverlayDetection(null)}
+                      className="p-1 text-[#888] hover:text-white hover:bg-[#222] transition-all rounded"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-8 text-center space-y-3">
                 <Activity className="w-12 h-12 text-[#2563EB] animate-spin" />
@@ -948,11 +1048,106 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               </div>
             )}
 
-            {/* Reticle Graphics */}
-            <div className="absolute top-4 left-4 border-l-2 border-t-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80" />
-            <div className="absolute top-4 right-4 border-r-2 border-t-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80" />
-            <div className="absolute bottom-4 left-4 border-l-2 border-b-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80" />
-            <div className="absolute bottom-4 right-4 border-r-2 border-b-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80" />
+            {/* Reticle Corner Graphics */}
+            <div className="absolute top-4 left-4 border-l-2 border-t-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80 z-20" />
+            <div className="absolute top-4 right-4 border-r-2 border-t-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80 z-20" />
+            <div className="absolute bottom-4 left-4 border-l-2 border-b-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80 z-20" />
+            <div className="absolute bottom-4 right-4 border-r-2 border-b-2 border-[#FF3B30] w-6 h-6 pointer-events-none opacity-80 z-20" />
+          </div>
+
+          {/* SVG Overlay HUD Interactive Controls Bar */}
+          <div className="bg-[#101010] border-t border-[#222] p-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            {/* Left: SVG Overlay Master Toggle & Category Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setEnableSvgOverlay(!enableSvgOverlay)}
+                className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider border flex items-center gap-1.5 transition-all font-mono ${
+                  enableSvgOverlay
+                    ? 'bg-[#2563EB]/20 text-[#60A5FA] border-[#2563EB] shadow-[0_0_8px_rgba(37,99,235,0.3)]'
+                    : 'bg-[#1A1A1A] text-[#666] border-[#333] hover:text-[#AAA]'
+                }`}
+                title="Toggle real-time SVG detection bounding box overlay"
+              >
+                {enableSvgOverlay ? <Eye className="w-3.5 h-3.5 text-[#60A5FA]" /> : <EyeOff className="w-3.5 h-3.5 text-[#666]" />}
+                <span>SVG HUD {enableSvgOverlay ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <div className="h-4 w-px bg-[#2A2A2A] mx-0.5" />
+
+              {/* Category Filter Chips */}
+              <div className="flex items-center gap-1 bg-[#161616] p-0.5 border border-[#2A2A2A] rounded">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'damage', label: 'Damage', color: 'text-[#FF3B30]' },
+                  { id: 'vehicle', label: 'Vehicles', color: 'text-[#00C2FF]' },
+                  { id: 'helmet', label: 'Helmets', color: 'text-[#FFD60A]' },
+                  { id: 'plate', label: 'Plates', color: 'text-[#34C759]' }
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setOverlayCategoryFilter(f.id)}
+                    className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded transition-all ${
+                      overlayCategoryFilter === f.id
+                        ? 'bg-[#2563EB] text-white shadow'
+                        : `text-[#888] hover:text-white ${f.color || ''}`
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Right: Graphic Elements Toggles & Confidence Filter */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowLabels(!showLabels)}
+                className={`px-2 py-0.5 text-[10px] font-mono font-bold border transition-all ${
+                  showLabels ? 'bg-[#1E293B] text-blue-300 border-blue-500/40' : 'bg-[#141414] text-[#666] border-[#2A2A2A]'
+                }`}
+                title="Toggle Category & Confidence Labels"
+              >
+                Labels {showLabels ? '✓' : '✗'}
+              </button>
+
+              <button
+                onClick={() => setShowCornerBrackets(!showCornerBrackets)}
+                className={`px-2 py-0.5 text-[10px] font-mono font-bold border transition-all ${
+                  showCornerBrackets ? 'bg-[#1E293B] text-blue-300 border-blue-500/40' : 'bg-[#141414] text-[#666] border-[#2A2A2A]'
+                }`}
+                title="Toggle HUD Reticle Corner Brackets"
+              >
+                Brackets {showCornerBrackets ? '✓' : '✗'}
+              </button>
+
+              <button
+                onClick={() => setShowFill(!showFill)}
+                className={`px-2 py-0.5 text-[10px] font-mono font-bold border transition-all ${
+                  showFill ? 'bg-[#1E293B] text-blue-300 border-blue-500/40' : 'bg-[#141414] text-[#666] border-[#2A2A2A]'
+                }`}
+                title="Toggle Box Semi-Transparent Fill"
+              >
+                Fill {showFill ? '✓' : '✗'}
+              </button>
+
+              {/* Confidence Threshold Slider */}
+              <div className="flex items-center gap-1.5 bg-[#161616] px-2 py-0.5 border border-[#2A2A2A] rounded">
+                <span className="text-[9px] text-[#888] font-mono uppercase">Conf:</span>
+                <input
+                  type="range"
+                  min="0.10"
+                  max="0.90"
+                  step="0.05"
+                  value={minConfidenceThreshold}
+                  onChange={(e) => setMinConfidenceThreshold(parseFloat(e.target.value))}
+                  className="w-14 h-1.5 accent-[#2563EB] cursor-pointer"
+                  title={`Minimum confidence threshold: ${(minConfidenceThreshold * 100).toFixed(0)}%`}
+                />
+                <span className="text-[10px] font-mono font-bold text-[#FFD60A] w-7 text-right">
+                  {(minConfidenceThreshold * 100).toFixed(0)}%
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Progress Bar & ETA Footer */}
