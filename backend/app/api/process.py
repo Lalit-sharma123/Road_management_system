@@ -23,6 +23,7 @@ from app.yolo.detector import YOLODamageDetector
 from app.services.severity_service import SeverityAnalysisService
 from app.services.gps_service import GPSExtractionService
 from app.services.helmet_anpr_service import HelmetANPRService
+from app.services.stolen_vehicle_service import StolenVehicleService
 from app.services.websocket_manager import ws_broadcaster
 from app.api.ws_routes import processing_progress_state
 from app.config.config import settings
@@ -521,6 +522,27 @@ async def execute_video_processing_task(
                         }
                         await ws_manager.broadcast(violation_ws_msg)
                         await ws_broadcaster.broadcast(violation_ws_msg)
+
+                        # Check for Stolen Vehicle Match in Real-Time (O(1) in-memory lookup)
+                        try:
+                            plate_num = v_data.get("license_plate_number")
+                            if plate_num:
+                                await StolenVehicleService.process_plate_detection(
+                                    plate_str=plate_num,
+                                    camera_id=v_data.get("camera_id") or "CAM-01",
+                                    camera_name="Highway ANPR Stream",
+                                    camera_location=v_data.get("location_name") or "National Highway 48",
+                                    latitude=v_data.get("latitude") or 28.4595,
+                                    longitude=v_data.get("longitude") or 77.0266,
+                                    vehicle_snapshot_url=v_data.get("evidence_image_url"),
+                                    plate_crop_url=v_data.get("plate_crop_url"),
+                                    ocr_confidence=v_data.get("confidence") or 0.95,
+                                    stream_id=video.id,
+                                    frame_number=frame_num,
+                                    db_session=db
+                                )
+                        except Exception as sv_err:
+                            print(f"Notice on Stolen Vehicle check: {sv_err}")
                 except Exception as viol_err:
                     print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
 

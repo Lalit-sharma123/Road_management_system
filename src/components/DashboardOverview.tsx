@@ -12,13 +12,16 @@ import {
   Truck,
   Bus,
   ShieldAlert,
+  AlertOctagon,
   Layers,
   Crosshair,
   Clock
 } from 'lucide-react';
 import { InspectionVideo, UserRole, TrafficViolation } from '../types/inspection';
+import { StolenVehicleAlert, StolenVehicleStats } from '../types/stolenVehicle';
 import { apiClient } from '../services/apiClient';
 import { violationService } from '../services/violationService';
+import { stolenVehicleService } from '../services/stolenVehicleService';
 import { YOLOModelMonitor } from './YOLOModelMonitor';
 
 interface DashboardSummaryData {
@@ -87,15 +90,26 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 }) => {
   const safeVideos = Array.isArray(videos) ? videos : [];
   const [summaryData, setSummaryData] = useState<DashboardSummaryData | null>(null);
+  const [stolenStats, setStolenStats] = useState<StolenVehicleStats | null>(null);
+  const [liveStolenAlerts, setLiveStolenAlerts] = useState<StolenVehicleAlert[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSummary = async () => {
     try {
-      const [dashRes, violStats] = await Promise.allSettled([
+      const [dashRes, violStats, stStats, stAlerts] = await Promise.allSettled([
         apiClient.get<DashboardSummaryData>('/dashboard/summary'),
-        violationService.getViolationStats()
+        violationService.getViolationStats(),
+        stolenVehicleService.getStats(),
+        stolenVehicleService.getLiveAlerts(5)
       ]);
+
+      if (stStats.status === 'fulfilled' && stStats.value) {
+        setStolenStats(stStats.value);
+      }
+      if (stAlerts.status === 'fulfilled' && Array.isArray(stAlerts.value)) {
+        setLiveStolenAlerts(stAlerts.value);
+      }
 
       let baseSummary: DashboardSummaryData = {
         total_inspections: safeVideos.length,
@@ -262,6 +276,47 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/30 p-3 text-xs font-mono text-[#FF3B30] flex items-center justify-between">
           <span>{error} Showing offline video metrics.</span>
           <button onClick={fetchSummary} className="underline uppercase hover:text-white">Retry</button>
+        </div>
+      )}
+
+      {/* Active Stolen Vehicle Live Intercept Banner (If any active alerts) */}
+      {stolenStats && stolenStats.active_alerts > 0 && (
+        <div className="bg-gradient-to-r from-red-950/80 via-rose-950/80 to-slate-950 border-2 border-red-500/60 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl shadow-red-950/30 font-mono">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-red-600 rounded-xl text-white animate-pulse">
+              <AlertOctagon className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/40">
+                  Critical Police Alert
+                </span>
+                <span className="text-xs text-slate-400">
+                  {stolenStats.active_alerts} ACTIVE STOLEN VEHICLE INTERCEPTS
+                </span>
+              </div>
+              <p className="text-sm font-bold text-white mt-0.5">
+                {liveStolenAlerts[0]
+                  ? `Plate ${liveStolenAlerts[0].vehicle_number} detected at ${liveStolenAlerts[0].camera_location || 'Corridor'}`
+                  : 'Stolen vehicle plates matched in live optical streams.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end md:self-center">
+            <button
+              onClick={() => onNavigate('stolen_alerts')}
+              className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
+            >
+              <AlertOctagon className="w-4 h-4" /> Open Stolen Alert Center
+            </button>
+            <button
+              onClick={() => onNavigate('stolen_registry')}
+              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-xl border border-slate-700 transition"
+            >
+              Registry
+            </button>
+          </div>
         </div>
       )}
 

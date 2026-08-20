@@ -331,3 +331,120 @@ class TrafficViolation(Base):
     )
 
 
+class StolenVehicle(Base):
+    """
+    Stolen Vehicle Registry:
+    Centralized database of stolen, flagged, and wanted motor vehicles for real-time ANPR matching.
+    """
+    __tablename__ = "stolen_vehicles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    vehicle_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)  # Normalized uppercase
+    owner_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    vehicle_type: Mapped[str] = mapped_column(String(50), default="CAR", nullable=False)  # CAR, MOTORCYCLE, SCOOTER, TRUCK, BUS, SUV, VAN
+    fir_number: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    police_station: Mapped[str] = mapped_column(String(255), nullable=False)
+    date_reported: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(String(255), default="Vehicle Theft", nullable=False)  # Theft, Robbery, Hit & Run, Kidnapping, Carjacking
+    priority: Mapped[str] = mapped_column(String(50), default="HIGH", index=True, nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", index=True, nullable=False)  # ACTIVE, RECOVERED
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+class StolenVehicleAlert(Base):
+    """
+    Real-Time Stolen Vehicle Detection Alert Records:
+    Instant logs generated when an ANPR OCR plate matches the Stolen Vehicle Registry.
+    """
+    __tablename__ = "stolen_vehicle_alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    stolen_vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stolen_vehicles.id", ondelete="SET NULL"), nullable=True)
+    vehicle_number: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    owner_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    fir_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    camera_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True)
+    camera_name: Mapped[Optional[str]] = mapped_column(String(255), default="Surveillance Camera", nullable=True)
+    camera_location: Mapped[Optional[str]] = mapped_column(String(255), default="Highway Junction", nullable=True)
+    latitude: Mapped[float] = mapped_column(Float, default=28.4595, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, default=77.0266, nullable=False)
+    
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    
+    vehicle_snapshot_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vehicle_snapshot_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plate_crop_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plate_crop_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    ocr_text: Mapped[str] = mapped_column(String(100), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.95, nullable=False)
+    
+    stream_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    frame_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tracking_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", index=True, nullable=False)  # ACTIVE, INVESTIGATING, INTERCEPTED, RESOLVED, FALSE_POSITIVE
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+class NotificationLog(Base):
+    """
+    Audit and Dispatch Log for Multi-Channel Stolen Vehicle Alert Notifications:
+    Supports Dashboard, Browser, Sound, SMS, WhatsApp, Email, and Push Notifications.
+    """
+    __tablename__ = "notification_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    alert_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stolen_vehicle_alerts.id", ondelete="CASCADE"), nullable=True)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)  # DASHBOARD, BROWSER, SOUND, SMS, WHATSAPP, EMAIL, PUSH
+    recipient: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="SENT", nullable=False)  # SENT, DELIVERED, FAILED, SIMULATED
+    payload_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class StolenVehicleSettings(Base):
+    """
+    System Configuration for Stolen Vehicle Alert System.
+    """
+    __tablename__ = "stolen_vehicle_settings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    alert_cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300, nullable=False)  # 5 minutes
+    duplicate_interval_seconds: Mapped[int] = mapped_column(Integer, default=300, nullable=False)
+    dashboard_notification: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    browser_notification: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sound_alert: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+

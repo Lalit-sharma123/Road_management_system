@@ -298,3 +298,115 @@ class ReportResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# Stolen Vehicle Alert System Schemas
+# ==========================================
+
+class StolenVehicleBase(BaseModel):
+    vehicle_number: str
+    owner_name: Optional[str] = None
+    vehicle_type: str = "CAR"
+    fir_number: str
+    police_station: str
+    date_reported: Optional[datetime] = None
+    reason: str = "Vehicle Theft"
+    priority: str = "HIGH"
+    status: str = "ACTIVE"
+    notes: Optional[str] = None
+
+
+class StolenVehicleCreate(StolenVehicleBase):
+    pass
+
+
+class StolenVehicleUpdate(BaseModel):
+    vehicle_number: Optional[str] = None
+    owner_name: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    fir_number: Optional[str] = None
+    police_station: Optional[str] = None
+    date_reported: Optional[datetime] = None
+    reason: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class StolenVehicleResponse(StolenVehicleBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StolenVehicleAlertBase(BaseModel):
+    vehicle_number: str
+    owner_name: Optional[str] = None
+    fir_number: Optional[str] = None
+    camera_id: Optional[str] = None
+    camera_name: Optional[str] = None
+    camera_location: Optional[str] = None
+    latitude: float = 28.4595
+    longitude: float = 77.0266
+    ocr_text: str
+    confidence: float = 0.95
+    vehicle_snapshot_url: Optional[str] = None
+    plate_crop_url: Optional[str] = None
+    stream_id: Optional[str] = None
+    frame_number: Optional[int] = None
+    tracking_id: Optional[str] = None
+    status: str = "ACTIVE"
+    resolved_by: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class StolenVehicleAlertCreate(StolenVehicleAlertBase):
+    stolen_vehicle_id: Optional[str] = None
+
+
+class StolenVehicleAlertResolveRequest(BaseModel):
+    alert_id: str
+    status: str = "RESOLVED"  # ACTIVE, INVESTIGATING, INTERCEPTED, RESOLVED, FALSE_POSITIVE
+    resolved_by: str = "Officer"
+    remarks: Optional[str] = None
+
+
+class StolenVehicleAlertResponse(StolenVehicleAlertBase):
+    id: str
+    stolen_vehicle_id: Optional[str] = None
+    timestamp: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StolenVehicleStatsResponse(BaseModel):
+    total_stolen_vehicles: int
+    active_alerts: int
+    alerts_today: int
+    recovered_vehicles: int
+    total_alerts_all_time: int
+    critical_alerts_count: int
+    status_breakdown: dict
+    priority_breakdown: dict
+    camera_breakdown: List[dict]
+    daily_trend: List[dict]
+
+
+class StolenVehicleSettingsSchema(BaseModel):
+    enabled: bool = True
+    alert_cooldown_seconds: int = 300
+    duplicate_interval_seconds: int = 300
+    dashboard_notification: bool = True
+    browser_notification: bool = True
+    sound_alert: bool = True
+    sms_enabled: bool = False
+    whatsapp_enabled: bool = False
+    email_enabled: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+

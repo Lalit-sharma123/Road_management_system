@@ -15,6 +15,12 @@ import { CameraManagementView } from './components/CameraManagementView';
 import { CameraLiveGridView } from './components/CameraLiveGridView';
 import { DriverModeView } from './components/DriverModeView';
 import { ViolationsView } from './components/ViolationsView';
+import { StolenVehicleRegistryView } from './components/StolenVehicleRegistryView';
+import { StolenVehicleAlertsView } from './components/StolenVehicleAlertsView';
+import { StolenVehicleAlertModal } from './components/StolenVehicleAlertModal';
+import { StolenVehicleAlert } from './types/stolenVehicle';
+import { stolenAlertAudio } from './utils/stolenSoundAlert';
+import { stolenVehicleService } from './services/stolenVehicleService';
 import { BackendCodeViewer } from './components/BackendCodeViewer';
 import { SettingsView } from './components/SettingsView';
 import { sampleVideos } from './data/mockData';
@@ -155,6 +161,59 @@ export default function App() {
 
   // Toast Notifications
   const [toastMessage, setToastMessage] = useState<{ title: string; desc: string; type: 'success' | 'warning' } | null>(null);
+
+  // Stolen Vehicle Real-Time Alert Modal State
+  const [activeStolenAlert, setActiveStolenAlert] = useState<StolenVehicleAlert | null>(null);
+
+  // Real-Time Global WebSocket Listener for Stolen Vehicle Alerts & Critical Events
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
+
+    const connectWs = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data?.type === 'stolen_alert' && data?.alert) {
+              const alert: StolenVehicleAlert = data.alert;
+              setActiveStolenAlert(alert);
+              stolenAlertAudio.playAlarmSound();
+              stolenAlertAudio.triggerBrowserNotification(
+                alert.vehicle_number,
+                alert.camera_location || 'City ANPR Camera',
+                alert.fir_number || 'Stolen Vehicle FIR'
+              );
+              showToast(
+                '🚨 STOLEN VEHICLE DETECTED',
+                `Target Plate: ${alert.vehicle_number} at ${alert.camera_location || 'ANPR Highway'}`,
+                'warning'
+              );
+            }
+          } catch (e) {
+            // Ignore non-json frames
+          }
+        };
+
+        ws.onclose = () => {
+          reconnectTimer = setTimeout(connectWs, 4000);
+        };
+      } catch (e) {
+        reconnectTimer = setTimeout(connectWs, 5000);
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, []);
 
   // System Settings State
   const [ollamaUrl, setOllamaUrl] = useState<string>('http://localhost:11434');
@@ -341,6 +400,16 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'stolen_registry' && (
+          <StolenVehicleRegistryView />
+        )}
+
+        {activeTab === 'stolen_alerts' && (
+          <StolenVehicleAlertsView 
+            onOpenRegistry={() => setActiveTab('stolen_registry')}
+          />
+        )}
+
         {activeTab === 'violations' && (
           <ViolationsView 
             currentRole={currentRole}
@@ -503,6 +572,27 @@ export default function App() {
         </div>
         <div>MEMORY_USAGE: 4.2GB / 16GB // DISK: 24% // CUDA_0: ONLINE</div>
       </footer>
+      {/* Global Stolen Vehicle Real-Time Alert Intercept Modal */}
+      <StolenVehicleAlertModal
+        alert={activeStolenAlert}
+        onClose={() => setActiveStolenAlert(null)}
+        onViewInAlertCenter={() => {
+          setActiveTab('stolen_alerts');
+          setActiveStolenAlert(null);
+        }}
+        onQuickInvestigate={async (alertId) => {
+          try {
+            await stolenVehicleService.resolveAlert({
+              alert_id: alertId,
+              status: 'INVESTIGATING',
+              resolved_by: currentUser?.full_name || 'Control Operator',
+              remarks: 'Patrol unit dispatched via quick intercept alert.'
+            });
+            showToast('Investigating', 'Patrol unit assigned to target vehicle.');
+            setActiveStolenAlert(null);
+          } catch (e) {}
+        }}
+      />
     </div>
   );
 }

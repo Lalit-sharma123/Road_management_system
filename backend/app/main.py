@@ -21,18 +21,22 @@ from app.api.logs import router as logs_router
 from app.driver.routes import router as driver_router
 from app.api.ws_routes import router as ws_router
 from app.api.violations import router as violations_router
+from app.api.stolen_vehicles import router as stolen_vehicles_router
+from app.api.stolen_alerts import router as stolen_alerts_router
+from app.services.stolen_vehicle_service import StolenVehicleService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application Lifecycle Context Manager.
-    Initializes PostgreSQL tables on startup.
+    Initializes PostgreSQL tables on startup and loads Stolen Vehicle in-memory cache.
     """
     print("Initializing Smart Road Damage Detection Database Schema...")
     try:
         await init_db()
         print("Database schema successfully synchronized.")
+        await StolenVehicleService.initialize_cache()
     except Exception as e:
         print(f"Database initialization note: {e}. Ensure PostgreSQL is running.")
     yield
@@ -177,6 +181,10 @@ app.include_router(ws_router, prefix=settings.API_V1_STR)
 app.include_router(ws_router)  # Allow direct /ws/live-detections, /ws/dashboard, /processing/status, /processing/live
 app.include_router(violations_router, prefix=settings.API_V1_STR)
 app.include_router(violations_router)  # Allow direct /violations
+app.include_router(stolen_vehicles_router, prefix=settings.API_V1_STR)
+app.include_router(stolen_vehicles_router)  # Allow direct /stolen-vehicles
+app.include_router(stolen_alerts_router, prefix=settings.API_V1_STR)
+app.include_router(stolen_alerts_router)  # Allow direct /stolen-alerts
 
 
 @app.get("/", tags=["Health Check"])

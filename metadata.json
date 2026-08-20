@@ -1,6 +1,6 @@
 {
   "name": "Smart Road Damage Detection and Analysis System",
-  "description": "AI-powered computer vision platform for road damage inspection, automated helmet violation detection with ANPR/OCR license plate recognition, e-challan generation, severity scoring, and telemetry analytics.",
+  "description": "AI-powered computer vision platform for road damage inspection, automated helmet violation detection with ANPR/OCR license plate recognition, e-challan generation, stolen vehicle registry & real-time intercept alerts, severity scoring, and telemetry analytics.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

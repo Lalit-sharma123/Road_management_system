@@ -187,6 +187,67 @@ async def ensure_schema_alignment(conn) -> None:
             ("notes", "TEXT", "TEXT"),
             ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "stolen_vehicles": [
+            ("vehicle_number", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("owner_name", "VARCHAR(255)", "VARCHAR(255)"),
+            ("vehicle_type", "VARCHAR(50) DEFAULT 'CAR'", "VARCHAR(50) DEFAULT 'CAR'"),
+            ("fir_number", "VARCHAR(100) NOT NULL", "VARCHAR(100) NOT NULL"),
+            ("police_station", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("date_reported", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("reason", "VARCHAR(255) DEFAULT 'Vehicle Theft'", "VARCHAR(255) DEFAULT 'Vehicle Theft'"),
+            ("priority", "VARCHAR(50) DEFAULT 'HIGH'", "VARCHAR(50) DEFAULT 'HIGH'"),
+            ("status", "VARCHAR(50) DEFAULT 'ACTIVE'", "VARCHAR(50) DEFAULT 'ACTIVE'"),
+            ("notes", "TEXT", "TEXT"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "stolen_vehicle_alerts": [
+            ("stolen_vehicle_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("vehicle_number", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("owner_name", "VARCHAR(255)", "VARCHAR(255)"),
+            ("fir_number", "VARCHAR(100)", "VARCHAR(100)"),
+            ("camera_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("camera_name", "VARCHAR(255) DEFAULT 'Surveillance Camera'", "VARCHAR(255) DEFAULT 'Surveillance Camera'"),
+            ("camera_location", "VARCHAR(255) DEFAULT 'Highway Junction'", "VARCHAR(255) DEFAULT 'Highway Junction'"),
+            ("latitude", "DOUBLE PRECISION DEFAULT 28.4595", "FLOAT DEFAULT 28.4595"),
+            ("longitude", "DOUBLE PRECISION DEFAULT 77.0266", "FLOAT DEFAULT 77.0266"),
+            ("timestamp", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("vehicle_snapshot_url", "TEXT", "TEXT"),
+            ("vehicle_snapshot_path", "TEXT", "TEXT"),
+            ("plate_crop_url", "TEXT", "TEXT"),
+            ("plate_crop_path", "TEXT", "TEXT"),
+            ("ocr_text", "VARCHAR(100) NOT NULL", "VARCHAR(100) NOT NULL"),
+            ("confidence", "DOUBLE PRECISION DEFAULT 0.95", "FLOAT DEFAULT 0.95"),
+            ("stream_id", "VARCHAR(100)", "VARCHAR(100)"),
+            ("frame_number", "INTEGER", "INTEGER"),
+            ("tracking_id", "VARCHAR(50)", "VARCHAR(50)"),
+            ("status", "VARCHAR(50) DEFAULT 'ACTIVE'", "VARCHAR(50) DEFAULT 'ACTIVE'"),
+            ("resolved_by", "VARCHAR(255)", "VARCHAR(255)"),
+            ("remarks", "TEXT", "TEXT"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "notification_logs": [
+            ("alert_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("channel", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("recipient", "VARCHAR(255)", "VARCHAR(255)"),
+            ("status", "VARCHAR(50) DEFAULT 'SENT'", "VARCHAR(50) DEFAULT 'SENT'"),
+            ("payload_json", "JSON", "JSON"),
+            ("error_message", "TEXT", "TEXT"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "stolen_vehicle_settings": [
+            ("enabled", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+            ("alert_cooldown_seconds", "INTEGER DEFAULT 300", "INTEGER DEFAULT 300"),
+            ("duplicate_interval_seconds", "INTEGER DEFAULT 300", "INTEGER DEFAULT 300"),
+            ("dashboard_notification", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+            ("browser_notification", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+            ("sound_alert", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+            ("sms_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
+            ("whatsapp_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
+            ("email_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
+            ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ]
     }
 
@@ -441,8 +502,125 @@ async def _seed_initial_data():
                 for v in sample_violations:
                     session.add(v)
 
+            # 7. Seed Default Stolen Vehicle Registry
+            from app.models.models import StolenVehicle, StolenVehicleAlert, StolenVehicleSettings
+            from datetime import timedelta
+            now = datetime.now(timezone.utc)
+
+            stmt_sv = select(StolenVehicle)
+            sv_rec = (await session.execute(stmt_sv)).scalars().first()
+            if not sv_rec:
+                sample_stolen_vehicles = [
+                    StolenVehicle(
+                        vehicle_number="DL01AB1234",
+                        owner_name="Rajesh Kumar Sharma",
+                        vehicle_type="MOTORCYCLE",
+                        fir_number="FIR-2026-DEL-88912",
+                        police_station="Connaught Place PS, New Delhi",
+                        date_reported=now - timedelta(days=4),
+                        reason="Vehicle Theft (Parked outside Metro Station)",
+                        priority="HIGH",
+                        status="ACTIVE",
+                        notes="Black Honda CB Shine motorcycle. Stolen on 16-Aug-2026. Suspect fled towards Outer Ring Road."
+                    ),
+                    StolenVehicle(
+                        vehicle_number="HR26DQ5519",
+                        owner_name="Vikramaditya Singh",
+                        vehicle_type="CAR",
+                        fir_number="FIR-2026-GGN-44120",
+                        police_station="Sector 29 PS, Gurugram",
+                        date_reported=now - timedelta(days=2),
+                        reason="Armed Carjacking / Grand Theft",
+                        priority="CRITICAL",
+                        status="ACTIVE",
+                        notes="White Hyundai Creta SUV. Armed robbery reported near Cyber City Underpass. High Priority Intercept."
+                    ),
+                    StolenVehicle(
+                        vehicle_number="MH12DE1432",
+                        owner_name="Pooja Deshmukh",
+                        vehicle_type="SCOOTER",
+                        fir_number="FIR-2026-PUN-33109",
+                        police_station="Shivaji Nagar PS, Pune",
+                        date_reported=now - timedelta(days=7),
+                        reason="Vehicle Theft",
+                        priority="MEDIUM",
+                        status="ACTIVE",
+                        notes="Red Activa 6G scooter. Key left in ignition."
+                    ),
+                    StolenVehicle(
+                        vehicle_number="KA05MK9821",
+                        owner_name="Anand Murthy",
+                        vehicle_type="MOTORCYCLE",
+                        fir_number="FIR-2026-BLR-12093",
+                        police_station="Indiranagar PS, Bengaluru",
+                        date_reported=now - timedelta(days=12),
+                        reason="Hit & Run Felony",
+                        priority="HIGH",
+                        status="RECOVERED",
+                        notes="Royal Enfield Classic 350. Recovered by Highway Patrol Unit 4."
+                    )
+                ]
+                for sv in sample_stolen_vehicles:
+                    session.add(sv)
+
+            # 8. Seed Default Stolen Vehicle Settings
+            stmt_svs = select(StolenVehicleSettings)
+            svs_rec = (await session.execute(stmt_svs)).scalars().first()
+            if not svs_rec:
+                session.add(StolenVehicleSettings(
+                    enabled=True,
+                    alert_cooldown_seconds=300,
+                    duplicate_interval_seconds=300,
+                    dashboard_notification=True,
+                    browser_notification=True,
+                    sound_alert=True,
+                    sms_enabled=False,
+                    whatsapp_enabled=False,
+                    email_enabled=False
+                ))
+
+            # 9. Seed Initial Stolen Vehicle Alert Records
+            stmt_sva = select(StolenVehicleAlert)
+            sva_rec = (await session.execute(stmt_sva)).scalars().first()
+            if not sva_rec:
+                sample_alerts = [
+                    StolenVehicleAlert(
+                        vehicle_number="HR26DQ5519",
+                        owner_name="Vikramaditya Singh",
+                        fir_number="FIR-2026-GGN-44120",
+                        camera_name="Highway ANPR Camera 02",
+                        camera_location="NH-48 Rajiv Chowk Flyover",
+                        latitude=28.4595,
+                        longitude=77.0266,
+                        timestamp=now - timedelta(minutes=15),
+                        ocr_text="HR 26 DQ 5519",
+                        confidence=0.98,
+                        frame_number=142,
+                        status="ACTIVE",
+                        remarks="Instant ANPR camera match against State Police Crime Database. Alert dispatched to Patrol Intercept Squad."
+                    ),
+                    StolenVehicleAlert(
+                        vehicle_number="DL01AB1234",
+                        owner_name="Rajesh Kumar Sharma",
+                        fir_number="FIR-2026-DEL-88912",
+                        camera_name="City Surveillance Dome C4",
+                        camera_location="MG Road Metro Intersection",
+                        latitude=28.4655,
+                        longitude=77.0330,
+                        timestamp=now - timedelta(hours=1, minutes=30),
+                        ocr_text="DL01AB1234",
+                        confidence=0.96,
+                        frame_number=290,
+                        status="INVESTIGATING",
+                        resolved_by="Inspector Sharma",
+                        remarks="Surveillance unit tracking movement heading towards Mehrauli-Gurgaon border."
+                    )
+                ]
+                for sa in sample_alerts:
+                    session.add(sa)
+
             await session.commit()
-            print("✅ Default Database Seeds (Admin, Inspector, Settings, Violations) checked.")
+            print("✅ Default Database Seeds (Admin, Inspector, Settings, Violations, Stolen Vehicles) checked.")
         except Exception as seed_err:
             await session.rollback()
             print(f"Note on seeding database: {seed_err}")
