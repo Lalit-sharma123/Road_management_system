@@ -708,7 +708,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           // Check global progress endpoint if available
           const statusRes = await apiClient.get('/process/status').catch(() => null);
           if (statusRes && statusRes.data && statusRes.data.is_processing) {
-            setProgress(statusRes.data.progress_percent || 50);
+            if (typeof statusRes.data.progress_percent === 'number') {
+              setProgress(statusRes.data.progress_percent);
+            }
             if (statusRes.data.status) setStatusText(statusRes.data.status);
             if (statusRes.data.current_fps) setFps(statusRes.data.current_fps);
           }

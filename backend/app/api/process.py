@@ -352,7 +352,12 @@ async def execute_video_processing_task(
                 frames_processed_count += 1
                 frame_detections = []
 
+                # Default GPS Coordinates computed deterministically per frame number
+                base_lat = 28.4595 + (frame_num * 0.00008)
+                base_lon = 77.0266 + (frame_num * 0.00009)
+
                 # Multi-Model YOLO detection on preprocessed frame
+                # print(f"🔍 [AI Pipeline] Frame {frame_num} - Inference Started")
                 raw_detections = detector_instance.detect(
                     preprocessed_frame,
                     conf_threshold=confidence_threshold
@@ -397,9 +402,6 @@ async def execute_video_processing_task(
                         det,
                         frame_height=processor.height
                     )
-
-                    base_lat = 28.4595 + (frame_num * 0.00008)
-                    base_lon = 77.0266 + (frame_num * 0.00009)
 
                     det_record = {
                         "category": cat_raw,

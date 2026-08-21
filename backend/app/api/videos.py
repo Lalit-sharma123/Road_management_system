@@ -11,7 +11,7 @@ from app.config.config import settings
 from app.database.database import get_db
 from app.models.models import User, Video, Detection, UserRole, ProcessingStatus
 from app.schemas.schemas import VideoUploadResponse, VideoDetailResponse, VideoDashboardResponse
-from app.auth.jwt import get_current_user, require_role
+from app.auth.jwt import get_current_user, get_current_user_optional, require_role
 from app.cv.video_processor import VideoProcessor
 from app.api.process import global_session_manager, cleanup_system_resources, ws_manager
 from app.services.websocket_manager import ws_broadcaster
@@ -25,7 +25,7 @@ ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 async def upload_video(
     title: str = Form(...),
     file: UploadFile = File(...),
-    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.INSPECTOR])),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -94,7 +94,7 @@ async def upload_video(
         fps=fps,
         resolution=resolution,
         status=ProcessingStatus.PENDING,
-        uploader_id=current_user.id
+        uploader_id=current_user.id if current_user else None
     )
 
     db.add(new_video)
@@ -117,7 +117,7 @@ async def upload_video(
 async def list_videos(
     skip: int = 0,
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """List uploaded inspection videos with pagination."""
@@ -129,7 +129,7 @@ async def list_videos(
 @router.get("/{video_id}", response_model=VideoDetailResponse)
 async def get_video_details(
     video_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """Retrieve complete metadata, processing state, and analytics for a video."""
@@ -154,7 +154,7 @@ async def get_video_details(
 @router.get("/{video_id}/dashboard", response_model=VideoDashboardResponse)
 async def get_video_dashboard(
     video_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """

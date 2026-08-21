@@ -139,7 +139,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
           if (wsData.stage && wsData.message) {
             const stageName = wsData.stage as PipelineStage;
             if (['Uploading', 'Extracting Frames', 'Running YOLO', 'Generating Report', 'Saving Results', 'Finished'].includes(stageName)) {
-              addLog(stageName, wsData.progress || 50, wsData.message);
+              addLog(stageName, typeof wsData.progress === 'number' ? wsData.progress : 0, wsData.message);
             }
           }
         },
