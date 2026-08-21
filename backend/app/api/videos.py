@@ -3,6 +3,7 @@ import uuid
 import shutil
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -296,6 +297,36 @@ async def get_video_dashboard(
         "timeline": timeline_events,
         "detection_counts": category_counts
     }
+
+
+@router.get("/{video_id}/download")
+async def download_processed_video(
+    video_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Download the processed annotated video MP4 file."""
+    stmt = select(Video).where(Video.id == video_id)
+    video = (await db.execute(stmt)).scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    file_to_send = None
+    if video.processed_file_path and os.path.exists(video.processed_file_path):
+        file_to_send = video.processed_file_path
+    elif video.file_path and os.path.exists(video.file_path):
+        file_to_send = video.file_path
+
+    if not file_to_send or not os.path.exists(file_to_send):
+        raise HTTPException(status_code=404, detail="Processed video file not available on disk yet")
+
+    clean_title = "".join(c for c in video.title if c.isalnum() or c in (' ', '_', '-')).rstrip()
+    download_filename = f"processed_{clean_title or video_id}.mp4"
+
+    return FileResponse(
+        path=file_to_send,
+        media_type="video/mp4",
+        filename=download_filename
+    )
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)

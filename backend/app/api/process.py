@@ -80,25 +80,29 @@ class ConnectionManager:
             "client_id": client_id,
             "video_id": video_id
         }
+        print(f"🔌 [WebSocket Connected] Client: '{client_id}', Scoped Video: '{video_id}' | Total Active: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
-            del self.active_connections[websocket]
+            info = self.active_connections.pop(websocket, {})
+            print(f"🔌 [WebSocket Disconnected] Client: '{info.get('client_id')}' | Remaining Active: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
         msg_session_id = message.get("session_id")
         msg_video_id = message.get("video_id")
 
-        # Session filtering: If a message is from an older or superseded session, drop it immediately
+        # Session filtering: If a message is from an older or superseded session, drop it
         if global_session_manager.active_session_id and msg_session_id and msg_session_id != global_session_manager.active_session_id:
             return
 
         payload = json.dumps(message)
         dead = []
         for connection, info in list(self.active_connections.items()):
+            conn_vid = info.get("video_id")
             # If connection is scoped to a specific video_id and message has a different video_id, skip
-            if info.get("video_id") and msg_video_id and info["video_id"] != msg_video_id:
-                continue
+            if conn_vid and msg_video_id and conn_vid not in ["default", "client", ""]:
+                if conn_vid != msg_video_id and conn_vid not in msg_video_id and msg_video_id not in conn_vid:
+                    continue
             try:
                 await connection.send_text(payload)
             except Exception:
@@ -151,6 +155,7 @@ class SessionManager:
         await ws_manager.broadcast(reset_msg)
         await ws_broadcaster.broadcast(reset_msg)
 
+        print(f"🎬 [SessionManager] Initialized Session '{session_id}' for Video '{video_id}'")
         return session_id, self.cancel_event
 
     async def pause_session(self):
@@ -213,13 +218,19 @@ global_session_manager = SessionManager()
 
 @router.websocket("/ws")
 @router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
-    # Extract video_id from client_id if formatted like live-{videoId}-{timestamp}
-    video_id_scope = None
-    if client_id.startswith("live-"):
-        parts = client_id.split("-")
-        if len(parts) >= 2:
-            video_id_scope = parts[1]
+async def websocket_endpoint(websocket: WebSocket, client_id: str = "default", video_id: Optional[str] = None):
+    # Extract video_id from client_id (e.g., live-{videoId}-{timestamp}) or query param
+    video_id_scope = video_id
+    if not video_id_scope and client_id.startswith("live-"):
+        # Format: live-{video_id}-{timestamp}
+        raw = client_id[5:]  # Remove "live-"
+        last_dash_idx = raw.rfind("-")
+        if last_dash_idx != -1:
+            video_id_scope = raw[:last_dash_idx]
+        else:
+            video_id_scope = raw
+    elif not video_id_scope and client_id not in ["default", "client"]:
+        video_id_scope = client_id
 
     await ws_manager.connect(websocket, client_id=client_id, video_id=video_id_scope)
     try:
@@ -229,7 +240,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
             "progress": 0,
             "message": f"WebSocket connection active for client: {client_id}",
             "session_id": global_session_manager.active_session_id,
-            "video_id": video_id_scope,
+            "video_id": video_id_scope or global_session_manager.active_video_id,
             "timestamp": asyncio.get_event_loop().time()
         }))
         while True:
@@ -291,13 +302,16 @@ async def execute_video_processing_task(
             video.status = ProcessingStatus.PROCESSING
             await db.commit()
 
+            print(f"🚀 [Pipeline Step 1/7: Initialized] Video ID: {video.id} | File: {video.file_path}")
             await send_ws_update("Uploading", 15, "FastAPI WS: Ingestion verified. Initializing OpenCV decoding...")
 
             # Initialize VideoProcessor (fresh VideoCapture with resilient path resolution)
             processor = VideoProcessor(video_path=video.file_path, video_id=video.id)
             frames_processed_count = 0
+            total_expected_frames = processor.total_frames or 100
 
-            await send_ws_update("Extracting Frames", 35, f"FastAPI WS: Slicing frames with frame_skip={frame_skip}...")
+            print(f"📹 [Pipeline Step 2/7: Video Loaded] Width: {processor.width} | Height: {processor.height} | Total Frames: {total_expected_frames} | FPS: {processor.fps}")
+            await send_ws_update("Extracting Frames", 25, f"FastAPI WS: Decoding stream (Total Frames: {total_expected_frames}, FPS: {processor.fps})...")
 
             # Extract frames generator with optimized fast decoding
             frame_gen = processor.extract_frames_generator(
@@ -306,7 +320,8 @@ async def execute_video_processing_task(
                 enable_gaussian_blur=False
             )
 
-            await send_ws_update("Running YOLO", 50, "FastAPI WS: Executing YOLO damage detection inference...")
+            print(f"⚡ [Pipeline Step 3/7: Inference Loop Started] frame_skip={frame_skip} | Confidence Threshold={confidence_threshold}")
+            await send_ws_update("Running YOLO", 30, "FastAPI WS: Executing real-time YOLO multi-model damage detection...")
 
             # Output MP4 video writer
             output_mp4_path = os.path.join(settings.PROCESSED_DIR, f"processed_{video.id}.mp4")
@@ -317,8 +332,6 @@ async def execute_video_processing_task(
                 processor.fps or 30.0,
                 (processor.width, processor.height)
             )
-
-            total_expected_frames = processor.total_frames or 100
 
             # Category tracking counters
             pothole_count = 0
@@ -352,17 +365,22 @@ async def execute_video_processing_task(
                 frames_processed_count += 1
                 frame_detections = []
 
+                # Backend Log: Frame read
+                print(f"🎬 [Backend] Frame read: #{frame_num} (ts: {timestamp_sec:.2f}s)")
+
                 # Default GPS Coordinates computed deterministically per frame number
                 base_lat = 28.4595 + (frame_num * 0.00008)
                 base_lon = 77.0266 + (frame_num * 0.00009)
 
                 # Multi-Model YOLO detection on preprocessed frame
-                # print(f"🔍 [AI Pipeline] Frame {frame_num} - Inference Started")
                 raw_detections = detector_instance.detect(
                     preprocessed_frame,
                     conf_threshold=confidence_threshold
                 )
                 has_damage = len(raw_detections) > 0
+
+                # Backend Log: Inference complete
+                print(f"⚡ [Backend] Inference complete: Frame #{frame_num} ({len(raw_detections)} detections)")
 
                 for det in raw_detections:
                     sev_level, sev_score = SeverityAnalysisService.calculate_detection_severity(
@@ -464,148 +482,7 @@ async def execute_video_processing_task(
                         cv2.LINE_AA
                     )
 
-                if video_writer:
-                    try:
-                        video_writer.write(annotated_img)
-                    except Exception as vw_err:
-                        print(f"⚠️ [VideoWriter Frame Error]: {vw_err}")
-
-                # 2. GUARANTEE VALID FRAME IMAGE IS GENERATED AND SAVED TO DISK BEFORE DB INSERTION
-                # Prevents IntegrityError and orphaned references
-                frame_abs_path, frame_rel_path = processor.save_annotated_frame(
-                    frame=annotated_img,
-                    video_id=str(video.id),
-                    frame_num=frame_num
-                )
-
-                # 3. DB Frame and Detection persistence with comprehensive try-except-finally & rollback
-                db_frame = None
-                try:
-                    db_frame = Frame(
-                        video_id=video.id,
-                        frame_number=frame_num,
-                        timestamp_seconds=timestamp_sec,
-                        image_path=frame_rel_path,
-                        has_damage=has_damage
-                    )
-                    db.add(db_frame)
-                    await db.flush()
-
-                    for d_rec in frame_detections:
-                        base_lat = 28.4595 + (frame_num * 0.00008)
-                        base_lon = 77.0266 + (frame_num * 0.00009)
-                        db_detection = Detection(
-                            video_id=video.id,
-                            camera_id=None,
-                            frame_id=db_frame.id,
-                            frame_number=frame_num,
-                            timestamp_seconds=timestamp_sec,
-                            category=d_rec["category"],
-                            confidence=d_rec["confidence"],
-                            x_min=d_rec["x_min"],
-                            y_min=d_rec["y_min"],
-                            x_max=d_rec["x_max"],
-                            y_max=d_rec["y_max"],
-                            area_pixels=float((d_rec["x_max"] - d_rec["x_min"]) * (d_rec["y_max"] - d_rec["y_min"])),
-                            severity=d_rec["severity"],
-                            severity_score=d_rec["severity_score"],
-                            distance_meters=d_rec["distance_meters"],
-                            latitude=base_lat,
-                            longitude=base_lon
-                        )
-                        db.add(db_detection)
-                    await db.flush()
-                except Exception as db_err:
-                    print(f"⚠️ [Frame/Detection Persistence Warning]: {db_err}")
-                    try:
-                        await db.rollback()
-                    except Exception as rb_err:
-                        print(f"⚠️ [DB Rollback Warning]: {rb_err}")
-                    finally:
-                        db_frame = None
-
-                # 4. Automatic Helmet Violation & ANPR / OCR Detection with dedicated try-except-finally & rollback
-                try:
-                    frame_violations = HelmetANPRService.evaluate_frame_violations(
-                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        location_name="National Highway 48 - Sector 29",
-                        base_lat=base_lat,
-                        base_lon=base_lon
-                    )
-
-                    for v_data in frame_violations:
-                        helmet_violations_count += 1
-                        violations_list.append(v_data)
-
-                        # Persist to database
-                        db_violation = TrafficViolation(
-                            id=v_data["id"],
-                            challan_number=v_data["challan_number"],
-                            violation_type=v_data["violation_type"],
-                            license_plate_number=v_data["license_plate_number"],
-                            confidence=v_data["confidence"],
-                            rider_confidence=v_data["rider_confidence"],
-                            fine_amount=v_data["fine_amount"],
-                            fine_status=v_data["fine_status"],
-                            video_id=video.id,
-                            camera_id=v_data.get("camera_id"),
-                            frame_id=db_frame.id if db_frame else None,
-                            frame_number=frame_num,
-                            timestamp_seconds=timestamp_sec,
-                            evidence_image_path=v_data.get("evidence_image_path"),
-                            evidence_image_url=v_data.get("evidence_image_url"),
-                            plate_crop_url=v_data.get("plate_crop_url"),
-                            vehicle_type=v_data["vehicle_type"],
-                            latitude=v_data["latitude"],
-                            longitude=v_data["longitude"],
-                            location_name=v_data["location_name"],
-                            notes=v_data["notes"]
-                        )
-                        db.add(db_violation)
-
-                        # Broadcast live Violation Event via WebSocket
-                        violation_ws_msg = {
-                            "type": "violation",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "violation": v_data
-                        }
-                        await ws_manager.broadcast(violation_ws_msg)
-                        await ws_broadcaster.broadcast(violation_ws_msg)
-
-                        # Check for Stolen Vehicle Match in Real-Time (O(1) in-memory lookup)
-                        try:
-                            plate_num = v_data.get("license_plate_number")
-                            if plate_num:
-                                await StolenVehicleService.process_plate_detection(
-                                    plate_str=plate_num,
-                                    camera_id=v_data.get("camera_id") or "CAM-01",
-                                    camera_name="Highway ANPR Stream",
-                                    camera_location=v_data.get("location_name") or "National Highway 48",
-                                    latitude=v_data.get("latitude") or 28.4595,
-                                    longitude=v_data.get("longitude") or 77.0266,
-                                    vehicle_snapshot_url=v_data.get("evidence_image_url"),
-                                    plate_crop_url=v_data.get("plate_crop_url"),
-                                    ocr_confidence=v_data.get("confidence") or 0.95,
-                                    stream_id=video.id,
-                                    frame_number=frame_num,
-                                    db_session=db
-                                )
-                        except Exception as sv_err:
-                            print(f"Notice on Stolen Vehicle check: {sv_err}")
-                except Exception as viol_err:
-                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
-                    try:
-                        await db.rollback()
-                    except Exception as rb_err:
-                        print(f"⚠️ [DB Rollback Warning]: {rb_err}")
-
-                # Ultra-fast live UI streaming image encoding:
+                # 2. Ultra-fast live UI streaming image encoding:
                 # Downscale preview to 960px width max for low latency and zero network packet bloat
                 stream_img = annotated_img
                 if processor.width > 960:
@@ -617,6 +494,9 @@ async def execute_video_processing_task(
                 _, buffer = cv2.imencode('.jpg', stream_img, [cv2.IMWRITE_JPEG_QUALITY, 68])
                 base64_str = base64.b64encode(buffer).decode('utf-8')
                 frame_base64 = f"data:image/jpeg;base64,{base64_str}"
+
+                # Backend Log: Frame encoded
+                print(f"📦 [Backend] Frame encoded: Frame #{frame_num} (JPEG Base64 ready, size: {len(base64_str)} bytes)")
 
                 formatted_detections = []
                 for det in frame_detections:
@@ -638,8 +518,6 @@ async def execute_video_processing_task(
                         "height": max(0, y2 - y1)
                     })
 
-                base_lat = 28.4595 + (frame_num * 0.00008)
-                base_lon = 77.0266 + (frame_num * 0.00009)
                 total_batches = max(1, int(total_expected_frames / max(1, frame_skip)))
                 current_progress = min(99, max(1, int((frames_processed_count / total_batches) * 100)))
                 live_road_health = round(max(20.0, 100.0 - (road_damage_count * 4.0)), 1)
@@ -647,7 +525,7 @@ async def execute_video_processing_task(
                 effective_fps = max(1.0, float(processor.fps or 30.0) / max(1, frame_skip))
                 eta_sec = max(0, round(remaining_frames / effective_fps, 1))
 
-                # Update global progress state for status polling
+                # Update global progress state
                 processing_progress_state["is_processing"] = True
                 processing_progress_state["video_id"] = video.id
                 processing_progress_state["current_frame"] = frame_num
@@ -665,6 +543,7 @@ async def execute_video_processing_task(
                     "session_id": session_id,
                     "video_id": video.id,
                     "stage": "Detecting",
+                    "frame": frame_base64,
                     "frame_number": frame_num,
                     "total_frames": total_expected_frames,
                     "frame_width": int(processor.width or 1280),
@@ -679,6 +558,14 @@ async def execute_video_processing_task(
                     "image_url": frame_base64,
                     "road_health": live_road_health,
                     "gps": {
+                        "latitude": round(base_lat, 6),
+                        "longitude": round(base_lon, 6)
+                    },
+                    "telemetry": {
+                        "road_health": live_road_health,
+                        "fps": round(float(processor.fps or 30.0), 1),
+                        "eta_seconds": eta_sec,
+                        "progress": current_progress,
                         "latitude": round(base_lat, 6),
                         "longitude": round(base_lon, 6)
                     },
@@ -704,11 +591,99 @@ async def execute_video_processing_task(
                 if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
                     break
 
+                # 3. IMMEDIATELY SEND OVER WEBSOCKET FIRST (STREAMING HAS HIGHEST PRIORITY)
                 await ws_manager.broadcast(ws_frame_msg)
                 await ws_broadcaster.broadcast(ws_frame_msg)
 
+                # Backend Log: Frame sent
+                print(f"🚀 [Backend] Frame sent: Frame #{frame_num} broadcast to WebSocket clients (progress: {current_progress}%)")
+
+                # 4. AFTER WEBSOCKET BROADCAST: Non-blocking write to output MP4
+                if video_writer:
+                    try:
+                        video_writer.write(annotated_img)
+                    except Exception as vw_err:
+                        print(f"⚠️ [VideoWriter Frame Error]: {vw_err}")
+
+                # 5. AFTER WEBSOCKET BROADCAST: Database Persistence (Isolated in try-except so DB NEVER stops streaming)
+                try:
+                    frame_abs_path, frame_rel_path = processor.save_annotated_frame(
+                        frame=annotated_img,
+                        video_id=str(video.id),
+                        frame_num=frame_num
+                    )
+
+                    db_frame = Frame(
+                        video_id=video.id,
+                        frame_number=frame_num,
+                        timestamp_seconds=timestamp_sec,
+                        image_path=frame_rel_path,
+                        has_damage=has_damage
+                    )
+                    db.add(db_frame)
+                    await db.flush()
+
+                    for d_rec in frame_detections:
+                        db_detection = Detection(
+                            video_id=video.id,
+                            camera_id=None,
+                            frame_id=db_frame.id,
+                            frame_number=frame_num,
+                            timestamp_seconds=timestamp_sec,
+                            category=d_rec["category"],
+                            confidence=d_rec["confidence"],
+                            x_min=d_rec["x_min"],
+                            y_min=d_rec["y_min"],
+                            x_max=d_rec["x_max"],
+                            y_max=d_rec["y_max"],
+                            area_pixels=float((d_rec["x_max"] - d_rec["x_min"]) * (d_rec["y_max"] - d_rec["y_min"])),
+                            severity=d_rec["severity"],
+                            severity_score=d_rec["severity_score"],
+                            distance_meters=d_rec["distance_meters"],
+                            latitude=base_lat,
+                            longitude=base_lon
+                        )
+                        db.add(db_detection)
+                    await db.flush()
+                except Exception as db_err:
+                    print(f"⚠️ [DB Non-blocking Persistence Notice]: {db_err}")
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+
+                # 6. Helmet & ANPR Violation Evaluation (Non-blocking)
+                try:
+                    frame_violations = HelmetANPRService.evaluate_frame_violations(
+                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
+                        detections=raw_detections,
+                        frame_number=frame_num,
+                        timestamp_sec=timestamp_sec,
+                        video_id=video.id,
+                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
+                        location_name="National Highway 48 - Sector 29",
+                        base_lat=base_lat,
+                        base_lon=base_lon
+                    )
+
+                    for v_data in frame_violations:
+                        helmet_violations_count += 1
+                        violations_list.append(v_data)
+
+                        # Broadcast live Violation Event via WebSocket
+                        violation_ws_msg = {
+                            "type": "violation",
+                            "session_id": session_id,
+                            "video_id": video.id,
+                            "violation": v_data
+                        }
+                        await ws_manager.broadcast(violation_ws_msg)
+                        await ws_broadcaster.broadcast(violation_ws_msg)
+                except Exception as viol_err:
+                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
+
                 del annotated_img, raw_frame, preprocessed_frame, buffer
-                # Natural playback pacing for real-time visualization
+                # Natural playback pacing for smooth real-time CCTV stream experience
                 frame_delay = max(0.02, min(0.05, 0.8 / max(processor.fps or 30.0, 1.0)))
                 await asyncio.sleep(frame_delay)
 
@@ -716,6 +691,8 @@ async def execute_video_processing_task(
             if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
                 print(f"🛑 [Session {session_id}] Video {video_id} loop exited early due to cancellation.")
                 return
+
+            print(f"🏁 [Pipeline Step 5/7: Loop Completed] Processed {frames_processed_count} frames. Releasing writers...")
 
             if video_writer:
                 video_writer.release()

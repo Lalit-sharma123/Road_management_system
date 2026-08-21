@@ -438,291 +438,296 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     }
   };
 
-  // 8. WebSocket Realtime Engine
+  // 8. WebSocket Realtime Engine with Auto-Reconnect and Zero Polling Dependency
   useEffect(() => {
-    const clientId = `live-${videoId}-${Date.now()}`;
+    if (!videoId) return;
 
-    const ws = videoService.connectWebSocket(
-      clientId,
-      (msg: any) => {
-        // Strict Video ID filter: discard messages meant for any other video
-        if (msg.video_id && msg.video_id !== videoId) {
-          return;
-        }
+    let isSubscribed = true;
+    let reconnectTimeout: any = null;
 
-        // Handle backend session reset message
-        if (msg.type === 'session_reset') {
-          if (!msg.video_id || msg.video_id === videoId) {
-            if (msg.session_id) {
-              activeSessionIdRef.current = msg.session_id;
+    const establishWebSocket = () => {
+      if (!isSubscribed) return;
+      const clientId = `live-${videoId}-${Date.now()}`;
+
+      const ws = videoService.connectWebSocket(
+        clientId,
+        (msg: any) => {
+          // Strict Video ID filter: discard messages meant for any other video
+          if (msg.video_id && msg.video_id !== videoId) {
+            return;
+          }
+
+          // Handle backend session reset message
+          if (msg.type === 'session_reset') {
+            if (!msg.video_id || msg.video_id === videoId) {
+              if (msg.session_id) {
+                activeSessionIdRef.current = msg.session_id;
+              }
+              setCurrentFrameUrl(null);
+              setCurrentFrameDetections([]);
+              setSelectedOverlayDetection(null);
+              setFrameNumber(0);
+              setProgress(0);
+              setPotholeCount(0);
+              setCrackCount(0);
+              setBrokenRoadCount(0);
+              setMissingAsphaltCount(0);
+              setRoadDamageCount(0);
+              setVehicleCount(0);
+              setHelmetCount(0);
+              setNumberPlateCount(0);
+              setHelmetViolationsCount(0);
+              setTimelineEvents([]);
+              setSelectedTimelineEvent(null);
+              routePointsRef.current = [];
+              damageLayerGroupRef.current?.clearLayers();
+              polylineRef.current?.setLatLngs([]);
+              setStatusText(msg.message || 'Fresh detection session initialized.');
+              setActiveStage('Initializing Models');
             }
-            setCurrentFrameUrl(null);
-            setCurrentFrameDetections([]);
-            setSelectedOverlayDetection(null);
-            setFrameNumber(0);
-            setProgress(0);
-            setPotholeCount(0);
-            setCrackCount(0);
-            setBrokenRoadCount(0);
-            setMissingAsphaltCount(0);
-            setRoadDamageCount(0);
-            setVehicleCount(0);
-            setHelmetCount(0);
-            setNumberPlateCount(0);
-            setHelmetViolationsCount(0);
-            setTimelineEvents([]);
-            setSelectedTimelineEvent(null);
-            routePointsRef.current = [];
-            damageLayerGroupRef.current?.clearLayers();
-            polylineRef.current?.setLatLngs([]);
-            setStatusText(msg.message || 'Fresh detection session initialized.');
-            setActiveStage('Initializing Models');
-          }
-          return;
-        }
-
-        // Track active session for this video stream
-        if (msg.session_id) {
-          activeSessionIdRef.current = msg.session_id;
-        }
-
-        // Calculate live FPS
-        const now = performance.now();
-        frameTimesRef.current.push(now);
-        if (frameTimesRef.current.length > 10) frameTimesRef.current.shift();
-        if (frameTimesRef.current.length > 1) {
-          const delta = (now - frameTimesRef.current[0]) / (frameTimesRef.current.length - 1);
-          if (delta > 0) setFps(Math.round(1000 / delta));
-        }
-
-        // Status / Stage / Progress updates
-        if (msg.stage) {
-          setActiveStage(msg.stage);
-          if (msg.stage === 'Paused') setIsPaused(true);
-          if (msg.stage === 'Detecting') setIsPaused(false);
-        }
-        if (msg.message) {
-          setStatusText(msg.message);
-        }
-        if (msg.progress !== undefined) {
-          setProgress(msg.progress);
-        }
-        if (msg.total_frames) {
-          setTotalFrames(msg.total_frames);
-        }
-        if (msg.eta_seconds !== undefined) {
-          setEtaSeconds(msg.eta_seconds);
-        }
-        if (msg.road_health !== undefined) {
-          setRoadHealth(msg.road_health);
-        }
-
-        // Frame Payload Processing
-        if (msg.type === 'frame' || msg.image_url || msg.image_data || msg.image_base64) {
-          setActiveStage('Detecting');
-          let frameImgUrl = '';
-          if (msg.image_data) {
-            frameImgUrl = msg.image_data.startsWith('data:') ? msg.image_data : `data:image/jpeg;base64,${msg.image_data}`;
-          } else if (msg.image_base64) {
-            frameImgUrl = msg.image_base64.startsWith('data:') ? msg.image_base64 : `data:image/jpeg;base64,${msg.image_base64}`;
-          } else if (msg.image_url) {
-            frameImgUrl = getFullImageUrl(msg.image_url);
+            return;
           }
 
-          if (frameImgUrl) {
-            setCurrentFrameUrl(frameImgUrl);
-          }
-          if (msg.frame_number) {
-            setFrameNumber(msg.frame_number);
-          }
-          if (msg.timestamp !== undefined) {
-            setTimestamp(msg.timestamp);
-          }
-          if (msg.frame_width) {
-            setFrameWidth(msg.frame_width);
-          }
-          if (msg.frame_height) {
-            setFrameHeight(msg.frame_height);
-          }
-          if (Array.isArray(msg.detections)) {
-            setCurrentFrameDetections(msg.detections);
+          // Track active session for this video stream
+          if (msg.session_id) {
+            activeSessionIdRef.current = msg.session_id;
           }
 
-          // Live GPS update
-          let frameLat = 28.4595 + (msg.frame_number * 0.00008);
-          let frameLng = 77.0266 + (msg.frame_number * 0.00009);
-
-          if (msg.gps && msg.gps.latitude && msg.gps.longitude) {
-            frameLat = msg.gps.latitude;
-            frameLng = msg.gps.longitude;
+          // Calculate live FPS
+          const now = performance.now();
+          frameTimesRef.current.push(now);
+          if (frameTimesRef.current.length > 10) frameTimesRef.current.shift();
+          let calculatedFps = msg.fps || 30;
+          if (frameTimesRef.current.length > 1) {
+            const delta = (now - frameTimesRef.current[0]) / (frameTimesRef.current.length - 1);
+            if (delta > 0) calculatedFps = Math.round(1000 / delta);
+            setFps(calculatedFps);
+          } else if (msg.fps) {
+            setFps(msg.fps);
           }
 
-          setCurrentGps({ lat: frameLat, lng: frameLng });
-          routePointsRef.current.push([frameLat, frameLng]);
-
-          if (polylineRef.current) {
-            polylineRef.current.setLatLngs(routePointsRef.current);
+          // Status / Stage / Progress updates
+          if (msg.stage) {
+            setActiveStage(msg.stage);
+            if (msg.stage === 'Paused') setIsPaused(true);
+            if (msg.stage === 'Detecting') setIsPaused(false);
           }
-          if (vehicleMarkerRef.current) {
-            vehicleMarkerRef.current.setLatLng([frameLat, frameLng]);
+          if (msg.message) {
+            setStatusText(msg.message);
           }
-          if (mapRef.current && routePointsRef.current.length % 5 === 0) {
-            mapRef.current.panTo([frameLat, frameLng], { animate: true });
+          if (msg.progress !== undefined) {
+            setProgress(msg.progress);
           }
-
-          // Authoritative counts from backend if present
-          if (msg.counts) {
-            if (typeof msg.counts.pothole === 'number') setPotholeCount(msg.counts.pothole);
-            if (typeof msg.counts.crack === 'number') setCrackCount(msg.counts.crack);
-            if (typeof msg.counts.broken_road === 'number') setBrokenRoadCount(msg.counts.broken_road);
-            if (typeof msg.counts.missing_asphalt === 'number') setMissingAsphaltCount(msg.counts.missing_asphalt);
-            if (typeof msg.counts.road_damage === 'number') setRoadDamageCount(msg.counts.road_damage);
-            if (typeof msg.counts.vehicle === 'number') setVehicleCount(msg.counts.vehicle);
-            if (typeof msg.counts.helmet === 'number') setHelmetCount(msg.counts.helmet);
-            if (typeof msg.counts.number_plate === 'number') setNumberPlateCount(msg.counts.number_plate);
-            if (typeof msg.counts.helmet_violations === 'number') setHelmetViolationsCount(msg.counts.helmet_violations);
+          if (msg.total_frames) {
+            setTotalFrames(msg.total_frames);
+          }
+          if (msg.eta_seconds !== undefined) {
+            setEtaSeconds(msg.eta_seconds);
+          }
+          if (msg.road_health !== undefined) {
+            setRoadHealth(msg.road_health);
           }
 
-          // Handle incoming detections on frame
-          if (Array.isArray(msg.detections) && msg.detections.length > 0) {
-            const newItems: LiveDetectionItem[] = msg.detections.map((d: any, idx: number) => {
-              const cat = (d.category || 'damage').toLowerCase();
-              if (!msg.counts) {
-                if (cat.includes('pothole')) setPotholeCount((c) => c + 1);
-                else if (cat.includes('crack')) setCrackCount((c) => c + 1);
-                else if (cat.includes('broken')) setBrokenRoadCount((c) => c + 1);
-                else if (cat.includes('asphalt')) setMissingAsphaltCount((c) => c + 1);
-                if (cat.includes('car') || cat.includes('truck') || cat.includes('vehicle')) setVehicleCount((c) => c + 1);
-                if (cat.includes('helmet')) setHelmetCount((c) => c + 1);
-                if (cat.includes('plate')) setNumberPlateCount((c) => c + 1);
-              }
+          // Frame Payload Processing
+          if (msg.type === 'frame' || msg.image_url || msg.image_data || msg.image_base64 || msg.frame) {
+            setActiveStage('Detecting');
 
-              const sev = d.severity || 'HIGH';
-              const markerColor = getSeverityColor(sev);
+            // Frontend Console Log: Frame received, Frame number, FPS, Progress
+            console.log(`[Frontend] Frame received: #${msg.frame_number || 1} | Progress: ${msg.progress ?? 0}% | FPS: ${calculatedFps}`);
 
-              // Add damage marker to map
-              if (damageLayerGroupRef.current) {
-                const markerIcon = L.divIcon({
-                  className: 'damage-pin',
-                  html: `<div style="background-color: ${markerColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 8px ${markerColor};"></div>`,
-                  iconSize: [12, 12],
-                  iconAnchor: [6, 6]
-                });
+            let frameImgUrl = '';
+            if (msg.frame) {
+              frameImgUrl = msg.frame.startsWith('data:') ? msg.frame : `data:image/jpeg;base64,${msg.frame}`;
+            } else if (msg.image_data) {
+              frameImgUrl = msg.image_data.startsWith('data:') ? msg.image_data : `data:image/jpeg;base64,${msg.image_data}`;
+            } else if (msg.image_base64) {
+              frameImgUrl = msg.image_base64.startsWith('data:') ? msg.image_base64 : `data:image/jpeg;base64,${msg.image_base64}`;
+            } else if (msg.image_url) {
+              frameImgUrl = getFullImageUrl(msg.image_url);
+            }
 
-                const m = L.marker([frameLat, frameLng], { icon: markerIcon });
-                m.bindPopup(`
-                  <div style="font-family: monospace; font-size: 11px; color: #111;">
-                    <strong>${d.category.toUpperCase()}</strong><br/>
-                    Severity: ${sev}<br/>
-                    Conf: ${(d.confidence * 100).toFixed(0)}%<br/>
-                    Frame #${msg.frame_number} @ ${msg.timestamp.toFixed(1)}s
-                  </div>
-                `);
-                damageLayerGroupRef.current.addLayer(m);
-              }
+            if (frameImgUrl) {
+              setCurrentFrameUrl(frameImgUrl);
+              // Frontend Console Log: Frame rendered
+              console.log(`[Frontend] Frame rendered: #${msg.frame_number || 1}`);
+            }
+            if (msg.frame_number) {
+              setFrameNumber(msg.frame_number);
+            }
+            if (msg.timestamp !== undefined) {
+              setTimestamp(msg.timestamp);
+            }
+            if (msg.frame_width) {
+              setFrameWidth(msg.frame_width);
+            }
+            if (msg.frame_height) {
+              setFrameHeight(msg.frame_height);
+            }
+            if (Array.isArray(msg.detections)) {
+              setCurrentFrameDetections(msg.detections);
+            }
 
-              return {
-                id: `det-${msg.frame_number}-${idx}-${Date.now()}`,
-                category: d.category || 'Pothole',
-                confidence: d.confidence || 0.85,
-                severity: sev,
-                frame_number: msg.frame_number || 0,
-                timestamp: msg.timestamp || 0,
-                latitude: frameLat,
-                longitude: frameLng,
-                image_url: frameImgUrl
-              };
-            });
+            // Live GPS update
+            let frameLat = 28.4595 + ((msg.frame_number || 1) * 0.00008);
+            let frameLng = 77.0266 + ((msg.frame_number || 1) * 0.00009);
 
-            setTimelineEvents((prev) => [...newItems, ...prev.slice(0, 49)]);
-          }
+            if (msg.gps && msg.gps.latitude && msg.gps.longitude) {
+              frameLat = msg.gps.latitude;
+              frameLng = msg.gps.longitude;
+            }
 
-          // Update live traffic violations from frame payload
-          if (Array.isArray(msg.violations) && msg.violations.length > 0) {
-            setLiveViolations(msg.violations);
-            setHelmetViolationsCount(msg.violations.length);
-          } else if (Array.isArray(msg.latest_violations) && msg.latest_violations.length > 0) {
-            setLiveViolations((prev) => {
-              const ids = new Set(prev.map(v => v.id || v.challan_number));
-              const combined = [...prev];
-              for (const v of msg.latest_violations) {
-                if (!ids.has(v.id || v.challan_number)) {
-                  combined.unshift(v);
-                  ids.add(v.id || v.challan_number);
+            setCurrentGps({ lat: frameLat, lng: frameLng });
+            routePointsRef.current.push([frameLat, frameLng]);
+
+            if (polylineRef.current) {
+              polylineRef.current.setLatLngs(routePointsRef.current);
+            }
+            if (vehicleMarkerRef.current) {
+              vehicleMarkerRef.current.setLatLng([frameLat, frameLng]);
+            }
+            if (mapRef.current && routePointsRef.current.length % 5 === 0) {
+              mapRef.current.panTo([frameLat, frameLng], { animate: true });
+            }
+
+            // Authoritative counts from backend if present
+            if (msg.counts) {
+              if (typeof msg.counts.pothole === 'number') setPotholeCount(msg.counts.pothole);
+              if (typeof msg.counts.crack === 'number') setCrackCount(msg.counts.crack);
+              if (typeof msg.counts.broken_road === 'number') setBrokenRoadCount(msg.counts.broken_road);
+              if (typeof msg.counts.missing_asphalt === 'number') setMissingAsphaltCount(msg.counts.missing_asphalt);
+              if (typeof msg.counts.road_damage === 'number') setRoadDamageCount(msg.counts.road_damage);
+              if (typeof msg.counts.vehicle === 'number') setVehicleCount(msg.counts.vehicle);
+              if (typeof msg.counts.helmet === 'number') setHelmetCount(msg.counts.helmet);
+              if (typeof msg.counts.number_plate === 'number') setNumberPlateCount(msg.counts.number_plate);
+              if (typeof msg.counts.helmet_violations === 'number') setHelmetViolationsCount(msg.counts.helmet_violations);
+            }
+
+            // Handle incoming detections on frame & update timeline
+            if (Array.isArray(msg.detections) && msg.detections.length > 0) {
+              const newItems: LiveDetectionItem[] = msg.detections.map((d: any, idx: number) => {
+                const cat = (d.category || 'damage').toLowerCase();
+                if (!msg.counts) {
+                  if (cat.includes('pothole')) setPotholeCount((c) => c + 1);
+                  else if (cat.includes('crack')) setCrackCount((c) => c + 1);
+                  else if (cat.includes('broken')) setBrokenRoadCount((c) => c + 1);
+                  else if (cat.includes('asphalt')) setMissingAsphaltCount((c) => c + 1);
+                  if (cat.includes('car') || cat.includes('truck') || cat.includes('vehicle')) setVehicleCount((c) => c + 1);
+                  if (cat.includes('helmet')) setHelmetCount((c) => c + 1);
+                  if (cat.includes('plate')) setNumberPlateCount((c) => c + 1);
                 }
+
+                const sev = d.severity || 'HIGH';
+                const markerColor = getSeverityColor(sev);
+
+                // Add damage marker to map
+                if (damageLayerGroupRef.current) {
+                  const markerIcon = L.divIcon({
+                    className: 'damage-pin',
+                    html: `<div style="background-color: ${markerColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 8px ${markerColor};"></div>`,
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                  });
+
+                  const m = L.marker([frameLat, frameLng], { icon: markerIcon });
+                  m.bindPopup(`
+                    <div style="font-family: monospace; font-size: 11px; color: #111;">
+                      <strong>${d.category.toUpperCase()}</strong><br/>
+                      Severity: ${sev}<br/>
+                      Conf: ${(d.confidence * 100).toFixed(0)}%<br/>
+                      Frame #${msg.frame_number} @ ${msg.timestamp.toFixed(1)}s
+                    </div>
+                  `);
+                  damageLayerGroupRef.current.addLayer(m);
+                }
+
+                return {
+                  id: `det-${msg.frame_number}-${idx}-${Date.now()}`,
+                  category: d.category || 'Pothole',
+                  confidence: d.confidence || 0.85,
+                  severity: sev,
+                  frame_number: msg.frame_number || 0,
+                  timestamp: msg.timestamp || 0,
+                  latitude: frameLat,
+                  longitude: frameLng,
+                  image_url: frameImgUrl
+                };
+              });
+
+              setTimelineEvents((prev) => [...newItems, ...prev.slice(0, 49)]);
+            }
+
+            // Update live traffic violations from frame payload
+            if (Array.isArray(msg.violations) && msg.violations.length > 0) {
+              setLiveViolations(msg.violations);
+              setHelmetViolationsCount(msg.violations.length);
+            } else if (Array.isArray(msg.latest_violations) && msg.latest_violations.length > 0) {
+              setLiveViolations((prev) => {
+                const ids = new Set(prev.map(v => v.id || v.challan_number));
+                const combined = [...prev];
+                for (const v of msg.latest_violations) {
+                  if (!ids.has(v.id || v.challan_number)) {
+                    combined.unshift(v);
+                    ids.add(v.id || v.challan_number);
+                  }
+                }
+                return combined;
+              });
+            }
+          }
+
+          // Direct violation event
+          if (msg.type === 'violation' && msg.violation) {
+            setLiveViolations((prev) => {
+              const v = msg.violation;
+              const exists = prev.some(item => item.id === v.id || item.challan_number === v.challan_number);
+              if (!exists) {
+                setHelmetViolationsCount((c) => c + 1);
+                return [v, ...prev];
               }
-              return combined;
+              return prev;
             });
           }
-        }
 
-        // Direct violation event
-        if (msg.type === 'violation' && msg.violation) {
-          setLiveViolations((prev) => {
-            const v = msg.violation;
-            const exists = prev.some(item => item.id === v.id || item.challan_number === v.challan_number);
-            if (!exists) {
-              setHelmetViolationsCount((c) => c + 1);
-              return [v, ...prev];
-            }
-            return prev;
-          });
-        }
+          // Completion Handling
+          if (msg.type === 'finished' || msg.type === 'processing_complete' || msg.progress === 100 || msg.stage === 'Finished' || msg.stage === 'Completed') {
+            setProgress(100);
+            setIsCompleted(true);
+            setActiveStage('Completed');
+            setStatusText('YOLO Real-Time Detection Completed! Output video and analytics saved.');
 
-        // Completion Handling
-        if (msg.type === 'finished' || msg.progress === 100 || msg.stage === 'Finished' || msg.stage === 'Completed') {
-          setProgress(100);
-          setIsCompleted(true);
-          setActiveStage('Completed');
-          setStatusText('YOLO Real-Time Detection Completed! Output video and analytics saved.');
-
-          videoService.getVideoDetails(videoId).then((details) => {
-            if (onProcessingComplete) onProcessingComplete(details);
-          }).catch(() => {});
-        }
-      },
-      (err) => {
-        console.warn('Live Processing WS Connection Notice:', err);
-        setStatusText('Inference pipeline running. Receiving live YOLO video stream...');
-      }
-    );
-
-    wsRef.current = ws;
-
-    // Fallback polling interval to guarantee status updates if WebSocket misses a packet
-    const pollInterval = setInterval(async () => {
-      if (!videoId || isCompleted) return;
-      try {
-        const details = await videoService.getVideoDetails(videoId);
-        if (details.status === 'completed') {
-          setProgress(100);
-          setIsCompleted(true);
-          setActiveStage('Completed');
-          setStatusText('YOLO Frame Processing Completed!');
-          clearInterval(pollInterval);
-          if (onProcessingComplete) onProcessingComplete(details);
-        } else if (details.status === 'failed') {
-          setStatusText('Video processing encountered an error.');
-          clearInterval(pollInterval);
-        } else {
-          // Check global progress endpoint if available
-          const statusRes = await apiClient.get('/process/status').catch(() => null);
-          if (statusRes && statusRes.data && statusRes.data.is_processing) {
-            if (typeof statusRes.data.progress_percent === 'number') {
-              setProgress(statusRes.data.progress_percent);
-            }
-            if (statusRes.data.status) setStatusText(statusRes.data.status);
-            if (statusRes.data.current_fps) setFps(statusRes.data.current_fps);
+            videoService.getVideoDetails(videoId).then((details) => {
+              if (onProcessingComplete) onProcessingComplete(details);
+            }).catch(() => {});
+          }
+        },
+        (err) => {
+          console.warn('[Frontend] Live Processing WS Connection Notice:', err);
+          // If connection fails, automatically attempt reconnect after 1.5s
+          if (isSubscribed && !isCompleted) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(establishWebSocket, 1500);
           }
         }
-      } catch (pollErr) {
-        // Silent catch for polling
-      }
-    }, 2500);
+      );
+
+      // Listen for socket close to auto-reconnect
+      ws.onclose = () => {
+        if (isSubscribed && !isCompleted) {
+          console.log('[Frontend] WebSocket closed. Automatically reconnecting in 1.5s...');
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = setTimeout(establishWebSocket, 1500);
+        }
+      };
+
+      wsRef.current = ws;
+    };
+
+    establishWebSocket();
 
     return () => {
+      isSubscribed = false;
+      clearTimeout(reconnectTimeout);
       if (wsRef.current) wsRef.current.close();
-      clearInterval(pollInterval);
     };
   }, [videoId, isCompleted]);
 
