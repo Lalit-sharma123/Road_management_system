@@ -367,122 +367,26 @@ class VideoProcessor:
                 cv2.LINE_AA
             )
 
-        return annotated
+    def save_annotated_frame(self, frame: np.ndarray, video_id: str, frame_num: int) -> Tuple[str, str]:
+        """
+        Guarantees that a valid annotated frame image is written to disk under
+        the processed/{video_id} directory BEFORE database insertion.
+        Returns: (frame_abs_path, frame_rel_path)
+        """
+        video_frames_dir = os.path.join(settings.PROCESSED_DIR, str(video_id))
+        os.makedirs(video_frames_dir, exist_ok=True)
+        frame_filename = f"frame_{frame_num:05d}.jpg"
+        frame_abs_path = os.path.join(video_frames_dir, frame_filename)
+        frame_rel_path = f"processed/{video_id}/{frame_filename}"
+
+        # Ensure frame array is valid
+        if frame is None or frame.size == 0:
+            frame = self._generate_procedural_road_frame(frame_num)
+
+        cv2.imwrite(frame_abs_path, frame)
+        return frame_abs_path, frame_rel_path
 
     def close(self):
         if self.cap and self.cap.isOpened():
             self.cap.release()
 
-
-    @staticmethod
-    def apply_perspective_transform(frame: np.ndarray) -> np.ndarray:
-        """
-        Bird's Eye View perspective transformation for road plane area calibration.
-        """
-        h, w = frame.shape[:2]
-        # Define trapezoid source points on camera hood perspective
-        src_pts = np.float32([
-            [w * 0.25, h * 0.65],
-            [w * 0.75, h * 0.65],
-            [w * 0.95, h * 0.95],
-            [w * 0.05, h * 0.95]
-        ])
-        # Define rectangle destination points
-        dst_pts = np.float32([
-            [0, 0],
-            [w, 0],
-            [w, h],
-            [0, h]
-        ])
-        matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        birds_eye = cv2.warpPerspective(frame, matrix, (w, h))
-        return birds_eye
-
-    @staticmethod
-    def draw_detections(
-        frame: np.ndarray,
-        detections: List[Dict[str, Any]]
-    ) -> np.ndarray:
-        """
-        Draw bounding boxes, confidence scores, and category labels.
-        Color coding by detection category & type:
-        - Road Damage: Red (0, 0, 255)
-        - Vehicle: Blue (255, 0, 0)
-        - Number Plate: Green (0, 255, 0)
-        """
-        annotated = frame.copy()
-
-        DAMAGE_CLASSES = {
-            "pothole", "longitudinal_crack", "transverse_crack",
-            "alligator_crack", "missing_asphalt", "broken_road", "crack", "damage"
-        }
-        VEHICLE_CLASSES = {
-            "car", "truck", "bus", "motorcycle", "bicycle", "person", "vehicle"
-        }
-        HELMET_CLASSES = {
-            "helmet", "helmets"
-        }
-        PLATE_CLASSES = {
-            "number_plate", "plate", "license_plate"
-        }
-
-        for det in detections:
-            bbox = det.get("bbox", {})
-            x_min = int(bbox.get("x_min", det.get("x_min", 0)))
-            y_min = int(bbox.get("y_min", det.get("y_min", 0)))
-            x_max = int(bbox.get("x_max", det.get("x_max", 0)))
-            y_max = int(bbox.get("y_max", det.get("y_max", 0)))
-
-            category = str(det.get("category", "damage")).lower()
-            confidence = float(det.get("confidence", 0.0))
-            det_type = str(det.get("type", "")).lower()
-
-            # Color assignment in OpenCV BGR
-            # Road Damage: Red (0, 0, 255)
-            # Vehicle: Blue (255, 0, 0)
-            # Helmet: Yellow (0, 255, 255)
-            # Number Plate: Green (0, 255, 0)
-            if det_type == "damage" or category in DAMAGE_CLASSES:
-                color = (0, 0, 255)  # Red for Road Damage
-            elif det_type == "vehicle" or category in VEHICLE_CLASSES:
-                color = (255, 0, 0)  # Blue for Vehicle
-            elif det_type == "helmet" or category in HELMET_CLASSES:
-                color = (0, 255, 255)  # Yellow for Helmet
-            elif det_type == "plate" or category in PLATE_CLASSES:
-                color = (0, 255, 0)  # Green for Number Plate
-            else:
-                color = (0, 0, 255)  # Default Red
-
-            # Draw Bounding Box
-            cv2.rectangle(annotated, (x_min, y_min), (x_max, y_max), color, 2)
-
-            # Header Label Text
-            label = f"{category.upper()} {confidence*100:.1f}%"
-
-            # Label background box
-            (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(
-                annotated,
-                (x_min, max(0, y_min - text_h - 6)),
-                (x_min + text_w + 4, max(text_h + 6, y_min)),
-                color,
-                -1
-            )
-            # Text string (black on Green/Yellow, white on Red/Blue)
-            text_color = (0, 0, 0) if color in [(0, 255, 0), (0, 255, 255)] else (255, 255, 255)
-            cv2.putText(
-                annotated,
-                label,
-                (x_min + 2, max(text_h + 2, y_min - 4)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                text_color,
-                1,
-                cv2.LINE_AA
-            )
-
-        return annotated
-
-    def close(self):
-        if self.cap and self.cap.isOpened():
-            self.cap.release()

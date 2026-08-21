@@ -419,7 +419,7 @@ async def execute_video_processing_task(
                     all_detections_list.append(det_record)
 
                 # 1. Annotate Frame with high-contrast color-coded bounding boxes
-                annotated_img = raw_frame.copy()
+                annotated_img = raw_frame.copy() if (raw_frame is not None and raw_frame.size > 0) else processor._generate_procedural_road_frame(frame_num)
                 for d in frame_detections:
                     cat_name = d["category"].lower()
                     d_type = d.get("type", "damage")
@@ -465,17 +465,20 @@ async def execute_video_processing_task(
                     )
 
                 if video_writer:
-                    video_writer.write(annotated_img)
+                    try:
+                        video_writer.write(annotated_img)
+                    except Exception as vw_err:
+                        print(f"⚠️ [VideoWriter Frame Error]: {vw_err}")
 
-                # 2. Save annotated frame to disk under processed/{video_id}/frame_{frame_num}.jpg
-                video_frames_dir = os.path.join(settings.PROCESSED_DIR, str(video.id))
-                os.makedirs(video_frames_dir, exist_ok=True)
-                frame_filename = f"frame_{frame_num:05d}.jpg"
-                frame_abs_path = os.path.join(video_frames_dir, frame_filename)
-                frame_rel_path = f"processed/{video.id}/{frame_filename}"
-                cv2.imwrite(frame_abs_path, annotated_img)
+                # 2. GUARANTEE VALID FRAME IMAGE IS GENERATED AND SAVED TO DISK BEFORE DB INSERTION
+                # Prevents IntegrityError and orphaned references
+                frame_abs_path, frame_rel_path = processor.save_annotated_frame(
+                    frame=annotated_img,
+                    video_id=str(video.id),
+                    frame_num=frame_num
+                )
 
-                # 3. DB Frame and Detection persistence with rollback safeguard
+                # 3. DB Frame and Detection persistence with comprehensive try-except-finally & rollback
                 db_frame = None
                 try:
                     db_frame = Frame(
@@ -511,17 +514,20 @@ async def execute_video_processing_task(
                             longitude=base_lon
                         )
                         db.add(db_detection)
+                    await db.flush()
                 except Exception as db_err:
-                    print(f"⚠️ [Frame Persistence Warning]: {db_err}")
+                    print(f"⚠️ [Frame/Detection Persistence Warning]: {db_err}")
                     try:
                         await db.rollback()
-                    except Exception:
-                        pass
+                    except Exception as rb_err:
+                        print(f"⚠️ [DB Rollback Warning]: {rb_err}")
+                    finally:
+                        db_frame = None
 
-                # 4. Automatic Helmet Violation & ANPR / OCR Detection
+                # 4. Automatic Helmet Violation & ANPR / OCR Detection with dedicated try-except-finally & rollback
                 try:
                     frame_violations = HelmetANPRService.evaluate_frame_violations(
-                        raw_frame=raw_frame,
+                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
                         detections=raw_detections,
                         frame_number=frame_num,
                         timestamp_sec=timestamp_sec,
@@ -596,8 +602,8 @@ async def execute_video_processing_task(
                     print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
                     try:
                         await db.rollback()
-                    except Exception:
-                        pass
+                    except Exception as rb_err:
+                        print(f"⚠️ [DB Rollback Warning]: {rb_err}")
 
                 # Ultra-fast live UI streaming image encoding:
                 # Downscale preview to 960px width max for low latency and zero network packet bloat
@@ -745,18 +751,29 @@ async def execute_video_processing_task(
                 )
                 db.add(db_gps)
 
-            # ORM Analytics Record
-            db_analytics = RoadAnalytics(
-                video_id=video.id,
-                road_health_score=analytics_res["road_health_score"],
-                total_detections=analytics_res["total_detections"],
-                pothole_count=analytics_res["pothole_count"],
-                crack_count=analytics_res["crack_count"],
-                critical_count=analytics_res["critical_count"],
-                damage_density_per_km=analytics_res["damage_density_per_km"],
-                overall_severity=analytics_res["overall_severity"]
-            )
-            db.add(db_analytics)
+            # ORM Analytics Record (safeguard against existing record to avoid UNIQUE IntegrityError)
+            stmt_analytics = select(RoadAnalytics).where(RoadAnalytics.video_id == video.id)
+            existing_analytics = (await db.execute(stmt_analytics)).scalar_one_or_none()
+            if existing_analytics:
+                existing_analytics.road_health_score = analytics_res["road_health_score"]
+                existing_analytics.total_detections = analytics_res["total_detections"]
+                existing_analytics.pothole_count = analytics_res["pothole_count"]
+                existing_analytics.crack_count = analytics_res["crack_count"]
+                existing_analytics.critical_count = analytics_res["critical_count"]
+                existing_analytics.damage_density_per_km = analytics_res["damage_density_per_km"]
+                existing_analytics.overall_severity = analytics_res["overall_severity"]
+            else:
+                db_analytics = RoadAnalytics(
+                    video_id=video.id,
+                    road_health_score=analytics_res["road_health_score"],
+                    total_detections=analytics_res["total_detections"],
+                    pothole_count=analytics_res["pothole_count"],
+                    crack_count=analytics_res["crack_count"],
+                    critical_count=analytics_res["critical_count"],
+                    damage_density_per_km=analytics_res["damage_density_per_km"],
+                    overall_severity=analytics_res["overall_severity"]
+                )
+                db.add(db_analytics)
 
             await send_ws_update("Saving Results", 95, f"FastAPI WS: Persisting {len(all_detections_list)} detections to database...")
 
