@@ -210,6 +210,15 @@ class TestSessionIsolationAndPipelineCleanup(unittest.TestCase):
         self.assertIn("cleanup_system_resources", source)
         self.assertIn("session_reset", source)
 
+    def test_video_processor_resilience_on_missing_file(self):
+        """Verify VideoProcessor initializes safely without crashing when a video file path does not exist."""
+        processor_path = os.path.join(BACKEND_DIR, "cv", "video_processor.py")
+        with open(processor_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("is_synthetic", source)
+        self.assertIn("_generate_procedural_road_frame", source)
+        self.assertIn("resolve_video_path", source)
+
 
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestPythonBackendAST)

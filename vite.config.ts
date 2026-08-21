@@ -19,6 +19,23 @@ export default defineConfig(() => {
           target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
           changeOrigin: true,
           secure: false,
+          ws: true,
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              const code = (err as any)?.code;
+              if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
+                return; // Gracefully handle backend disconnects
+              }
+            });
+            proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+              socket.on('error', (err: any) => {
+                const code = err?.code;
+                if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
+                  return; // Suppress socket disconnect errors
+                }
+              });
+            });
+          },
         },
         '/uploads': {
           target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
@@ -34,6 +51,22 @@ export default defineConfig(() => {
           target: process.env.VITE_WS_URL || 'ws://127.0.0.1:8000',
           ws: true,
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              const code = (err as any)?.code;
+              if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
+                return;
+              }
+            });
+            proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+              socket.on('error', (err: any) => {
+                const code = err?.code;
+                if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
+                  return;
+                }
+              });
+            });
+          },
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

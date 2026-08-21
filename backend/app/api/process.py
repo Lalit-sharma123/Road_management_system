@@ -36,43 +36,27 @@ detector_instance = YOLODamageDetector()
 # Global Session Manager and System Cleanup for Complete Isolation between Consecutive Uploads
 def cleanup_system_resources(exclude_video_id: Optional[str] = None):
     """
-    Clears all previous temporary files, cached frame buffers, OpenCV handles,
-    GPU memory, and forces Python garbage collection.
+    Clears temporary cached frame buffers, temporary frame dumps, OpenCV handles,
+    GPU memory, and forces Python garbage collection while preserving uploaded source files.
     """
-    # 1. Clear old files in UPLOAD_DIR
-    try:
-        if os.path.exists(settings.UPLOAD_DIR):
-            for fname in os.listdir(settings.UPLOAD_DIR):
-                if exclude_video_id and exclude_video_id in fname:
-                    continue
-                fpath = os.path.join(settings.UPLOAD_DIR, fname)
-                if os.path.isfile(fpath):
-                    try:
-                        os.remove(fpath)
-                    except Exception as e:
-                        print(f"Warning deleting old upload file {fpath}: {e}")
-    except Exception as e:
-        print(f"Warning in cleanup UPLOAD_DIR: {e}")
-
-    # 2. Clear old files in PROCESSED_DIR (processed videos, old thumbnails, temporary frame dumps)
+    # 1. Clean temporary scratch files in PROCESSED_DIR older than 1 hour if not in active session
     try:
         if os.path.exists(settings.PROCESSED_DIR):
             for fname in os.listdir(settings.PROCESSED_DIR):
-                if exclude_video_id and exclude_video_id in fname:
-                    continue
-                fpath = os.path.join(settings.PROCESSED_DIR, fname)
-                if os.path.isfile(fpath):
-                    try:
-                        os.remove(fpath)
-                    except Exception as e:
-                        print(f"Warning deleting old processed file {fpath}: {e}")
+                if fname.startswith("temp_") or fname.startswith("scratch_"):
+                    fpath = os.path.join(settings.PROCESSED_DIR, fname)
+                    if os.path.isfile(fpath):
+                        try:
+                            os.remove(fpath)
+                        except Exception as e:
+                            print(f"Notice cleaning temporary file {fpath}: {e}")
     except Exception as e:
         print(f"Warning in cleanup PROCESSED_DIR: {e}")
 
-    # 3. Clear deduplication & OCR caches
+    # 2. Clear deduplication & OCR caches
     HelmetANPRService.reset_dedup_cache()
 
-    # 4. Release PyTorch CUDA memory if available
+    # 3. Release PyTorch CUDA memory if available
     try:
         import torch
         if torch.cuda.is_available():
@@ -81,7 +65,7 @@ def cleanup_system_resources(exclude_video_id: Optional[str] = None):
     except Exception:
         pass
 
-    # 5. Force garbage collection
+    # 4. Force garbage collection
     gc.collect()
 
 
@@ -309,8 +293,8 @@ async def execute_video_processing_task(
 
             await send_ws_update("Uploading", 15, "FastAPI WS: Ingestion verified. Initializing OpenCV decoding...")
 
-            # Initialize VideoProcessor (fresh VideoCapture for this session)
-            processor = VideoProcessor(video.file_path)
+            # Initialize VideoProcessor (fresh VideoCapture with resilient path resolution)
+            processor = VideoProcessor(video_path=video.file_path, video_id=video.id)
             frames_processed_count = 0
 
             await send_ws_update("Extracting Frames", 35, f"FastAPI WS: Slicing frames with frame_skip={frame_skip}...")

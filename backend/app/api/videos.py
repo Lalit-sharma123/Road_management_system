@@ -59,7 +59,7 @@ async def upload_video(
     # 4. Process OpenCV Metadata & Thumbnail with guaranteed release
     processor = None
     try:
-        processor = VideoProcessor(saved_path)
+        processor = VideoProcessor(video_path=saved_path, video_id=video_id)
         metadata = processor.get_metadata()
         
         thumbnail_filename = f"thumb_{video_id}.jpg"

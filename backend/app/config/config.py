@@ -115,6 +115,69 @@ class Settings(BaseSettings):
         return weights_dir_path / clean_name
 
 
+    def resolve_video_path(self, video_path: Optional[str], video_id: Optional[str] = None) -> Optional[Path]:
+        """
+        Centralized video path resolver.
+        Handles relative, absolute, cross-machine, or moved video file paths.
+        Returns the resolved existing Path if found, otherwise None.
+        """
+        if not video_path and not video_id:
+            return None
+
+        # 1. Direct path check if provided
+        if video_path:
+            p = Path(video_path)
+            if p.is_file():
+                return p.resolve()
+
+            clean_name = p.name
+            candidates = [
+                Path(self.UPLOAD_DIR).resolve() / clean_name,
+                self.BASE_DIR.resolve() / "uploads" / clean_name,
+                self.PROJECT_ROOT.resolve() / "backend" / "uploads" / clean_name,
+                self.PROJECT_ROOT.resolve() / "uploads" / clean_name,
+                Path.cwd().resolve() / "backend" / "uploads" / clean_name,
+                Path.cwd().resolve() / "uploads" / clean_name,
+                Path(self.PROCESSED_DIR).resolve() / clean_name,
+            ]
+            for candidate in candidates:
+                if candidate.is_file():
+                    return candidate.resolve()
+
+        # 2. Check candidate filenames by video_id
+        if video_id:
+            for ext in [".mp4", ".avi", ".mov", ".mkv", ".webm"]:
+                fname = f"{video_id}{ext}"
+                candidates = [
+                    Path(self.UPLOAD_DIR).resolve() / fname,
+                    self.BASE_DIR.resolve() / "uploads" / fname,
+                    self.PROJECT_ROOT.resolve() / "backend" / "uploads" / fname,
+                    self.PROJECT_ROOT.resolve() / "uploads" / fname,
+                    Path.cwd().resolve() / "backend" / "uploads" / fname,
+                    Path.cwd().resolve() / "uploads" / fname,
+                    Path(self.PROCESSED_DIR).resolve() / fname,
+                    Path(self.PROCESSED_DIR).resolve() / f"processed_{fname}",
+                ]
+                for candidate in candidates:
+                    if candidate.is_file():
+                        return candidate.resolve()
+
+        # 3. Check all existing files in UPLOAD_DIR for substring match
+        for search_dir in [Path(self.UPLOAD_DIR), self.BASE_DIR / "uploads", self.PROJECT_ROOT / "backend" / "uploads", Path.cwd() / "backend" / "uploads"]:
+            if search_dir.is_dir():
+                try:
+                    for f in search_dir.iterdir():
+                        if f.is_file():
+                            if video_id and video_id in f.name:
+                                return f.resolve()
+                            if video_path and Path(video_path).name in f.name:
+                                return f.resolve()
+                except Exception:
+                    pass
+
+        return None
+
+
 settings = Settings()
 
 # Ensure required local directories exist
