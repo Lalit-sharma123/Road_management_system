@@ -114,7 +114,7 @@ class Frame(Base):
     video_id: Mapped[str] = mapped_column(String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
     frame_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     timestamp_seconds: Mapped[float] = mapped_column(Float, nullable=False)
-    image_path: Mapped[str] = mapped_column(Text, nullable=False)
+    image_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     has_damage: Mapped[bool] = mapped_column(Boolean, default=False)
 
     video: Mapped["Video"] = relationship("Video", back_populates="frames")

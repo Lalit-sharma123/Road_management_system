@@ -416,121 +416,7 @@ async def execute_video_processing_task(
                     frame_detections.append(det_record)
                     all_detections_list.append(det_record)
 
-                # DB Frame and Detection persistence
-                try:
-                    db_frame = Frame(
-                        video_id=video.id,
-                        frame_number=frame_num,
-                        timestamp_seconds=timestamp_sec,
-                        has_damage=has_damage
-                    )
-                    db.add(db_frame)
-                    await db.flush()
-
-                    for d_rec in frame_detections:
-                        base_lat = 28.4595 + (frame_num * 0.00008)
-                        base_lon = 77.0266 + (frame_num * 0.00009)
-                        db_detection = Detection(
-                            video_id=video.id,
-                            camera_id=None,
-                            frame_id=db_frame.id,
-                            frame_number=frame_num,
-                            timestamp_seconds=timestamp_sec,
-                            category=d_rec["category"],
-                            confidence=d_rec["confidence"],
-                            x_min=d_rec["x_min"],
-                            y_min=d_rec["y_min"],
-                            x_max=d_rec["x_max"],
-                            y_max=d_rec["y_max"],
-                            area_pixels=float((d_rec["x_max"] - d_rec["x_min"]) * (d_rec["y_max"] - d_rec["y_min"])),
-                            severity=d_rec["severity"],
-                            severity_score=d_rec["severity_score"],
-                            distance_meters=d_rec["distance_meters"],
-                            latitude=base_lat,
-                            longitude=base_lon
-                        )
-                        db.add(db_detection)
-                except Exception as db_err:
-                    print(f"⚠️ [Frame Persistence Warning]: {db_err}")
-
-                # Automatic Helmet Violation & ANPR / OCR Detection
-                try:
-                    frame_violations = HelmetANPRService.evaluate_frame_violations(
-                        raw_frame=raw_frame,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        location_name="National Highway 48 - Sector 29",
-                        base_lat=base_lat,
-                        base_lon=base_lon
-                    )
-
-                    for v_data in frame_violations:
-                        helmet_violations_count += 1
-                        violations_list.append(v_data)
-
-                        # Persist to database
-                        db_violation = TrafficViolation(
-                            id=v_data["id"],
-                            challan_number=v_data["challan_number"],
-                            violation_type=v_data["violation_type"],
-                            license_plate_number=v_data["license_plate_number"],
-                            confidence=v_data["confidence"],
-                            rider_confidence=v_data["rider_confidence"],
-                            fine_amount=v_data["fine_amount"],
-                            fine_status=v_data["fine_status"],
-                            video_id=video.id,
-                            camera_id=v_data.get("camera_id"),
-                            frame_id=db_frame.id if 'db_frame' in locals() and db_frame else None,
-                            frame_number=frame_num,
-                            timestamp_seconds=timestamp_sec,
-                            evidence_image_path=v_data.get("evidence_image_path"),
-                            evidence_image_url=v_data.get("evidence_image_url"),
-                            plate_crop_url=v_data.get("plate_crop_url"),
-                            vehicle_type=v_data["vehicle_type"],
-                            latitude=v_data["latitude"],
-                            longitude=v_data["longitude"],
-                            location_name=v_data["location_name"],
-                            notes=v_data["notes"]
-                        )
-                        db.add(db_violation)
-
-                        # Broadcast live Violation Event via WebSocket
-                        violation_ws_msg = {
-                            "type": "violation",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "violation": v_data
-                        }
-                        await ws_manager.broadcast(violation_ws_msg)
-                        await ws_broadcaster.broadcast(violation_ws_msg)
-
-                        # Check for Stolen Vehicle Match in Real-Time (O(1) in-memory lookup)
-                        try:
-                            plate_num = v_data.get("license_plate_number")
-                            if plate_num:
-                                await StolenVehicleService.process_plate_detection(
-                                    plate_str=plate_num,
-                                    camera_id=v_data.get("camera_id") or "CAM-01",
-                                    camera_name="Highway ANPR Stream",
-                                    camera_location=v_data.get("location_name") or "National Highway 48",
-                                    latitude=v_data.get("latitude") or 28.4595,
-                                    longitude=v_data.get("longitude") or 77.0266,
-                                    vehicle_snapshot_url=v_data.get("evidence_image_url"),
-                                    plate_crop_url=v_data.get("plate_crop_url"),
-                                    ocr_confidence=v_data.get("confidence") or 0.95,
-                                    stream_id=video.id,
-                                    frame_number=frame_num,
-                                    db_session=db
-                                )
-                        except Exception as sv_err:
-                            print(f"Notice on Stolen Vehicle check: {sv_err}")
-                except Exception as viol_err:
-                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
-
-                # Annotate Frame with high-contrast color-coded bounding boxes
+                # 1. Annotate Frame with high-contrast color-coded bounding boxes
                 annotated_img = raw_frame.copy()
                 for d in frame_detections:
                     cat_name = d["category"].lower()
@@ -579,6 +465,138 @@ async def execute_video_processing_task(
                 if video_writer:
                     video_writer.write(annotated_img)
 
+                # 2. Save annotated frame to disk under processed/{video_id}/frame_{frame_num}.jpg
+                video_frames_dir = os.path.join(settings.PROCESSED_DIR, str(video.id))
+                os.makedirs(video_frames_dir, exist_ok=True)
+                frame_filename = f"frame_{frame_num:05d}.jpg"
+                frame_abs_path = os.path.join(video_frames_dir, frame_filename)
+                frame_rel_path = f"processed/{video.id}/{frame_filename}"
+                cv2.imwrite(frame_abs_path, annotated_img)
+
+                # 3. DB Frame and Detection persistence with rollback safeguard
+                db_frame = None
+                try:
+                    db_frame = Frame(
+                        video_id=video.id,
+                        frame_number=frame_num,
+                        timestamp_seconds=timestamp_sec,
+                        image_path=frame_rel_path,
+                        has_damage=has_damage
+                    )
+                    db.add(db_frame)
+                    await db.flush()
+
+                    for d_rec in frame_detections:
+                        base_lat = 28.4595 + (frame_num * 0.00008)
+                        base_lon = 77.0266 + (frame_num * 0.00009)
+                        db_detection = Detection(
+                            video_id=video.id,
+                            camera_id=None,
+                            frame_id=db_frame.id,
+                            frame_number=frame_num,
+                            timestamp_seconds=timestamp_sec,
+                            category=d_rec["category"],
+                            confidence=d_rec["confidence"],
+                            x_min=d_rec["x_min"],
+                            y_min=d_rec["y_min"],
+                            x_max=d_rec["x_max"],
+                            y_max=d_rec["y_max"],
+                            area_pixels=float((d_rec["x_max"] - d_rec["x_min"]) * (d_rec["y_max"] - d_rec["y_min"])),
+                            severity=d_rec["severity"],
+                            severity_score=d_rec["severity_score"],
+                            distance_meters=d_rec["distance_meters"],
+                            latitude=base_lat,
+                            longitude=base_lon
+                        )
+                        db.add(db_detection)
+                except Exception as db_err:
+                    print(f"⚠️ [Frame Persistence Warning]: {db_err}")
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+
+                # 4. Automatic Helmet Violation & ANPR / OCR Detection
+                try:
+                    frame_violations = HelmetANPRService.evaluate_frame_violations(
+                        raw_frame=raw_frame,
+                        detections=raw_detections,
+                        frame_number=frame_num,
+                        timestamp_sec=timestamp_sec,
+                        video_id=video.id,
+                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
+                        location_name="National Highway 48 - Sector 29",
+                        base_lat=base_lat,
+                        base_lon=base_lon
+                    )
+
+                    for v_data in frame_violations:
+                        helmet_violations_count += 1
+                        violations_list.append(v_data)
+
+                        # Persist to database
+                        db_violation = TrafficViolation(
+                            id=v_data["id"],
+                            challan_number=v_data["challan_number"],
+                            violation_type=v_data["violation_type"],
+                            license_plate_number=v_data["license_plate_number"],
+                            confidence=v_data["confidence"],
+                            rider_confidence=v_data["rider_confidence"],
+                            fine_amount=v_data["fine_amount"],
+                            fine_status=v_data["fine_status"],
+                            video_id=video.id,
+                            camera_id=v_data.get("camera_id"),
+                            frame_id=db_frame.id if db_frame else None,
+                            frame_number=frame_num,
+                            timestamp_seconds=timestamp_sec,
+                            evidence_image_path=v_data.get("evidence_image_path"),
+                            evidence_image_url=v_data.get("evidence_image_url"),
+                            plate_crop_url=v_data.get("plate_crop_url"),
+                            vehicle_type=v_data["vehicle_type"],
+                            latitude=v_data["latitude"],
+                            longitude=v_data["longitude"],
+                            location_name=v_data["location_name"],
+                            notes=v_data["notes"]
+                        )
+                        db.add(db_violation)
+
+                        # Broadcast live Violation Event via WebSocket
+                        violation_ws_msg = {
+                            "type": "violation",
+                            "session_id": session_id,
+                            "video_id": video.id,
+                            "violation": v_data
+                        }
+                        await ws_manager.broadcast(violation_ws_msg)
+                        await ws_broadcaster.broadcast(violation_ws_msg)
+
+                        # Check for Stolen Vehicle Match in Real-Time (O(1) in-memory lookup)
+                        try:
+                            plate_num = v_data.get("license_plate_number")
+                            if plate_num:
+                                await StolenVehicleService.process_plate_detection(
+                                    plate_str=plate_num,
+                                    camera_id=v_data.get("camera_id") or "CAM-01",
+                                    camera_name="Highway ANPR Stream",
+                                    camera_location=v_data.get("location_name") or "National Highway 48",
+                                    latitude=v_data.get("latitude") or 28.4595,
+                                    longitude=v_data.get("longitude") or 77.0266,
+                                    vehicle_snapshot_url=v_data.get("evidence_image_url"),
+                                    plate_crop_url=v_data.get("plate_crop_url"),
+                                    ocr_confidence=v_data.get("confidence") or 0.95,
+                                    stream_id=video.id,
+                                    frame_number=frame_num,
+                                    db_session=db
+                                )
+                        except Exception as sv_err:
+                            print(f"Notice on Stolen Vehicle check: {sv_err}")
+                except Exception as viol_err:
+                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+
                 # Ultra-fast live UI streaming image encoding:
                 # Downscale preview to 960px width max for low latency and zero network packet bloat
                 stream_img = annotated_img
@@ -614,12 +632,25 @@ async def execute_video_processing_task(
 
                 base_lat = 28.4595 + (frame_num * 0.00008)
                 base_lon = 77.0266 + (frame_num * 0.00009)
-                total_batches = max(1, total_expected_frames / max(1, frame_skip))
-                current_progress = min(98, max(5, int((frames_processed_count / total_batches) * 95)))
+                total_batches = max(1, int(total_expected_frames / max(1, frame_skip)))
+                current_progress = min(99, max(1, int((frames_processed_count / total_batches) * 100)))
                 live_road_health = round(max(20.0, 100.0 - (road_damage_count * 4.0)), 1)
                 remaining_frames = max(0, total_batches - frames_processed_count)
                 effective_fps = max(1.0, float(processor.fps or 30.0) / max(1, frame_skip))
                 eta_sec = max(0, round(remaining_frames / effective_fps, 1))
+
+                # Update global progress state for status polling
+                processing_progress_state["is_processing"] = True
+                processing_progress_state["video_id"] = video.id
+                processing_progress_state["current_frame"] = frame_num
+                processing_progress_state["total_frames"] = total_expected_frames
+                processing_progress_state["progress_percent"] = current_progress
+                processing_progress_state["current_fps"] = round(float(processor.fps or 30.0), 1)
+                processing_progress_state["estimated_time_remaining_sec"] = eta_sec
+                processing_progress_state["pothole_count"] = pothole_count
+                processing_progress_state["crack_count"] = crack_count
+                processing_progress_state["road_health_index"] = live_road_health
+                processing_progress_state["status"] = f"Detecting frame {frame_num}/{total_expected_frames}"
 
                 ws_frame_msg = {
                     "type": "frame",
@@ -748,8 +779,16 @@ async def execute_video_processing_task(
 
         except asyncio.CancelledError:
             print(f"🛑 [Session {session_id}] Background task cancelled cleanly.")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
         except Exception as e:
             print(f"[Processing Pipeline Error]: {e}")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             if video:
                 try:
                     video.status = ProcessingStatus.FAILED

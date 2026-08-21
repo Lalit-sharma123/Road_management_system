@@ -481,14 +481,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           return;
         }
 
-        // Strict Session ID validation: if session_id is present, ensure it matches active session
+        // Track active session for this video stream
         if (msg.session_id) {
-          if (!activeSessionIdRef.current) {
-            activeSessionIdRef.current = msg.session_id;
-          } else if (activeSessionIdRef.current !== msg.session_id) {
-            // Superseded or stale frame from older session: drop immediately
-            return;
-          }
+          activeSessionIdRef.current = msg.session_id;
         }
 
         // Calculate live FPS
