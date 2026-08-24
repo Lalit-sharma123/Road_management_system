@@ -27,14 +27,22 @@ class StolenVehicleService:
     # In-memory O(1) hash map cache: normalized_plate -> StolenVehicle dict
     _registry_cache: Dict[str, Dict[str, Any]] = {}
     
-    # Cooldown tracker: f"{camera_id}_{normalized_plate}" -> timestamp
+    # Cooldown tracker: f"{scope}_{normalized_plate}" -> timestamp
     _cooldown_tracker: Dict[str, float] = {}
+
+    # Temporal confirmation cache for multi-frame OCR stability:
+    # normalized_plate -> {"last_seen": float, "ocr_confidence": float, "plate_confidence": float, "confirmation_count": int}
+    _plate_temporal_cache: Dict[str, Dict[str, Any]] = {}
 
     # Cached settings
     _settings_cache: Dict[str, Any] = {
         "enabled": True,
-        "alert_cooldown_seconds": 300,
-        "duplicate_interval_seconds": 300,
+        "alert_cooldown_seconds": getattr(settings, "STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS", 10),
+        "duplicate_interval_seconds": getattr(settings, "STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS", 10),
+        "min_ocr_confidence": getattr(settings, "STOLEN_VEHICLE_MIN_OCR_CONFIDENCE", 0.70),
+        "min_plate_confidence": getattr(settings, "STOLEN_VEHICLE_MIN_PLATE_CONFIDENCE", 0.50),
+        "confirmation_frames": getattr(settings, "STOLEN_VEHICLE_CONFIRMATION_FRAMES", 2),
+        "cache_seconds": getattr(settings, "STOLEN_VEHICLE_CACHE_SECONDS", 30),
         "dashboard_notification": True,
         "browser_notification": True,
         "sound_alert": True,
@@ -46,17 +54,32 @@ class StolenVehicleService:
     _is_initialized: bool = False
 
     @classmethod
-    def normalize_plate(cls, plate_str: Optional[str]) -> str:
+    def normalize_vehicle_number(cls, text: Optional[str]) -> str:
         """
-        Normalizes any vehicle license plate format:
-        Examples:
-        - "DL-01-AB-1234" -> "DL01AB1234"
-        - "hr 26 dq 5519" -> "HR26DQ5519"
-        - "MH.12.DE.1432" -> "MH12DE1432"
+        Centralized normalization function:
+        - Uppercase
+        - Remove spaces, hyphens, underscores, dots, slashes, punctuation
+        - Trim whitespace
+        - Returns pure alphanumeric uppercase representation (e.g. 'UP32 AB 1234' -> 'UP32AB1234')
         """
-        if not plate_str:
+        if not text:
             return ""
-        return re.sub(r'[^A-Z0-9]', '', plate_str.upper())
+        return re.sub(r'[^A-Z0-9]', '', str(text).upper().strip())
+
+    @classmethod
+    def normalize_plate(cls, plate_str: Optional[str]) -> str:
+        """Direct alias for normalize_vehicle_number."""
+        return cls.normalize_vehicle_number(plate_str)
+
+    @classmethod
+    def format_display_number(cls, raw: str) -> str:
+        """Helper to format normalized plate with standard spaced aesthetic (e.g. DL01AB1234 -> DL 01 AB 1234)."""
+        norm = cls.normalize_vehicle_number(raw)
+        if len(norm) >= 9:
+            return f"{norm[:2]} {norm[2:4]} {norm[4:6]} {norm[6:]}"
+        elif len(norm) >= 6:
+            return f"{norm[:2]} {norm[2:4]} {norm[4:]}"
+        return norm or raw
 
     @classmethod
     async def initialize_cache(cls):
@@ -72,21 +95,33 @@ class StolenVehicleService:
     @classmethod
     async def reload_cache(cls, session: AsyncSession):
         """Refreshes the in-memory cache from database."""
-        # 1. Load active stolen vehicles
-        stmt = select(StolenVehicle).where(StolenVehicle.status == "ACTIVE")
+        # 1. Load active stolen vehicles (status in 'stolen' or 'ACTIVE')
+        stmt = select(StolenVehicle).where(
+            or_(
+                func.lower(StolenVehicle.status) == "stolen",
+                func.upper(StolenVehicle.status) == "ACTIVE"
+            )
+        )
         result = await session.execute(stmt)
         vehicles = result.scalars().all()
 
         new_cache = {}
         for v in vehicles:
-            norm = cls.normalize_plate(v.vehicle_number)
+            norm = cls.normalize_vehicle_number(v.vehicle_number or v.normalized_vehicle_number)
             if norm:
+                # Disallow recovered or inactive vehicles from triggering alerts
+                v_status = str(v.status or "stolen").lower()
+                if v_status in ["recovered", "inactive", "resolved"]:
+                    continue
+
                 new_cache[norm] = {
                     "id": v.id,
                     "vehicle_number": v.vehicle_number,
                     "normalized_number": norm,
+                    "normalized_vehicle_number": norm,
                     "owner_name": v.owner_name,
                     "vehicle_type": v.vehicle_type,
+                    "description": v.description or v.notes or v.reason,
                     "fir_number": v.fir_number,
                     "police_station": v.police_station,
                     "date_reported": v.date_reported.isoformat() if v.date_reported else None,
@@ -101,7 +136,7 @@ class StolenVehicleService:
         stmt_set = select(StolenVehicleSettings)
         set_res = (await session.execute(stmt_set)).scalars().first()
         if set_res:
-            cls._settings_cache = {
+            cls._settings_cache.update({
                 "enabled": set_res.enabled,
                 "alert_cooldown_seconds": set_res.alert_cooldown_seconds,
                 "duplicate_interval_seconds": set_res.duplicate_interval_seconds,
@@ -111,34 +146,39 @@ class StolenVehicleService:
                 "sms_enabled": set_res.sms_enabled,
                 "whatsapp_enabled": set_res.whatsapp_enabled,
                 "email_enabled": set_res.email_enabled
-            }
+            })
 
     @classmethod
     def is_stolen_in_memory(cls, plate_str: str) -> Optional[Dict[str, Any]]:
         """
         Ultra-fast O(1) synchronous in-memory lookup with OCR tolerance.
         Zero performance overhead on YOLO/ANPR inference loop.
+        Only matches records with status 'stolen' or 'ACTIVE'.
         """
         if not cls._settings_cache.get("enabled", True):
             return None
         
-        norm = cls.normalize_plate(plate_str)
-        if not norm:
+        norm = cls.normalize_vehicle_number(plate_str)
+        if not norm or len(norm) < 4:
             return None
         
         # 1. Exact normalized match
         if norm in cls._registry_cache:
-            return cls._registry_cache[norm]
+            rec = cls._registry_cache[norm]
+            if str(rec.get("status", "")).lower() not in ["recovered", "inactive"]:
+                return rec
 
         # 2. Substring & OCR error-tolerant matching for active registered stolen vehicles
         for reg_plate, record in cls._registry_cache.items():
-            if record.get("status", "ACTIVE") != "ACTIVE":
+            rec_status = str(record.get("status", "")).lower()
+            if rec_status in ["recovered", "inactive"]:
                 continue
+
             # Direct containment check
-            if (len(reg_plate) >= 4 and reg_plate in norm) or (len(norm) >= 4 and norm in reg_plate):
+            if (len(reg_plate) >= 5 and reg_plate in norm) or (len(norm) >= 5 and norm in reg_plate):
                 return record
             # 1-character OCR error tolerance (e.g. O/0, I/1, S/5, B/8)
-            if len(reg_plate) == len(norm) and len(reg_plate) >= 4:
+            if len(reg_plate) == len(norm) and len(reg_plate) >= 5:
                 diffs = sum(1 for a, b in zip(reg_plate, norm) if a != b)
                 if diffs <= 1:
                     return record
@@ -146,21 +186,77 @@ class StolenVehicleService:
         return None
 
     @classmethod
-    def check_cooldown(cls, camera_id: Optional[str], normalized_plate: str) -> bool:
+    def update_temporal_confirmation(
+        cls,
+        normalized_plate: str,
+        ocr_confidence: float,
+        plate_confidence: float = 0.90
+    ) -> bool:
+        """
+        Temporal multi-frame false positive protection:
+        Requires STOLEN_VEHICLE_CONFIRMATION_FRAMES consecutive or clustered hits
+        within STOLEN_VEHICLE_CACHE_SECONDS, OR single hit with very high OCR confidence (>= 0.90).
+        """
+        now = time.time()
+        cache_window = cls._settings_cache.get("cache_seconds", getattr(settings, "STOLEN_VEHICLE_CACHE_SECONDS", 30))
+        required_frames = cls._settings_cache.get("confirmation_frames", getattr(settings, "STOLEN_VEHICLE_CONFIRMATION_FRAMES", 2))
+
+        # Evict stale entries
+        stale_keys = [k for k, v in cls._plate_temporal_cache.items() if (now - v.get("last_seen", 0)) > cache_window]
+        for k in stale_keys:
+            cls._plate_temporal_cache.pop(k, None)
+
+        # High single frame confidence bypass
+        if ocr_confidence >= 0.88 and plate_confidence >= 0.70:
+            cls._plate_temporal_cache[normalized_plate] = {
+                "last_seen": now,
+                "ocr_confidence": ocr_confidence,
+                "plate_confidence": plate_confidence,
+                "confirmation_count": required_frames
+            }
+            return True
+
+        if normalized_plate in cls._plate_temporal_cache:
+            entry = cls._plate_temporal_cache[normalized_plate]
+            entry["last_seen"] = now
+            entry["confirmation_count"] += 1
+            entry["ocr_confidence"] = max(entry["ocr_confidence"], ocr_confidence)
+            entry["plate_confidence"] = max(entry["plate_confidence"], plate_confidence)
+
+            if entry["confirmation_count"] >= required_frames:
+                return True
+        else:
+            cls._plate_temporal_cache[normalized_plate] = {
+                "last_seen": now,
+                "ocr_confidence": ocr_confidence,
+                "plate_confidence": plate_confidence,
+                "confirmation_count": 1
+            }
+            if required_frames <= 1:
+                return True
+
+        return False
+
+    @classmethod
+    def check_cooldown(cls, scope_id: Optional[str], normalized_plate: str) -> bool:
         """
         Returns True if cooldown is active (alert should be suppressed),
         False if alert is permitted (and updates cooldown timestamp).
+        Cooldown duration configured via STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS (default 10s).
         """
-        cam_key = f"{camera_id or 'global'}_{normalized_plate}"
+        key = f"{scope_id or 'global'}_{normalized_plate}"
         now = time.time()
-        cooldown_sec = cls._settings_cache.get("alert_cooldown_seconds", 300)
+        cooldown_sec = cls._settings_cache.get(
+            "alert_cooldown_seconds",
+            getattr(settings, "STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS", 10)
+        )
 
-        if cam_key in cls._cooldown_tracker:
-            elapsed = now - cls._cooldown_tracker[cam_key]
+        if key in cls._cooldown_tracker:
+            elapsed = now - cls._cooldown_tracker[key]
             if elapsed < cooldown_sec:
                 return True  # Under active cooldown
 
-        cls._cooldown_tracker[cam_key] = now
+        cls._cooldown_tracker[key] = now
         return False
 
     @classmethod
@@ -425,6 +521,10 @@ class StolenVehicleService:
                     plate_crop_url=pl_url,
                     plate_crop_path=pl_path,
                     ocr_confidence=ocr_conf,
+                    plate_confidence=float(matched_plate.get("confidence", 0.90) if matched_plate else 0.90),
+                    vehicle_bbox=v,
+                    plate_bbox=matched_plate,
+                    source="video" if video_id else "camera",
                     stream_id=video_id,
                     frame_number=frame_number,
                     tracking_id=f"TRK-{frame_number}-{v_idx}",
@@ -450,6 +550,10 @@ class StolenVehicleService:
         plate_crop_url: Optional[str] = None,
         plate_crop_path: Optional[str] = None,
         ocr_confidence: float = 0.95,
+        plate_confidence: float = 0.90,
+        vehicle_bbox: Optional[Dict[str, float]] = None,
+        plate_bbox: Optional[Dict[str, float]] = None,
+        source: Optional[str] = None,
         stream_id: Optional[str] = None,
         frame_number: Optional[int] = None,
         tracking_id: Optional[str] = None,
@@ -459,7 +563,7 @@ class StolenVehicleService:
         Main Stolen Vehicle Evaluation & Alert Dispatch Pipeline:
         
         1. Checks O(1) in-memory cache.
-        2. Evaluates camera cooldown.
+        2. Evaluates camera/video cooldown.
         3. Persists StolenVehicleAlert to database.
         4. Broadcasts WebSocket event & notifies channels.
         """
@@ -467,20 +571,38 @@ class StolenVehicleService:
         if not stolen_record:
             return None
 
-        norm_plate = stolen_record["normalized_number"]
+        norm_plate = stolen_record.get("normalized_number") or cls.normalize_vehicle_number(plate_str)
 
-        # Check duplicate cooldown per camera stream
-        if cls.check_cooldown(camera_id, norm_plate):
-            logger.info(f"Stolen vehicle {norm_plate} detected again on {camera_id} (suppressed by cooldown).")
+        # Check duplicate cooldown per camera/video stream
+        cooldown_scope = stream_id or camera_id or "global"
+        if cls.check_cooldown(cooldown_scope, norm_plate):
+            logger.info(f"Stolen vehicle {norm_plate} detected again on {cooldown_scope} (suppressed by cooldown).")
             return None
 
         alert_id = str(uuid.uuid4())
         now_dt = datetime.now(timezone.utc)
+        disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
+
+        formatted_v_bbox = {
+            "x_min": float(vehicle_bbox.get("x_min", 0)) if vehicle_bbox else 0.0,
+            "y_min": float(vehicle_bbox.get("y_min", 0)) if vehicle_bbox else 0.0,
+            "x_max": float(vehicle_bbox.get("x_max", 0)) if vehicle_bbox else 0.0,
+            "y_max": float(vehicle_bbox.get("y_max", 0)) if vehicle_bbox else 0.0
+        } if vehicle_bbox else {}
+
+        formatted_p_bbox = {
+            "x_min": float(plate_bbox.get("x_min", 0)) if plate_bbox else 0.0,
+            "y_min": float(plate_bbox.get("y_min", 0)) if plate_bbox else 0.0,
+            "x_max": float(plate_bbox.get("x_max", 0)) if plate_bbox else 0.0,
+            "y_max": float(plate_bbox.get("y_max", 0)) if plate_bbox else 0.0
+        } if plate_bbox else {}
 
         alert_dict = {
             "id": alert_id,
             "stolen_vehicle_id": stolen_record.get("id"),
             "vehicle_number": stolen_record.get("vehicle_number", norm_plate),
+            "normalized_vehicle_number": norm_plate,
+            "display_number": disp_number,
             "owner_name": stolen_record.get("owner_name"),
             "fir_number": stolen_record.get("fir_number"),
             "vehicle_type": stolen_record.get("vehicle_type", "VEHICLE"),
@@ -498,10 +620,17 @@ class StolenVehicleService:
             "plate_crop_path": plate_crop_path,
             "ocr_text": plate_str,
             "confidence": round(float(ocr_confidence), 2),
+            "plate_confidence": round(float(plate_confidence), 2),
+            "ocr_confidence": round(float(ocr_confidence), 2),
+            "source": source or ("video" if stream_id else "camera"),
+            "bbox": formatted_v_bbox,
+            "plate_bbox": formatted_p_bbox,
             "stream_id": stream_id,
+            "video_id": stream_id,
             "frame_number": frame_number,
             "tracking_id": tracking_id,
             "status": "ACTIVE",
+            "message": f"STOLEN VEHICLE DETECTED: {norm_plate}",
             "remarks": f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')}). Flagged by {camera_name}."
         }
 

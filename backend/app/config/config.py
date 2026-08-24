@@ -43,12 +43,19 @@ class Settings(BaseSettings):
     REPORTS_DIR: str = str(BACKEND_DIR / "reports")
     WEIGHTS_DIR: str = str(BACKEND_DIR / "weights")
     
-    # YOLO Model Filenames (4 Dedicated Specialized Models)
+    # YOLO Model Filenames (Dedicated Specialized Models)
     DAMAGE_MODEL_NAME: str = "best.pt"
     VEHICLE_MODEL_NAME: str = "yolov8n.pt"
     HELMET_MODEL_NAME: str = "helmet.pt"
-    NUMBERPLATE_MODEL_NAME: str = "numberplate.pt"
+    NUMBERPLATE_MODEL_NAME: str = "numberplate-yolo-v26n.pt"
     HELMET_PLATE_MODEL_NAME: str = "helmet_numberplate.pt"  # backwards compatibility alias
+    
+    # Stolen Vehicle Detection & Real-Time Alert Configuration
+    STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS: int = 10
+    STOLEN_VEHICLE_MIN_OCR_CONFIDENCE: float = 0.70
+    STOLEN_VEHICLE_MIN_PLATE_CONFIDENCE: float = 0.50
+    STOLEN_VEHICLE_CONFIRMATION_FRAMES: int = 2
+    STOLEN_VEHICLE_CACHE_SECONDS: int = 30
     
     # Backwards compatibility attributes
     YOLO_MODEL_PATH: str = str(ROOT_DIR / "best.pt")

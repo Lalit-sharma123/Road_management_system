@@ -700,8 +700,41 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           }
 
           // Direct Stolen Vehicle Intercept Alert
-          if ((msg.type === 'stolen_alert' || msg.type === 'stolen_vehicle_alert' || msg.event === 'STOLEN_VEHICLE_DETECTED') && msg.alert) {
-            const stAlert = msg.alert;
+          const isStolenEvent = (
+            msg.type === 'stolen_alert' ||
+            msg.type === 'stolen_vehicle_alert' ||
+            msg.event === 'STOLEN_VEHICLE_DETECTED' ||
+            msg.event === 'stolen_vehicle_detected' ||
+            (msg.alert && (msg.alert.vehicle_number || msg.alert.stolen_vehicle_id)) ||
+            (msg.data && msg.data.vehicle_number && msg.event?.includes('stolen'))
+          );
+
+          if (isStolenEvent) {
+            const rawAlert = msg.alert || msg.data || msg;
+            const stAlert = {
+              id: rawAlert.id || `sta-${Date.now()}`,
+              vehicle_number: rawAlert.vehicle_number || rawAlert.plate_number || rawAlert.normalized_vehicle_number || 'UNKNOWN',
+              display_number: rawAlert.display_number || rawAlert.vehicle_number,
+              owner_name: rawAlert.owner_name || 'Registered Owner',
+              fir_number: rawAlert.fir_number || 'POLICE-FIR-ACTIVE',
+              camera_name: rawAlert.camera_name || rawAlert.source_name || 'ANPR Video Pipeline',
+              camera_location: rawAlert.camera_location || rawAlert.location || 'Processing Stream',
+              latitude: rawAlert.latitude || 28.4595,
+              longitude: rawAlert.longitude || 77.0266,
+              timestamp: rawAlert.timestamp || new Date().toISOString(),
+              vehicle_snapshot_url: rawAlert.vehicle_snapshot_url || rawAlert.snapshot_url || '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: rawAlert.plate_crop_url || rawAlert.plate_image_url || '/processed/violations/sample_plate.jpg',
+              ocr_text: rawAlert.ocr_text || rawAlert.vehicle_number,
+              confidence: rawAlert.confidence || rawAlert.ocr_confidence || 0.95,
+              ocr_confidence: rawAlert.ocr_confidence || rawAlert.confidence || 0.95,
+              plate_confidence: rawAlert.plate_confidence || 0.90,
+              status: rawAlert.status || 'ACTIVE',
+              source: rawAlert.source || 'video',
+              bbox: rawAlert.bbox,
+              plate_bbox: rawAlert.plate_bbox,
+              remarks: rawAlert.remarks || rawAlert.message || `Stolen vehicle detected: ${rawAlert.vehicle_number}`
+            };
+
             setLatestStolenAlert(stAlert);
             setIsAlertBannerDismissed(false);
             setLiveStolenAlerts((prev) => {

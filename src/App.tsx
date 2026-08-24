@@ -203,8 +203,18 @@ export default function App() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if ((data?.type === 'stolen_alert' || data?.type === 'stolen_vehicle_alert' || data?.event === 'STOLEN_VEHICLE_DETECTED') && data?.alert) {
-              handleStolenAlertData(data.alert);
+            const isStolen = (
+              data?.type === 'stolen_alert' ||
+              data?.type === 'stolen_vehicle_alert' ||
+              data?.event === 'STOLEN_VEHICLE_DETECTED' ||
+              data?.event === 'stolen_vehicle_detected' ||
+              (data?.alert && (data.alert.vehicle_number || data.alert.stolen_vehicle_id)) ||
+              (data?.data && data.data.vehicle_number && data?.event?.includes('stolen'))
+            );
+
+            if (isStolen) {
+              const alertPayload = data.alert || data.data || data;
+              handleStolenAlertData(alertPayload);
             }
           } catch (e) {
             // Ignore non-json frames

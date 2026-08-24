@@ -40,19 +40,51 @@ class NotificationService:
         # 1. Primary Real-Time Dashboard WebSocket Broadcast
         if settings.get("dashboard_notification", True):
             try:
+                plate_norm = alert_data.get("vehicle_number", "")
+                disp_num = alert_data.get("display_number") or plate_norm
+                msg = f"STOLEN VEHICLE DETECTED: {plate_norm}"
+
+                # Standard structured event payload requested by client
                 ws_payload = {
+                    "event": "stolen_vehicle_detected",
                     "type": "stolen_vehicle_alert",
-                    "event": "STOLEN_VEHICLE_DETECTED",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "alert": alert_data
+                    "timestamp": alert_data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                    "vehicle_number": plate_norm,
+                    "display_number": disp_num,
+                    "confidence": alert_data.get("confidence", 0.95),
+                    "plate_confidence": alert_data.get("plate_confidence", 0.95),
+                    "ocr_confidence": alert_data.get("ocr_confidence", alert_data.get("confidence", 0.95)),
+                    "source": alert_data.get("source", "video" if alert_data.get("stream_id") else "camera"),
+                    "video_id": alert_data.get("stream_id"),
+                    "camera_id": alert_data.get("camera_id"),
+                    "bbox": alert_data.get("bbox", {}),
+                    "plate_bbox": alert_data.get("plate_bbox", {}),
+                    "message": msg,
+                    "alert": alert_data,
+                    "data": {
+                        "vehicle_number": plate_norm,
+                        "display_number": disp_num,
+                        "confidence": alert_data.get("confidence", 0.95),
+                        "plate_confidence": alert_data.get("plate_confidence", 0.95),
+                        "ocr_confidence": alert_data.get("ocr_confidence", alert_data.get("confidence", 0.95)),
+                        "source": alert_data.get("source", "video" if alert_data.get("stream_id") else "camera"),
+                        "video_id": alert_data.get("stream_id"),
+                        "camera_id": alert_data.get("camera_id"),
+                        "timestamp": alert_data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                        "bbox": alert_data.get("bbox", {}),
+                        "plate_bbox": alert_data.get("plate_bbox", {}),
+                        "message": msg,
+                        "owner_name": alert_data.get("owner_name"),
+                        "fir_number": alert_data.get("fir_number"),
+                        "police_station": alert_data.get("police_station"),
+                        "vehicle_snapshot_url": alert_data.get("vehicle_snapshot_url"),
+                        "plate_crop_url": alert_data.get("plate_crop_url"),
+                        "alert_id": alert_data.get("id")
+                    }
                 }
-                # Also send payload with type 'stolen_alert' for full frontend client compatibility
-                ws_payload_alt = {
-                    "type": "stolen_alert",
-                    "event": "STOLEN_VEHICLE_DETECTED",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "alert": alert_data
-                }
+                # Also send payload with type 'stolen_alert' for backwards compatibility
+                ws_payload_alt = dict(ws_payload)
+                ws_payload_alt["type"] = "stolen_alert"
 
                 # Broadcast to global dashboard/telemetry broadcasters
                 await ws_broadcaster.broadcast(ws_payload)

@@ -306,25 +306,40 @@ class ReportResponse(BaseModel):
 
 class StolenVehicleBase(BaseModel):
     vehicle_number: str
+    normalized_vehicle_number: Optional[str] = None
     owner_name: Optional[str] = None
-    vehicle_type: str = "CAR"
-    fir_number: str
-    police_station: str
+    vehicle_type: Optional[str] = "CAR"
+    description: Optional[str] = None
+    fir_number: Optional[str] = "FIR-ACTIVE"
+    police_station: Optional[str] = "Central Police Station"
     date_reported: Optional[datetime] = None
-    reason: str = "Vehicle Theft"
-    priority: str = "HIGH"
-    status: str = "ACTIVE"
+    reason: Optional[str] = "Vehicle Theft"
+    priority: Optional[str] = "HIGH"
+    status: str = "stolen"  # stolen, recovered, inactive, ACTIVE
     notes: Optional[str] = None
 
 
-class StolenVehicleCreate(StolenVehicleBase):
-    pass
+class StolenVehicleCreate(BaseModel):
+    vehicle_number: str
+    normalized_vehicle_number: Optional[str] = None
+    owner_name: Optional[str] = None
+    vehicle_type: Optional[str] = "CAR"
+    description: Optional[str] = None
+    fir_number: Optional[str] = "FIR-ACTIVE"
+    police_station: Optional[str] = "Central Police Station"
+    date_reported: Optional[datetime] = None
+    reason: Optional[str] = "Vehicle Theft"
+    priority: Optional[str] = "HIGH"
+    status: Optional[str] = "stolen"
+    notes: Optional[str] = None
 
 
 class StolenVehicleUpdate(BaseModel):
     vehicle_number: Optional[str] = None
+    normalized_vehicle_number: Optional[str] = None
     owner_name: Optional[str] = None
     vehicle_type: Optional[str] = None
+    description: Optional[str] = None
     fir_number: Optional[str] = None
     police_station: Optional[str] = None
     date_reported: Optional[datetime] = None

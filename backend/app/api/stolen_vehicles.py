@@ -70,13 +70,16 @@ async def create_stolen_vehicle(
     """
     Add a new stolen or wanted vehicle into the registry and sync real-time in-memory cache.
     """
-    normalized_plate = StolenVehicleService.normalize_plate(payload.vehicle_number)
+    normalized_plate = StolenVehicleService.normalize_vehicle_number(payload.vehicle_number)
     if not normalized_plate:
         raise HTTPException(status_code=400, detail="A valid vehicle license plate number is required.")
 
     # Check for existing active registration with the same normalized plate
     existing_stmt = select(StolenVehicle).where(
-        func.upper(StolenVehicle.vehicle_number) == normalized_plate
+        or_(
+            func.upper(StolenVehicle.vehicle_number) == normalized_plate,
+            func.upper(StolenVehicle.normalized_vehicle_number) == normalized_plate
+        )
     )
     existing = (await db.execute(existing_stmt)).scalars().first()
     if existing:
@@ -87,15 +90,17 @@ async def create_stolen_vehicle(
 
     new_vehicle = StolenVehicle(
         id=str(uuid.uuid4()),
-        vehicle_number=normalized_plate,
+        vehicle_number=payload.vehicle_number.strip().upper(),
+        normalized_vehicle_number=normalized_plate,
         owner_name=payload.owner_name,
-        vehicle_type=payload.vehicle_type.upper(),
-        fir_number=payload.fir_number.strip(),
-        police_station=payload.police_station.strip(),
+        vehicle_type=(payload.vehicle_type or "CAR").upper(),
+        description=payload.description or payload.notes,
+        fir_number=(payload.fir_number or "FIR-POLICE-ACTIVE").strip(),
+        police_station=(payload.police_station or "Traffic Headquarters").strip(),
         date_reported=payload.date_reported or datetime.now(timezone.utc),
-        reason=payload.reason.strip(),
-        priority=payload.priority.upper(),
-        status=payload.status.upper(),
+        reason=payload.reason or "Vehicle Theft",
+        priority=(payload.priority or "HIGH").upper(),
+        status=(payload.status or "stolen").lower() if str(payload.status).lower() in ["recovered", "inactive"] else (payload.status or "ACTIVE"),
         notes=payload.notes
     )
 

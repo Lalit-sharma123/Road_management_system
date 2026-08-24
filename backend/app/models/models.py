@@ -339,9 +339,11 @@ class StolenVehicle(Base):
     __tablename__ = "stolen_vehicles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    vehicle_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)  # Normalized uppercase
+    vehicle_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    normalized_vehicle_number: Mapped[str] = mapped_column(String(50), index=True, nullable=True)  # Uppercase alphanumeric index
     owner_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     vehicle_type: Mapped[str] = mapped_column(String(50), default="CAR", nullable=False)  # CAR, MOTORCYCLE, SCOOTER, TRUCK, BUS, SUV, VAN
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     fir_number: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     police_station: Mapped[str] = mapped_column(String(255), nullable=False)
     date_reported: Mapped[datetime] = mapped_column(
@@ -349,7 +351,7 @@ class StolenVehicle(Base):
     )
     reason: Mapped[str] = mapped_column(String(255), default="Vehicle Theft", nullable=False)  # Theft, Robbery, Hit & Run, Kidnapping, Carjacking
     priority: Mapped[str] = mapped_column(String(50), default="HIGH", index=True, nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL
-    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", index=True, nullable=False)  # ACTIVE, RECOVERED
+    status: Mapped[str] = mapped_column(String(50), default="stolen", index=True, nullable=False)  # stolen, recovered, inactive, ACTIVE
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
