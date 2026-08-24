@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { InspectionVideo, UserRole } from '../types/inspection';
 import { videoService } from '../services/videoService';
+import { stolenAlertAudio } from '../utils/stolenSoundAlert';
 
 interface VideoUploadAndProcessorProps {
   videos: InspectionVideo[];
@@ -141,6 +142,21 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
             if (['Uploading', 'Extracting Frames', 'Running YOLO', 'Generating Report', 'Saving Results', 'Finished'].includes(stageName)) {
               addLog(stageName, typeof wsData.progress === 'number' ? wsData.progress : 0, wsData.message);
             }
+          }
+
+          // Stolen vehicle alert during upload pipeline
+          if ((wsData.type === 'stolen_alert' || wsData.type === 'stolen_vehicle_alert' || wsData.event === 'STOLEN_VEHICLE_DETECTED') && wsData.alert) {
+            const alert = wsData.alert;
+            addLog('Running YOLO', 50, `🚨 CRITICAL ALERT: Stolen Vehicle Detected - Target Plate: ${alert.vehicle_number} (FIR: ${alert.fir_number || 'ACTIVE'})`);
+            try {
+              window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: alert }));
+              stolenAlertAudio.playAlarmSound();
+              stolenAlertAudio.triggerBrowserNotification(
+                alert.vehicle_number,
+                alert.camera_location || 'ANPR Camera',
+                alert.fir_number || 'Stolen Vehicle FIR'
+              );
+            } catch (e) {}
           }
         },
         () => {

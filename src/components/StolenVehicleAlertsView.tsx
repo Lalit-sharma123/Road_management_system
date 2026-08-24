@@ -73,6 +73,42 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
     fetchAlertsAndStats();
   }, [statusFilter]);
 
+  // Real-Time WebSocket subscription for instant alert updates
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
+
+    const connectWs = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if ((data?.type === 'stolen_alert' || data?.type === 'stolen_vehicle_alert' || data?.event === 'STOLEN_VEHICLE_DETECTED') && data?.alert) {
+              fetchAlertsAndStats();
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          reconnectTimer = setTimeout(connectWs, 3000);
+        };
+      } catch (e) {
+        reconnectTimer = setTimeout(connectWs, 4000);
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, []);
+
   const handleSimulate = async () => {
     try {
       setSimulating(true);

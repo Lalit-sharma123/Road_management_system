@@ -193,6 +193,23 @@ class CameraConnectionManager:
                     # Draw annotated frame with exact color scheme (Red: Damage, Blue: Vehicle, Yellow: Helmet, Green: Plate)
                     annotated_frame = VideoProcessor.draw_detections(frame, detections)
 
+                    # Stolen Vehicle Registry Evaluation for Cars/Vehicles
+                    stolen_alerts = []
+                    if vehicle_count > 0 or number_plate_count > 0:
+                        try:
+                            from app.services.stolen_vehicle_service import StolenVehicleService
+                            stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                                raw_frame=frame,
+                                detections=detections,
+                                frame_number=frame_count,
+                                timestamp_sec=timestamp,
+                                camera_id=camera_id,
+                                camera_name=camera_name,
+                                camera_location=f"Live Feed: {camera_name}"
+                            )
+                        except Exception as st_err:
+                            pass
+
                     # Encode to Base64 JPEG
                     _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     jpg_as_text = base64.b64encode(buffer).decode('utf-8')
@@ -208,6 +225,7 @@ class CameraConnectionManager:
                         "image_base64": image_base64,
                         "detections": detections,
                         "total_detections": len(detections),
+                        "stolen_alerts": stolen_alerts,
                         "road_damage_count": road_damage_count,
                         "vehicle_count": vehicle_count,
                         "helmet_count": helmet_count,

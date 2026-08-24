@@ -46,7 +46,26 @@ class NotificationService:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "alert": alert_data
                 }
+                # Also send payload with type 'stolen_alert' for full frontend client compatibility
+                ws_payload_alt = {
+                    "type": "stolen_alert",
+                    "event": "STOLEN_VEHICLE_DETECTED",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "alert": alert_data
+                }
+
+                # Broadcast to global dashboard/telemetry broadcasters
                 await ws_broadcaster.broadcast(ws_payload)
+                await ws_broadcaster.broadcast(ws_payload_alt)
+
+                # Also broadcast to video processing WebSocket manager if available
+                try:
+                    from app.api.process import ws_manager
+                    await ws_manager.broadcast(ws_payload)
+                    await ws_manager.broadcast(ws_payload_alt)
+                except Exception:
+                    pass
+
                 dispatched_logs.append({
                     "channel": "DASHBOARD_WEBSOCKET",
                     "status": "SENT",

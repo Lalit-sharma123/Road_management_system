@@ -170,6 +170,30 @@ export default function App() {
     let ws: WebSocket | null = null;
     let reconnectTimer: any = null;
 
+    const handleStolenAlertData = (alert: StolenVehicleAlert) => {
+      setActiveStolenAlert(alert);
+      stolenAlertAudio.playAlarmSound();
+      stolenAlertAudio.triggerBrowserNotification(
+        alert.vehicle_number,
+        alert.camera_location || 'City ANPR Camera',
+        alert.fir_number || 'Stolen Vehicle FIR'
+      );
+      showToast(
+        '🚨 STOLEN VEHICLE DETECTED',
+        `Target Plate: ${alert.vehicle_number} at ${alert.camera_location || 'ANPR Highway'} (FIR: ${alert.fir_number || 'ACTIVE'})`,
+        'warning'
+      );
+    };
+
+    const handleCustomStolenEvent = (e: Event) => {
+      const customEvt = e as CustomEvent<StolenVehicleAlert>;
+      if (customEvt.detail) {
+        handleStolenAlertData(customEvt.detail);
+      }
+    };
+
+    window.addEventListener('stolen_vehicle_detected', handleCustomStolenEvent);
+
     const connectWs = () => {
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -179,20 +203,8 @@ export default function App() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data?.type === 'stolen_alert' && data?.alert) {
-              const alert: StolenVehicleAlert = data.alert;
-              setActiveStolenAlert(alert);
-              stolenAlertAudio.playAlarmSound();
-              stolenAlertAudio.triggerBrowserNotification(
-                alert.vehicle_number,
-                alert.camera_location || 'City ANPR Camera',
-                alert.fir_number || 'Stolen Vehicle FIR'
-              );
-              showToast(
-                '🚨 STOLEN VEHICLE DETECTED',
-                `Target Plate: ${alert.vehicle_number} at ${alert.camera_location || 'ANPR Highway'}`,
-                'warning'
-              );
+            if ((data?.type === 'stolen_alert' || data?.type === 'stolen_vehicle_alert' || data?.event === 'STOLEN_VEHICLE_DETECTED') && data?.alert) {
+              handleStolenAlertData(data.alert);
             }
           } catch (e) {
             // Ignore non-json frames
@@ -210,6 +222,7 @@ export default function App() {
     connectWs();
 
     return () => {
+      window.removeEventListener('stolen_vehicle_detected', handleCustomStolenEvent);
       if (ws) ws.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };

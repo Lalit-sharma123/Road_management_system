@@ -682,6 +682,34 @@ async def execute_video_processing_task(
                 except Exception as viol_err:
                     print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
 
+                # 7. Stolen Vehicle Registry Intercept Evaluation (Real-Time for Cars, Trucks & Plates)
+                try:
+                    frame_stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
+                        detections=raw_detections,
+                        frame_number=frame_num,
+                        timestamp_sec=timestamp_sec,
+                        video_id=video.id,
+                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
+                        camera_name="Highway Surveillance ANPR",
+                        camera_location="National Highway 48 - Sector 29",
+                        latitude=base_lat,
+                        longitude=base_lon,
+                        db_session=db
+                    )
+                    for st_alert in frame_stolen_alerts:
+                        stolen_ws_msg = {
+                            "type": "stolen_alert",
+                            "event": "STOLEN_VEHICLE_DETECTED",
+                            "session_id": session_id,
+                            "video_id": video.id,
+                            "alert": st_alert
+                        }
+                        await ws_manager.broadcast(stolen_ws_msg)
+                        await ws_broadcaster.broadcast(stolen_ws_msg)
+                except Exception as stolen_err:
+                    print(f"⚠️ [Stolen Vehicle Evaluation Notice]: {stolen_err}")
+
                 del annotated_img, raw_frame, preprocessed_frame, buffer
                 # Natural playback pacing for smooth real-time CCTV stream experience
                 frame_delay = max(0.02, min(0.05, 0.8 / max(processor.fps or 30.0, 1.0)))

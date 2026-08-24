@@ -28,13 +28,18 @@ import {
   SlidersHorizontal,
   Info,
   X,
-  Target
+  Target,
+  AlertOctagon,
+  Volume2,
+  ExternalLink,
+  Shield
 } from 'lucide-react';
 import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
 import { videoService } from '../services/videoService';
 import { apiClient } from '../services/apiClient';
 import { DetectionSvgOverlay, OverlayDetection } from './DetectionSvgOverlay';
+import { stolenAlertAudio } from '../utils/stolenSoundAlert';
 
 interface LiveDetectionItem {
   id: string;
@@ -105,7 +110,13 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   // Live Traffic Violations (No Helmet on Bike)
   const [liveViolations, setLiveViolations] = useState<any[]>([]);
   const [selectedViolation, setSelectedViolation] = useState<any | null>(null);
-  const [activeSideTab, setActiveSideTab] = useState<'counters' | 'violations' | 'map'>('counters');
+
+  // Stolen Vehicle Intercept Alerts
+  const [liveStolenAlerts, setLiveStolenAlerts] = useState<any[]>([]);
+  const [latestStolenAlert, setLatestStolenAlert] = useState<any | null>(null);
+  const [isAlertBannerDismissed, setIsAlertBannerDismissed] = useState<boolean>(false);
+
+  const [activeSideTab, setActiveSideTab] = useState<'counters' | 'violations' | 'stolen' | 'map'>('counters');
 
   // Performance telemetry
   const [fps, setFps] = useState<number>(30);
@@ -688,6 +699,34 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             });
           }
 
+          // Direct Stolen Vehicle Intercept Alert
+          if ((msg.type === 'stolen_alert' || msg.type === 'stolen_vehicle_alert' || msg.event === 'STOLEN_VEHICLE_DETECTED') && msg.alert) {
+            const stAlert = msg.alert;
+            setLatestStolenAlert(stAlert);
+            setIsAlertBannerDismissed(false);
+            setLiveStolenAlerts((prev) => {
+              const exists = prev.some((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
+              if (!exists) {
+                return [stAlert, ...prev];
+              }
+              return prev;
+            });
+
+            // Dispatch global event for App.tsx modal and toast notification
+            try {
+              window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
+            } catch (e) {}
+
+            try {
+              stolenAlertAudio.playAlarmSound();
+              stolenAlertAudio.triggerBrowserNotification(
+                stAlert.vehicle_number,
+                stAlert.camera_location || 'ANPR Camera',
+                stAlert.fir_number || 'Stolen Vehicle FIR'
+              );
+            } catch (e) {}
+          }
+
           // Completion Handling
           if (msg.type === 'finished' || msg.type === 'processing_complete' || msg.progress === 100 || msg.stage === 'Finished' || msg.stage === 'Completed') {
             setProgress(100);
@@ -985,6 +1024,84 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         </div>
       )}
 
+      {/* 🚨 Critical Stolen Vehicle Intercept Alert Banner (Prominent Real-Time Alert) */}
+      {latestStolenAlert && !isAlertBannerDismissed && (
+        <div className="bg-gradient-to-r from-red-950 via-[#1A0B0B] to-rose-950 border-2 border-[#FF3B30] p-4 text-white shadow-[0_0_30px_rgba(255,59,48,0.4)] animate-pulse relative">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start md:items-center gap-3.5">
+              <div className="w-12 h-12 rounded-lg bg-[#FF3B30] text-white flex items-center justify-center flex-shrink-0 shadow-lg shadow-red-900/50 animate-bounce">
+                <AlertOctagon className="w-7 h-7 text-white stroke-[2.5]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-[#FF3B30] text-white text-[10px] font-black uppercase px-2 py-0.5 tracking-wider rounded">
+                    🚨 LAW ENFORCEMENT INTERCEPT ALERT
+                  </span>
+                  <span className="bg-red-500/20 text-red-300 border border-red-500/40 text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
+                    FIR: {latestStolenAlert.fir_number || 'STOLEN-CASE-ACTIVE'}
+                  </span>
+                  <span className="text-[10px] text-red-300 font-mono">
+                    CONFIDENCE: {Math.round((latestStolenAlert.confidence || 0.95) * 100)}%
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                  <span className="text-xl md:text-2xl font-black font-mono tracking-widest text-emerald-400 bg-black/60 px-3 py-0.5 border border-emerald-500/40 rounded">
+                    {latestStolenAlert.vehicle_number}
+                  </span>
+                  <span className="text-sm font-bold text-red-200">
+                    {latestStolenAlert.owner_name ? `Owner: ${latestStolenAlert.owner_name}` : 'Registered Stolen Vehicle'}
+                  </span>
+                  <span className="text-xs text-red-300/80">
+                    Station: {latestStolenAlert.police_station || 'Central PCR Division'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-red-300/70 mt-1">
+                  Location: {latestStolenAlert.camera_location || 'National Highway Surveillance'} // Target Vehicle flagged in active video processing pipeline.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap self-end md:self-center">
+              <button
+                onClick={() => {
+                  try {
+                    window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: latestStolenAlert }));
+                  } catch (e) {}
+                }}
+                className="px-3.5 py-2 bg-[#FF3B30] hover:bg-red-600 text-white text-xs font-black uppercase tracking-wider border border-red-400 shadow-md shadow-red-900/60 flex items-center gap-1.5 transition-all"
+              >
+                <ShieldAlert className="w-4 h-4" />
+                <span>Open Intercept Modal</span>
+              </button>
+
+              <button
+                onClick={() => stolenAlertAudio.playAlarmSound()}
+                title="Play Alarm Siren"
+                className="p-2 bg-black/50 hover:bg-black text-red-300 hover:text-white border border-red-500/40 rounded transition"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => onNavigate('stolen')}
+                className="px-3 py-2 bg-black/40 hover:bg-black text-xs font-bold uppercase text-red-200 border border-red-500/30 flex items-center gap-1 transition"
+              >
+                <span>Alerts Hub</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => setIsAlertBannerDismissed(true)}
+                title="Dismiss Banner"
+                className="p-2 text-red-400 hover:text-white hover:bg-red-900/40 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Center Area: Large AI Video Player & Right Telemetry */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Large AI Video Player Canvas */}
@@ -1246,10 +1363,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           </div>
 
           {/* Tab Switcher for Sidebar */}
-          <div className="flex items-center bg-[#141414] border border-[#2A2A2A] p-1">
+          <div className="flex items-center bg-[#141414] border border-[#2A2A2A] p-1 gap-1">
             <button
               onClick={() => setActiveSideTab('counters')}
-              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
                 activeSideTab === 'counters'
                   ? 'bg-[#2563EB] text-white shadow'
                   : 'text-[#888] hover:text-white'
@@ -1259,20 +1376,38 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             </button>
             <button
               onClick={() => setActiveSideTab('violations')}
-              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider font-mono transition-all text-center flex items-center justify-center gap-1 ${
                 activeSideTab === 'violations'
                   ? 'bg-[#FF3B30] text-white shadow'
                   : 'text-[#FF3B30]/80 hover:text-[#FF3B30]'
               }`}
             >
               <span>Violations</span>
-              <span className="bg-black/40 px-1.5 py-0.2 rounded text-[9px]">
+              <span className="bg-black/40 px-1 py-0.2 rounded text-[8px]">
                 {liveViolations.length || helmetViolationsCount}
               </span>
             </button>
             <button
+              onClick={() => setActiveSideTab('stolen')}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider font-mono transition-all text-center flex items-center justify-center gap-1 ${
+                activeSideTab === 'stolen'
+                  ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow'
+                  : liveStolenAlerts.length > 0
+                  ? 'text-red-400 bg-red-950/30 border border-red-500/40 animate-pulse'
+                  : 'text-[#888] hover:text-white'
+              }`}
+            >
+              <AlertOctagon className="w-3 h-3 text-red-400" />
+              <span>Stolen</span>
+              {liveStolenAlerts.length > 0 && (
+                <span className="bg-red-500 text-white px-1 py-0.2 rounded-full text-[8px] font-black">
+                  {liveStolenAlerts.length}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveSideTab('map')}
-              className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider font-mono transition-all text-center ${
                 activeSideTab === 'map'
                   ? 'bg-[#2563EB] text-white shadow'
                   : 'text-[#888] hover:text-white'
@@ -1344,6 +1479,25 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   <span className="text-[#34C759] font-bold font-mono text-sm">{numberPlateCount}</span>
                 </div>
               </div>
+
+              {/* Stolen Vehicles Intercept Alert Card */}
+              {liveStolenAlerts.length > 0 && (
+                <div 
+                  onClick={() => setActiveSideTab('stolen')}
+                  className="bg-[#FF3B30]/20 border-2 border-[#FF3B30] p-2.5 flex items-center justify-between cursor-pointer hover:bg-[#FF3B30]/30 transition-all animate-pulse"
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertOctagon className="w-4 h-4 text-[#FF3B30] animate-spin" />
+                    <div>
+                      <p className="text-[#FF3B30] font-black text-xs uppercase tracking-wider">🚨 Stolen Vehicles Intercepted</p>
+                      <p className="text-[10px] text-red-200">{liveStolenAlerts[0]?.vehicle_number} matched registry</p>
+                    </div>
+                  </div>
+                  <span className="bg-[#FF3B30] text-white px-2 py-0.5 rounded font-mono font-black text-xs">
+                    {liveStolenAlerts.length}
+                  </span>
+                </div>
+              )}
 
               {/* Violations Count Alert Card */}
               {(helmetViolationsCount > 0 || liveViolations.length > 0) && (
@@ -1479,7 +1633,132 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             </div>
           )}
 
-          {/* Tab 3: Live Vehicle GPS Map */}
+          {/* Tab 3: Stolen Vehicles Intercept Stream */}
+          {activeSideTab === 'stolen' && (
+            <div className="bg-[#141414] border border-[#FF3B30] p-3 space-y-3">
+              <div className="flex items-center justify-between border-b border-[#2A2A2A] pb-2">
+                <div className="flex items-center gap-1.5 text-xs font-black text-[#FF3B30] uppercase">
+                  <AlertOctagon className="w-4 h-4 text-[#FF3B30]" />
+                  <span>Stolen Intercept Stream ({liveStolenAlerts.length})</span>
+                </div>
+                <button
+                  onClick={() => onNavigate('stolen')}
+                  className="text-[10px] font-mono text-[#60A5FA] hover:underline"
+                >
+                  Registry & Logs →
+                </button>
+              </div>
+
+              {liveStolenAlerts.length === 0 ? (
+                <div className="p-6 text-center text-[#666] text-xs space-y-2">
+                  <Shield className="w-8 h-8 mx-auto text-[#444]" />
+                  <p>No stolen vehicles detected in this stream.</p>
+                  <p className="text-[10px] text-[#555]">Any license plate matching the Stolen Vehicle Registry will immediately trigger siren alarms and show up here.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                  {liveStolenAlerts.map((st, idx) => (
+                    <div 
+                      key={st.id || idx}
+                      className="bg-red-950/20 border-2 border-[#FF3B30] p-3 space-y-2.5 rounded shadow-lg shadow-red-950/40"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="bg-[#FF3B30] text-white text-[9px] font-black px-2 py-0.5 uppercase tracking-wider font-mono rounded">
+                          🚨 CRITICAL INTERCEPT
+                        </span>
+                        <span className="text-emerald-400 font-mono font-black text-xs bg-black/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                          {st.vehicle_number}
+                        </span>
+                      </div>
+
+                      {/* Evidence Images */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative aspect-video bg-black border border-red-500/40 overflow-hidden rounded">
+                          {st.vehicle_snapshot_url || st.evidence_image_url || st.evidence_image_base64 ? (
+                            <img 
+                              src={st.vehicle_snapshot_url || st.evidence_image_url || st.evidence_image_base64} 
+                              alt="Vehicle" 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[9px] text-[#888]">
+                              Vehicle Snapshot
+                            </div>
+                          )}
+                          <span className="absolute bottom-1 left-1 bg-black/80 text-[8px] text-white px-1 font-mono">
+                            Vehicle
+                          </span>
+                        </div>
+
+                        <div className="relative aspect-video bg-black border border-emerald-500/40 overflow-hidden rounded flex items-center justify-center">
+                          {st.plate_crop_url || st.plate_crop_base64 ? (
+                            <img 
+                              src={st.plate_crop_url || st.plate_crop_base64} 
+                              alt="Plate" 
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <div className="text-center p-1">
+                              <span className="text-[11px] font-mono font-black text-[#34C759] tracking-wider block">
+                                {st.vehicle_number}
+                              </span>
+                              <span className="text-[8px] text-[#888]">ANPR Matched</span>
+                            </div>
+                          )}
+                          <span className="absolute bottom-1 right-1 bg-black/80 text-[8px] text-[#34C759] px-1 font-mono font-bold">
+                            MATCHED
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Case Details */}
+                      <div className="bg-black/50 p-2 rounded text-[10px] space-y-1 text-slate-300 font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">FIR Number:</span>
+                          <span className="text-red-300 font-bold">{st.fir_number || 'STOLEN-FIR'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Owner:</span>
+                          <span className="text-slate-200">{st.owner_name || 'Registered Owner'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Police Station:</span>
+                          <span className="text-slate-200">{st.police_station || 'PCR Unit'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Confidence:</span>
+                          <span className="text-emerald-400 font-bold">{Math.round((st.confidence || 0.95) * 100)}%</span>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            try {
+                              window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: st }));
+                            } catch (e) {}
+                          }}
+                          className="flex-1 py-1.5 bg-[#FF3B30] hover:bg-red-600 text-white text-[10px] font-black uppercase tracking-wider rounded text-center transition"
+                        >
+                          View Intercept Modal
+                        </button>
+                        <button
+                          onClick={() => stolenAlertAudio.playAlarmSound()}
+                          title="Siren"
+                          className="p-1.5 bg-black/60 hover:bg-black text-red-300 border border-red-500/40 rounded transition"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 4: Live Vehicle GPS Map */}
           {activeSideTab === 'map' && (
             <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-3">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-[#2A2A2A] pb-2 flex justify-between items-center">

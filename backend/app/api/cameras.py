@@ -88,6 +88,23 @@ async def detect_frame(payload: FrameDetectRequest):
     # Draw color-coded detections (Red: Damage, Blue: Vehicles, Yellow: Helmet, Green: Plates)
     annotated_frame = VideoProcessor.draw_detections(frame, detections)
 
+    # Stolen Vehicle Registry Evaluation for Cars/Vehicles
+    stolen_alerts = []
+    if vehicle_count > 0 or number_plate_count > 0:
+        try:
+            from app.services.stolen_vehicle_service import StolenVehicleService
+            stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                raw_frame=frame,
+                detections=detections,
+                frame_number=1,
+                timestamp_sec=time.time(),
+                camera_id=payload.camera_id or "webcam",
+                camera_name=f"Camera {payload.camera_id or 'Live'}",
+                camera_location="Live Camera Feed"
+            )
+        except Exception:
+            pass
+
     # Encode to Base64 JPEG
     _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     jpg_as_text = base64.b64encode(buffer).decode('utf-8')
@@ -101,6 +118,7 @@ async def detect_frame(payload: FrameDetectRequest):
         "image_base64": annotated_base64,
         "detections": detections,
         "latest_detections": detections[:10],
+        "stolen_alerts": stolen_alerts,
         "road_damage_count": road_damage_count,
         "vehicle_count": vehicle_count,
         "helmet_count": helmet_count,
@@ -177,6 +195,24 @@ async def detect_frame_websocket(websocket: WebSocket):
                     number_plate_count += 1
 
             annotated_frame = VideoProcessor.draw_detections(frame, detections)
+
+            # Stolen Vehicle Registry Evaluation for Cars/Vehicles
+            stolen_alerts = []
+            if vehicle_count > 0 or number_plate_count > 0:
+                try:
+                    from app.services.stolen_vehicle_service import StolenVehicleService
+                    stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                        raw_frame=frame,
+                        detections=detections,
+                        frame_number=1,
+                        timestamp_sec=time.time(),
+                        camera_id="webcam_stream",
+                        camera_name="Live Camera Stream",
+                        camera_location="Surveillance Camera Feed"
+                    )
+                except Exception:
+                    pass
+
             _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             jpg_as_text = base64.b64encode(buffer).decode('utf-8')
             annotated_base64 = f"data:image/jpeg;base64,{jpg_as_text}"
@@ -189,6 +225,7 @@ async def detect_frame_websocket(websocket: WebSocket):
                 "image_base64": annotated_base64,
                 "detections": detections,
                 "latest_detections": detections[:10],
+                "stolen_alerts": stolen_alerts,
                 "road_damage_count": road_damage_count,
                 "vehicle_count": vehicle_count,
                 "helmet_count": helmet_count,
