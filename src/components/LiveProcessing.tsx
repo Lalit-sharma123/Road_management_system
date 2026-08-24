@@ -495,6 +495,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               polylineRef.current?.setLatLngs([]);
               setStatusText(msg.message || 'Fresh detection session initialized.');
               setActiveStage('Initializing Models');
+              setIsCompleted(false);
             }
             return;
           }
@@ -521,13 +522,19 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           if (msg.stage) {
             setActiveStage(msg.stage);
             if (msg.stage === 'Paused') setIsPaused(true);
-            if (msg.stage === 'Detecting') setIsPaused(false);
+            if (msg.stage === 'Detecting') {
+              setIsPaused(false);
+              setIsCompleted(false);
+            }
           }
           if (msg.message) {
             setStatusText(msg.message);
           }
           if (msg.progress !== undefined) {
             setProgress(msg.progress);
+            if (msg.progress < 100) {
+              setIsCompleted(false);
+            }
           }
           if (msg.total_frames) {
             setTotalFrames(msg.total_frames);
@@ -542,6 +549,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           // Frame Payload Processing
           if (msg.type === 'frame' || msg.image_url || msg.image_data || msg.image_base64 || msg.frame) {
             setActiveStage('Detecting');
+            setIsCompleted(false);
 
             // Frontend Console Log: Frame received, Frame number, FPS, Progress
             console.log(`[Frontend] Frame received: #${msg.frame_number || 1} | Progress: ${msg.progress ?? 0}% | FPS: ${calculatedFps}`);
@@ -686,6 +694,44 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             }
           }
 
+          // Direct Stolen Vehicle Intercept Alerts from Frame payload
+          if (Array.isArray(msg.stolen_alerts) && msg.stolen_alerts.length > 0) {
+            for (const st of msg.stolen_alerts) {
+              const stAlert = {
+                id: st.id || `sta-${Date.now()}`,
+                vehicle_number: st.vehicle_number || st.plate_number || 'UNKNOWN',
+                display_number: st.display_number || st.vehicle_number,
+                owner_name: st.owner_name || 'Registered Owner',
+                fir_number: st.fir_number || 'POLICE-FIR-ACTIVE',
+                camera_name: st.camera_name || 'ANPR Video Pipeline',
+                camera_location: st.camera_location || 'Processing Stream',
+                latitude: st.latitude || 28.4595,
+                longitude: st.longitude || 77.0266,
+                timestamp: st.timestamp || new Date().toISOString(),
+                vehicle_snapshot_url: st.vehicle_snapshot_url || '/processed/violations/sample_vehicle.jpg',
+                plate_crop_url: st.plate_crop_url || '/processed/violations/sample_plate.jpg',
+                ocr_text: st.ocr_text || st.vehicle_number,
+                confidence: st.confidence || st.ocr_confidence || 0.95,
+                ocr_confidence: st.ocr_confidence || 0.95,
+                plate_confidence: st.plate_confidence || 0.90,
+                status: st.status || 'ACTIVE',
+                source: st.source || 'video',
+                remarks: st.remarks || `Stolen vehicle detected: ${st.vehicle_number}`
+              };
+              setLatestStolenAlert(stAlert);
+              setIsAlertBannerDismissed(false);
+              setLiveStolenAlerts((prev) => {
+                const exists = prev.some((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
+                if (!exists) return [stAlert, ...prev];
+                return prev;
+              });
+              try {
+                window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
+                stolenAlertAudio.playAlarmSound();
+              } catch (e) {}
+            }
+          }
+
           // Direct violation event
           if (msg.type === 'violation' && msg.violation) {
             setLiveViolations((prev) => {
@@ -760,8 +806,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             } catch (e) {}
           }
 
-          // Completion Handling
-          if (msg.type === 'finished' || msg.type === 'processing_complete' || msg.progress === 100 || msg.stage === 'Finished' || msg.stage === 'Completed') {
+          // Completion Handling (Only when explicitly finished or progress reaches 100 with Completed stage)
+          if (msg.type === 'finished' || msg.type === 'processing_complete' || (msg.progress === 100 && (msg.stage === 'Finished' || msg.stage === 'Completed'))) {
             setProgress(100);
             setIsCompleted(true);
             setActiveStage('Completed');
@@ -775,7 +821,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         (err) => {
           console.warn('[Frontend] Live Processing WS Connection Notice:', err);
           // If connection fails, automatically attempt reconnect after 1.5s
-          if (isSubscribed && !isCompleted) {
+          if (isSubscribed) {
             clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(establishWebSocket, 1500);
           }
@@ -784,7 +830,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
       // Listen for socket close to auto-reconnect
       ws.onclose = () => {
-        if (isSubscribed && !isCompleted) {
+        if (isSubscribed) {
           console.log('[Frontend] WebSocket closed. Automatically reconnecting in 1.5s...');
           clearTimeout(reconnectTimeout);
           reconnectTimeout = setTimeout(establishWebSocket, 1500);
@@ -801,7 +847,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       clearTimeout(reconnectTimeout);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [videoId, isCompleted]);
+  }, [videoId]);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -1019,7 +1065,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       </div>
 
       {/* Completion Banner with Actions */}
-      {isCompleted && (
+      {isCompleted && progress >= 100 && activeStage === 'Completed' && (
         <div className="bg-gradient-to-r from-emerald-950/50 via-[#141414] to-blue-950/50 border-2 border-[#34C759] p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-[0_0_20px_rgba(52,199,89,0.2)]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-[#34C759]/20 border border-[#34C759] flex items-center justify-center flex-shrink-0">

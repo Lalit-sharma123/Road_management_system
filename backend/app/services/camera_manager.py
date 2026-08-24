@@ -190,10 +190,7 @@ class CameraConnectionManager:
                         sum(d.get("confidence", 0.0) for d in detections) / len(detections), 2
                     ) if detections else 0.92
 
-                    # Draw annotated frame with exact color scheme (Red: Damage, Blue: Vehicle, Yellow: Helmet, Green: Plate)
-                    annotated_frame = VideoProcessor.draw_detections(frame, detections)
-
-                    # Stolen Vehicle Registry Evaluation for Cars/Vehicles
+                    # 🚨 Immediate Stolen Vehicle Registry Evaluation for Detected Vehicles
                     stolen_alerts = []
                     if vehicle_count > 0 or number_plate_count > 0:
                         try:
@@ -209,6 +206,9 @@ class CameraConnectionManager:
                             )
                         except Exception as st_err:
                             pass
+
+                    # Draw annotated frame with exact color scheme (Red: Damage/Stolen, Blue: Vehicle, Yellow: Helmet, Green: Plate)
+                    annotated_frame = VideoProcessor.draw_detections(frame, detections)
 
                     # Encode to Base64 JPEG
                     _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])

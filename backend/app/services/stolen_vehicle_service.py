@@ -472,10 +472,11 @@ class StolenVehicleService:
             except Exception as e:
                 pass
 
-            # 2. Check if extracted_text matches any registered stolen vehicle
+            # 2. Normalize and check if extracted_text matches any registered stolen vehicle
             stolen_record = None
             if extracted_text:
-                stolen_record = cls.is_stolen_in_memory(extracted_text)
+                norm_extracted = cls.normalize_vehicle_number(extracted_text)
+                stolen_record = cls.is_stolen_in_memory(norm_extracted)
 
             # 3. If no OCR string matched or OCR text was noisy:
             # Check registered active plates against car detections in video session
@@ -490,10 +491,14 @@ class StolenVehicleService:
 
             if stolen_record:
                 target_plate = stolen_record.get("vehicle_number", extracted_text)
+                norm_p = cls.normalize_vehicle_number(target_plate)
                 
-                # Check duplicate cooldown
-                norm_p = cls.normalize_plate(target_plate)
+                # Check duplicate cooldown per camera/video scope
                 if cls.check_cooldown(camera_id or video_id, norm_p):
+                    # Even if cooldown is active (to prevent notification spam), mark detection visually
+                    v["is_stolen"] = True
+                    v["vehicle_number"] = target_plate
+                    v["plate_number"] = target_plate
                     continue
 
                 # Generate Evidence Snapshots
@@ -508,7 +513,7 @@ class StolenVehicleService:
                     camera_id=camera_id
                 )
 
-                # Process detection, save alert, and dispatch alarm & WebSockets
+                # Process detection, save alert, and dispatch alarm & WebSockets immediately
                 alert_dict = await cls.process_plate_detection(
                     plate_str=target_plate,
                     camera_id=camera_id,
@@ -532,6 +537,10 @@ class StolenVehicleService:
                 )
 
                 if alert_dict:
+                    v["is_stolen"] = True
+                    v["stolen_info"] = alert_dict
+                    v["vehicle_number"] = target_plate
+                    v["plate_number"] = target_plate
                     alerts_generated.append(alert_dict)
 
         return alerts_generated

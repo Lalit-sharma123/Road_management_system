@@ -333,7 +333,12 @@ class VideoProcessor:
             confidence = float(det.get("confidence", 0.0))
             det_type = str(det.get("type", "")).lower()
 
-            if det_type == "damage" or category in DAMAGE_CLASSES:
+            is_stolen = det.get("is_stolen", False)
+            plate_number = det.get("plate_number") or det.get("vehicle_number") or ""
+
+            if is_stolen:
+                color = (0, 0, 255)  # Crimson Alert Red for Stolen Vehicle
+            elif det_type == "damage" or category in DAMAGE_CLASSES:
                 color = (0, 0, 255)  # Red for Road Damage
             elif det_type == "vehicle" or category in VEHICLE_CLASSES:
                 color = (255, 0, 0)  # Blue for Vehicle
@@ -344,9 +349,14 @@ class VideoProcessor:
             else:
                 color = (0, 0, 255)  # Default Red
 
-            cv2.rectangle(annotated, (x_min, y_min), (x_max, y_max), color, 2)
+            border_thickness = 3 if is_stolen else 2
+            cv2.rectangle(annotated, (x_min, y_min), (x_max, y_max), color, border_thickness)
 
-            label = f"{category.upper()} {confidence*100:.1f}%"
+            if is_stolen:
+                label = f"🚨 STOLEN: {plate_number.upper()}" if plate_number else f"🚨 STOLEN VEHICLE {confidence*100:.0f}%"
+            else:
+                label = f"{category.upper()} {confidence*100:.1f}%"
+
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(
                 annotated,
@@ -366,6 +376,8 @@ class VideoProcessor:
                 1,
                 cv2.LINE_AA
             )
+
+        return annotated
 
     def save_annotated_frame(self, frame: np.ndarray, video_id: str, frame_num: int) -> Tuple[str, str]:
         """

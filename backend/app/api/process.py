@@ -343,7 +343,9 @@ async def execute_video_processing_task(
             helmet_count = 0
             number_plate_count = 0
             helmet_violations_count = 0
+            stolen_vehicle_count = 0
             violations_list = []
+            stolen_alerts_list = []
             frame_detections: List[Dict[str, Any]] = []
 
             # Reset deduplication cache for this new video session
@@ -381,6 +383,65 @@ async def execute_video_processing_task(
 
                 # Backend Log: Inference complete
                 print(f"⚡ [Backend] Inference complete: Frame #{frame_num} ({len(raw_detections)} detections)")
+
+                # 🚨 IMMEDIATE STOLEN VEHICLE & PLATE NORMALIZATION CHECK (Inside YOLO Loop)
+                frame_stolen_alerts = []
+                try:
+                    frame_stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
+                        detections=raw_detections,
+                        frame_number=frame_num,
+                        timestamp_sec=timestamp_sec,
+                        video_id=video.id,
+                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
+                        camera_name="Highway Surveillance ANPR",
+                        camera_location="National Highway 48 - Sector 29",
+                        latitude=base_lat,
+                        longitude=base_lon,
+                        db_session=db
+                    )
+                    for st_alert in frame_stolen_alerts:
+                        stolen_vehicle_count += 1
+                        stolen_alerts_list.append(st_alert)
+                        # Immediate Real-time WebSocket Alert Dispatch
+                        stolen_ws_msg = {
+                            "type": "stolen_alert",
+                            "event": "STOLEN_VEHICLE_DETECTED",
+                            "session_id": session_id,
+                            "video_id": video.id,
+                            "alert": st_alert
+                        }
+                        await ws_manager.broadcast(stolen_ws_msg)
+                        await ws_broadcaster.broadcast(stolen_ws_msg)
+                except Exception as stolen_err:
+                    print(f"⚠️ [Stolen Vehicle Evaluation in YOLO Loop Notice]: {stolen_err}")
+
+                # ⚠️ Traffic / Helmet Violation Evaluation (Inside YOLO Loop)
+                try:
+                    frame_violations = HelmetANPRService.evaluate_frame_violations(
+                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
+                        detections=raw_detections,
+                        frame_number=frame_num,
+                        timestamp_sec=timestamp_sec,
+                        video_id=video.id,
+                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
+                        location_name="National Highway 48 - Sector 29",
+                        base_lat=base_lat,
+                        base_lon=base_lon
+                    )
+                    for v_data in frame_violations:
+                        helmet_violations_count += 1
+                        violations_list.append(v_data)
+                        violation_ws_msg = {
+                            "type": "violation",
+                            "session_id": session_id,
+                            "video_id": video.id,
+                            "violation": v_data
+                        }
+                        await ws_manager.broadcast(violation_ws_msg)
+                        await ws_broadcaster.broadcast(violation_ws_msg)
+                except Exception as viol_err:
+                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
 
                 for det in raw_detections:
                     sev_level, sev_score = SeverityAnalysisService.calculate_detection_severity(
@@ -431,7 +492,9 @@ async def execute_video_processing_task(
                         "y_min": float(det["y_min"]),
                         "x_max": float(det["x_max"]),
                         "y_max": float(det["y_max"]),
-                        "distance_meters": distance_est
+                        "distance_meters": distance_est,
+                        "is_stolen": bool(det.get("is_stolen", False)),
+                        "plate_number": det.get("plate_number") or det.get("vehicle_number")
                     }
                     frame_detections.append(det_record)
                     all_detections_list.append(det_record)
@@ -441,9 +504,12 @@ async def execute_video_processing_task(
                 for d in frame_detections:
                     cat_name = d["category"].lower()
                     d_type = d.get("type", "damage")
+                    is_stolen_car = d.get("is_stolen", False)
 
                     # Distinct BGR color coding
-                    if "pothole" in cat_name:
+                    if is_stolen_car:
+                        box_color = (0, 0, 255)  # Crimson Alert Red for Stolen Vehicle
+                    elif "pothole" in cat_name:
                         box_color = (0, 0, 255)  # Bright Red
                     elif "crack" in cat_name or "broken" in cat_name or "asphalt" in cat_name or d_type == "damage":
                         box_color = (0, 140, 255)  # Vivid Orange
@@ -459,12 +525,18 @@ async def execute_video_processing_task(
                     x1, y1 = max(0, int(d["x_min"])), max(0, int(d["y_min"]))
                     x2, y2 = min(processor.width, int(d["x_max"])), min(processor.height, int(d["y_max"]))
 
-                    # Draw bounding box
-                    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 2)
+                    # Draw bounding box (Thicker 3px for high-priority stolen vehicle)
+                    border_w = 3 if is_stolen_car else 2
+                    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, border_w)
 
                     # Draw label badge with solid background
-                    display_cat = d["category"].replace("_", " ").upper()
-                    label_text = f"{display_cat} {int(d['confidence'] * 100)}%"
+                    if is_stolen_car:
+                        pl_text = d.get("plate_number") or "WANTED"
+                        label_text = f"STOLEN: {pl_text.upper()}"
+                    else:
+                        display_cat = d["category"].replace("_", " ").upper()
+                        label_text = f"{display_cat} {int(d['confidence'] * 100)}%"
+
                     (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                     badge_y1 = max(0, y1 - th - 6)
                     badge_y2 = y1
@@ -478,6 +550,9 @@ async def execute_video_processing_task(
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.45,
                         (255, 255, 255) if box_color != (0, 215, 255) else (0, 0, 0),
+                        1,
+                        cv2.LINE_AA
+                    )
                         1,
                         cv2.LINE_AA
                     )
@@ -515,7 +590,9 @@ async def execute_video_processing_task(
                         "y_max": y2,
                         "box": [x1, y1, x2, y2],
                         "width": max(0, x2 - x1),
-                        "height": max(0, y2 - y1)
+                        "height": max(0, y2 - y1),
+                        "is_stolen": bool(det.get("is_stolen", False)),
+                        "plate_number": det.get("plate_number")
                     })
 
                 total_batches = max(1, int(total_expected_frames / max(1, frame_skip)))
@@ -580,11 +657,16 @@ async def execute_video_processing_task(
                         "helmet": helmet_count,
                         "number_plate": number_plate_count,
                         "helmet_violations": helmet_violations_count,
+                        "stolen_vehicle": stolen_vehicle_count,
                         "total": len(all_detections_list)
                     },
                     "helmet_violations_count": helmet_violations_count,
                     "latest_violations": violations_list[-5:],
-                    "violations": violations_list
+                    "violations": violations_list,
+                    "stolen_vehicle_detected": len(frame_stolen_alerts) > 0,
+                    "stolen_alerts": frame_stolen_alerts,
+                    "stolen_count": stolen_vehicle_count,
+                    "latest_stolen_alerts": stolen_alerts_list[-5:]
                 }
                 
                 # Check cancellation again before broadcast
@@ -651,64 +733,6 @@ async def execute_video_processing_task(
                         await db.rollback()
                     except Exception:
                         pass
-
-                # 6. Helmet & ANPR Violation Evaluation (Non-blocking)
-                try:
-                    frame_violations = HelmetANPRService.evaluate_frame_violations(
-                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        location_name="National Highway 48 - Sector 29",
-                        base_lat=base_lat,
-                        base_lon=base_lon
-                    )
-
-                    for v_data in frame_violations:
-                        helmet_violations_count += 1
-                        violations_list.append(v_data)
-
-                        # Broadcast live Violation Event via WebSocket
-                        violation_ws_msg = {
-                            "type": "violation",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "violation": v_data
-                        }
-                        await ws_manager.broadcast(violation_ws_msg)
-                        await ws_broadcaster.broadcast(violation_ws_msg)
-                except Exception as viol_err:
-                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
-
-                # 7. Stolen Vehicle Registry Intercept Evaluation (Real-Time for Cars, Trucks & Plates)
-                try:
-                    frame_stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
-                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else annotated_img,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        camera_name="Highway Surveillance ANPR",
-                        camera_location="National Highway 48 - Sector 29",
-                        latitude=base_lat,
-                        longitude=base_lon,
-                        db_session=db
-                    )
-                    for st_alert in frame_stolen_alerts:
-                        stolen_ws_msg = {
-                            "type": "stolen_alert",
-                            "event": "STOLEN_VEHICLE_DETECTED",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "alert": st_alert
-                        }
-                        await ws_manager.broadcast(stolen_ws_msg)
-                        await ws_broadcaster.broadcast(stolen_ws_msg)
-                except Exception as stolen_err:
-                    print(f"⚠️ [Stolen Vehicle Evaluation Notice]: {stolen_err}")
 
                 del annotated_img, raw_frame, preprocessed_frame, buffer
                 # Natural playback pacing for smooth real-time CCTV stream experience
