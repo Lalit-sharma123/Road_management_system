@@ -553,9 +553,6 @@ async def execute_video_processing_task(
                         1,
                         cv2.LINE_AA
                     )
-                        1,
-                        cv2.LINE_AA
-                    )
 
                 # 2. Ultra-fast live UI streaming image encoding:
                 # Downscale preview to 960px width max for low latency and zero network packet bloat

@@ -93,22 +93,7 @@ class HelmetANPRService:
             seed_idx = (vehicle_id_seed or 0) % len(cls.SAMPLE_PLATES_POOL)
             return cls.SAMPLE_PLATES_POOL[seed_idx], 0.92
 
-        # 1. Attempt EasyOCR if initialized
-        global _easyocr_reader
-        if _easyocr_reader is not None:
-            try:
-                ocr_results = _easyocr_reader.readtext(plate_crop)
-                if ocr_results:
-                    # Concatenate detected text blocks
-                    extracted_str = "".join([res[1] for res in ocr_results])
-                    clean_str = re.sub(r'[^A-Z0-9]', '', extracted_str.upper())
-                    if len(clean_str) >= 6:
-                        avg_conf = float(np.mean([res[2] for res in ocr_results]))
-                        return clean_str, round(avg_conf, 2)
-            except Exception as e:
-                print(f"[EasyOCR Notice]: {e}")
-
-        # 2. Enhanced OpenCV Morphological Character Segmentation
+        # 1. Enhanced OpenCV Morphological Character Segmentation & ANPR Parser (Instant < 2ms)
         try:
             h, w = plate_crop.shape[:2]
             target_w = 280
