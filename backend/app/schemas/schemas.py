@@ -370,9 +370,13 @@ class StolenVehicleAlertBase(BaseModel):
     confidence: float = 0.95
     vehicle_snapshot_url: Optional[str] = None
     plate_crop_url: Optional[str] = None
+    video_id: Optional[str] = None
+    session_id: Optional[str] = None
     stream_id: Optional[str] = None
     frame_number: Optional[int] = None
+    last_frame_number: Optional[int] = None
     tracking_id: Optional[str] = None
+    detection_count: int = 1
     status: str = "ACTIVE"
     resolved_by: Optional[str] = None
     remarks: Optional[str] = None
@@ -393,6 +397,8 @@ class StolenVehicleAlertResponse(StolenVehicleAlertBase):
     id: str
     stolen_vehicle_id: Optional[str] = None
     timestamp: datetime
+    first_detected_at: Optional[datetime] = None
+    last_detected_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

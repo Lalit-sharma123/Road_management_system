@@ -25,6 +25,8 @@ async def list_stolen_alerts(
     search: Optional[str] = Query(None, description="Search by plate number, FIR, owner, camera, or location"),
     status: Optional[str] = Query(None, description="Filter by status: ACTIVE, INVESTIGATING, INTERCEPTED, RESOLVED, FALSE_POSITIVE, or ALL"),
     camera_id: Optional[str] = Query(None, description="Filter by camera ID"),
+    video_id: Optional[str] = Query(None, description="Filter by video ID"),
+    session_id: Optional[str] = Query(None, description="Filter by session ID"),
     days: Optional[int] = Query(None, description="Filter alerts from the last N days"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -40,6 +42,12 @@ async def list_stolen_alerts(
 
     if camera_id and camera_id.upper() != "ALL":
         stmt = stmt.where(StolenVehicleAlert.camera_id == camera_id)
+
+    if video_id:
+        stmt = stmt.where(or_(StolenVehicleAlert.video_id == video_id, StolenVehicleAlert.stream_id == video_id))
+
+    if session_id:
+        stmt = stmt.where(StolenVehicleAlert.session_id == session_id)
 
     if days and days > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)

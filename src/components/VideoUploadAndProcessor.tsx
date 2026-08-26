@@ -130,7 +130,8 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     setProcessingError(null);
     setCurrentStage('Uploading');
 
-    const clientId = `client-${Date.now()}`;
+    const uniqueSessionId = `sess_upload_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const clientId = `client-${uniqueSessionId}`;
 
     // Establish WebSocket Connection for Live Broadcast
     try {
@@ -161,7 +162,8 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
         },
         () => {
           console.warn('WebSocket connection error, falling back to REST response status.');
-        }
+        },
+        uniqueSessionId
       );
     } catch (wsErr) {
       console.warn('WebSocket connection failed:', wsErr);

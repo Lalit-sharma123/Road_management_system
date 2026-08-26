@@ -108,19 +108,27 @@ export const videoService = {
   connectWebSocket(
     clientId: string,
     onMessage: (data: any) => void,
-    onError?: (error: Event) => void
+    onError?: (error: Event) => void,
+    sessionId?: string,
+    videoId?: string
   ): WebSocket {
     const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const defaultBase = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}/api/v1` : 'http://localhost:8000/api/v1';
     const baseURL = apiClient.defaults.baseURL || defaultBase;
     
+    // Construct query parameters for isolated session and video channel routing
+    const queryParams = new URLSearchParams();
+    if (sessionId) queryParams.set('session_id', sessionId);
+    if (videoId) queryParams.set('video_id', videoId);
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
     let wsURL: string;
     if (baseURL.startsWith('http://') || baseURL.startsWith('https://')) {
-      wsURL = baseURL.replace(/^http/, 'ws').replace(/^https/, 'wss') + `/process/ws/${clientId}`;
+      wsURL = baseURL.replace(/^http/, 'ws').replace(/^https/, 'wss') + `/process/ws/${clientId}${queryString}`;
     } else {
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
       const host = window.location.host;
-      wsURL = `${wsProtocol}//${host}${baseURL}/process/ws/${clientId}`;
+      wsURL = `${wsProtocol}//${host}${baseURL}/process/ws/${clientId}${queryString}`;
     }
     
     const ws = new WebSocket(wsURL);

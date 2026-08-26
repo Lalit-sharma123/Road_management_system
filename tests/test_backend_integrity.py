@@ -18,6 +18,7 @@ import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKEND_DIR = os.path.join(ROOT_DIR, "backend", "app")
+sys.path.insert(0, os.path.join(ROOT_DIR, "backend"))
 
 
 class TestPythonBackendAST(unittest.TestCase):
@@ -220,12 +221,61 @@ class TestSessionIsolationAndPipelineCleanup(unittest.TestCase):
         self.assertIn("resolve_video_path", source)
 
 
+class TestWebSocketBroadcasterAndPruning(unittest.IsolatedAsyncioTestCase):
+    """Verifies that WebSocket broadcasters handle disconnected or slow clients without failing broadcasts to active clients."""
+
+    async def test_websocket_broadcast_pruning(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        # Mock active connections: one healthy, one throwing disconnect exception
+        healthy_ws = MagicMock()
+        healthy_ws.accept = AsyncMock(return_value=None)
+        healthy_ws.send_text = AsyncMock(return_value=None)
+
+        dead_ws = MagicMock()
+        dead_ws.accept = AsyncMock(return_value=None)
+        dead_ws.send_text = AsyncMock(side_effect=ConnectionResetError("Client dropped connection"))
+        dead_ws.close = AsyncMock(return_value=None)
+
+        slow_ws = MagicMock()
+        slow_ws.accept = AsyncMock(return_value=None)
+        async def hang_send(payload):
+            await asyncio.sleep(2.0)
+        slow_ws.send_text = AsyncMock(side_effect=hang_send)
+        slow_ws.close = AsyncMock(return_value=None)
+
+        # Import manager
+        from app.services.websocket_manager import WebSocketConnectionManager
+        mgr = WebSocketConnectionManager()
+
+        await mgr.connect(healthy_ws, client_id="healthy_client", session_id="sess_123", video_id="vid_1")
+        await mgr.connect(dead_ws, client_id="dead_client", session_id="sess_123", video_id="vid_1")
+        await mgr.connect(slow_ws, client_id="slow_client", session_id="sess_123", video_id="vid_1")
+
+        self.assertEqual(mgr.get_active_count(), 3)
+
+        # Broadcast a payload
+        test_msg = {"type": "frame", "video_id": "vid_1", "session_id": "sess_123", "progress": 50}
+        await mgr.broadcast(test_msg)
+
+        # Healthy client must have received the broadcast
+        healthy_ws.send_text.assert_called_once()
+
+        # Dead and slow clients must have been pruned safely
+        self.assertEqual(mgr.get_active_count(), 1)
+        self.assertIn(healthy_ws, mgr.active_connections)
+        self.assertNotIn(dead_ws, mgr.active_connections)
+        self.assertNotIn(slow_ws, mgr.active_connections)
+
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestPythonBackendAST)
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestDistanceAndProjectionCalculations))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestHelmetANPRAndDeduplicationLogic))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestMultiModelAIPipelineIntegrity))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestSessionIsolationAndPipelineCleanup))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestWebSocketBroadcasterAndPruning))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)

@@ -74,20 +74,37 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[WebSocket, Dict[str, Any]] = {}
 
-    async def connect(self, websocket: WebSocket, client_id: str = "default", video_id: Optional[str] = None):
-        await websocket.accept()
-        self.active_connections[websocket] = {
-            "client_id": client_id,
-            "video_id": video_id
-        }
-        print(f"🔌 [WebSocket Connected] Client: '{client_id}', Scoped Video: '{video_id}' | Total Active: {len(self.active_connections)}")
+    async def connect(
+        self,
+        websocket: WebSocket,
+        client_id: str = "default",
+        video_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ):
+        try:
+            await websocket.accept()
+            self.active_connections[websocket] = {
+                "client_id": client_id,
+                "video_id": video_id,
+                "session_id": session_id
+            }
+            print(f"🔌 [WebSocket Connected] Client: '{client_id}', Scoped Video: '{video_id}', Session: '{session_id}' | Total Active: {len(self.active_connections)}")
+        except Exception as e:
+            print(f"⚠️ [WebSocket Connect Error] Client: '{client_id}': {e}")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             info = self.active_connections.pop(websocket, {})
             print(f"🔌 [WebSocket Disconnected] Client: '{info.get('client_id')}' | Remaining Active: {len(self.active_connections)}")
+            try:
+                asyncio.create_task(websocket.close())
+            except Exception:
+                pass
 
     async def broadcast(self, message: Dict[str, Any]):
+        if not self.active_connections:
+            return
+
         msg_session_id = message.get("session_id")
         msg_video_id = message.get("video_id")
 
@@ -95,18 +112,30 @@ class ConnectionManager:
         if global_session_manager.active_session_id and msg_session_id and msg_session_id != global_session_manager.active_session_id:
             return
 
-        payload = json.dumps(message)
+        try:
+            payload = json.dumps(message)
+        except Exception as e:
+            print(f"❌ Error serializing broadcast message: {e}")
+            return
+
         dead = []
         for connection, info in list(self.active_connections.items()):
             conn_vid = info.get("video_id")
             # If connection is scoped to a specific video_id and message has a different video_id, skip
-            if conn_vid and msg_video_id and conn_vid not in ["default", "client", ""]:
+            if conn_vid and msg_video_id and conn_vid not in ["default", "client", "", "all"]:
                 if conn_vid != msg_video_id and conn_vid not in msg_video_id and msg_video_id not in conn_vid:
                     continue
+
+            conn_sess = info.get("session_id")
+            if conn_sess and msg_session_id and conn_sess not in ["default", "client", "", "all"]:
+                if conn_sess != msg_session_id and conn_sess not in msg_session_id and msg_session_id not in conn_sess:
+                    continue
+
             try:
-                await connection.send_text(payload)
-            except Exception:
+                await asyncio.wait_for(connection.send_text(payload), timeout=0.8)
+            except (asyncio.TimeoutError, WebSocketDisconnect, ConnectionResetError, RuntimeError, Exception):
                 dead.append(connection)
+
         for conn in dead:
             self.disconnect(conn)
 
@@ -218,42 +247,71 @@ global_session_manager = SessionManager()
 
 @router.websocket("/ws")
 @router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str = "default", video_id: Optional[str] = None):
-    # Extract video_id from client_id (e.g., live-{videoId}-{timestamp}) or query param
+async def websocket_endpoint(
+    websocket: WebSocket,
+    client_id: str = "default",
+    video_id: Optional[str] = None,
+    session_id: Optional[str] = None
+):
+    # Extract video_id and session_id from client_id (e.g., live-{videoId}-{sessionId}) or query param
     video_id_scope = video_id
+    session_id_scope = session_id
     if not video_id_scope and client_id.startswith("live-"):
-        # Format: live-{video_id}-{timestamp}
+        # Format: live-{video_id}-{session_id} or live-{video_id}-{timestamp}
         raw = client_id[5:]  # Remove "live-"
         last_dash_idx = raw.rfind("-")
         if last_dash_idx != -1:
             video_id_scope = raw[:last_dash_idx]
+            if not session_id_scope:
+                potential_sess = raw[last_dash_idx + 1:]
+                if potential_sess.startswith("sess_"):
+                    session_id_scope = potential_sess
         else:
             video_id_scope = raw
     elif not video_id_scope and client_id not in ["default", "client"]:
         video_id_scope = client_id
 
-    await ws_manager.connect(websocket, client_id=client_id, video_id=video_id_scope)
+    if not session_id_scope:
+        session_id_scope = global_session_manager.active_session_id or f"sess_{video_id_scope or 'proc'}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+
+    await ws_manager.connect(
+        websocket,
+        client_id=client_id,
+        video_id=video_id_scope,
+        session_id=session_id_scope
+    )
     try:
         # Send initial connection confirmation
         await websocket.send_text(json.dumps({
             "stage": "Connected",
-            "progress": 0,
+            "progress": processing_progress_state.get("progress_percent", 0),
             "message": f"WebSocket connection active for client: {client_id}",
-            "session_id": global_session_manager.active_session_id,
+            "session_id": session_id_scope,
             "video_id": video_id_scope or global_session_manager.active_video_id,
-            "timestamp": asyncio.get_event_loop().time()
+            "timestamp": time.time()
         }))
         while True:
             data = await websocket.receive_text()
-            # Keep-alive echo
+            # Keep-alive echo / ping responder
+            try:
+                msg = json.loads(data)
+                action = msg.get("action") or msg.get("type")
+            except Exception:
+                action = "ping"
+
             await websocket.send_text(json.dumps({
                 "stage": "Connected",
-                "session_id": global_session_manager.active_session_id,
+                "session_id": session_id_scope,
+                "video_id": video_id_scope,
                 "progress": processing_progress_state.get("progress_percent", 0),
                 "message": f"Channel active ({client_id})",
-                "timestamp": asyncio.get_event_loop().time()
+                "timestamp": time.time()
             }))
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
         ws_manager.disconnect(websocket)
 
 
@@ -290,423 +348,438 @@ async def execute_video_processing_task(
         await ws_manager.broadcast(msg_dict)
         await ws_broadcaster.broadcast(msg_dict)
 
-    async with AsyncSessionLocal() as db:
-        video = None
-        try:
+    # 1. Fetch video scalar metadata in a short-lived, isolated session
+    v_id = video_id
+    v_file_path = ""
+    v_duration_seconds = 0.0
+    v_total_frames = 0
+    v_fps = 30.0
+    v_camera_id = "CAM-01"
+
+    try:
+        async with AsyncSessionLocal() as init_db:
             stmt = select(Video).where(Video.id == video_id)
-            video = (await db.execute(stmt)).scalar_one_or_none()
-            if not video:
+            video_record = (await init_db.execute(stmt)).scalar_one_or_none()
+            if not video_record:
                 print(f"[Processing Task] Video '{video_id}' not found in database.")
                 return
 
-            video.status = ProcessingStatus.PROCESSING
-            await db.commit()
+            video_record.status = ProcessingStatus.PROCESSING
+            await init_db.commit()
 
-            print(f"🚀 [Pipeline Step 1/7: Initialized] Video ID: {video.id} | File: {video.file_path}")
-            await send_ws_update("Uploading", 15, "FastAPI WS: Ingestion verified. Initializing OpenCV decoding...")
+            v_id = str(video_record.id)
+            v_file_path = str(video_record.file_path)
+            v_duration_seconds = float(video_record.duration_seconds or 0.0)
+            v_total_frames = int(video_record.total_frames or 0)
+            v_fps = float(video_record.fps or 30.0)
+            v_camera_id = str(getattr(video_record, "camera_id", None) or "CAM-01")
+    except Exception as init_err:
+        print(f"⚠️ [Processing Task Initialization DB Notice]: {init_err}")
+        return
 
-            # Initialize VideoProcessor (fresh VideoCapture with resilient path resolution)
-            processor = VideoProcessor(video_path=video.file_path, video_id=video.id)
-            frames_processed_count = 0
-            total_expected_frames = processor.total_frames or 100
+    try:
+        print(f"🚀 [Pipeline Step 1/7: Initialized] Video ID: {v_id} | File: {v_file_path}")
+        await send_ws_update("Uploading", 15, "FastAPI WS: Ingestion verified. Initializing OpenCV decoding...")
 
-            print(f"📹 [Pipeline Step 2/7: Video Loaded] Width: {processor.width} | Height: {processor.height} | Total Frames: {total_expected_frames} | FPS: {processor.fps}")
-            await send_ws_update("Extracting Frames", 25, f"FastAPI WS: Decoding stream (Total Frames: {total_expected_frames}, FPS: {processor.fps})...")
+        # Initialize VideoProcessor (fresh VideoCapture with resilient path resolution)
+        processor = VideoProcessor(video_path=v_file_path, video_id=v_id)
+        frames_processed_count = 0
+        total_expected_frames = processor.total_frames or (v_total_frames if v_total_frames > 0 else 100)
 
-            # Extract frames generator with optimized fast decoding
-            frame_gen = processor.extract_frames_generator(
-                frame_skip=frame_skip,
-                enable_histogram_eq=False,
-                enable_gaussian_blur=False
+        print(f"📹 [Pipeline Step 2/7: Video Loaded] Width: {processor.width} | Height: {processor.height} | Total Frames: {total_expected_frames} | FPS: {processor.fps}")
+        await send_ws_update("Extracting Frames", 25, f"FastAPI WS: Decoding stream (Total Frames: {total_expected_frames}, FPS: {processor.fps})...")
+
+        # Extract frames generator with optimized fast decoding
+        frame_gen = processor.extract_frames_generator(
+            frame_skip=frame_skip,
+            enable_histogram_eq=False,
+            enable_gaussian_blur=False
+        )
+
+        print(f"⚡ [Pipeline Step 3/7: Inference Loop Started] frame_skip={frame_skip} | Confidence Threshold={confidence_threshold}")
+        await send_ws_update("Running YOLO", 30, "FastAPI WS: Executing real-time YOLO multi-model damage detection...")
+
+        # Output MP4 video writer
+        output_mp4_path = os.path.join(settings.PROCESSED_DIR, f"processed_{v_id}.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(
+            output_mp4_path,
+            fourcc,
+            processor.fps or 30.0,
+            (processor.width, processor.height)
+        )
+
+        # Category tracking counters
+        pothole_count = 0
+        crack_count = 0
+        broken_road_count = 0
+        missing_asphalt_count = 0
+        road_damage_count = 0
+        vehicle_count = 0
+        helmet_count = 0
+        number_plate_count = 0
+        helmet_violations_count = 0
+        stolen_vehicle_count = 0
+        violations_list = []
+        stolen_alerts_list = []
+        frame_detections: List[Dict[str, Any]] = []
+
+        # Reset deduplication cache for this new video session
+        HelmetANPRService.reset_dedup_cache(v_id)
+        StolenVehicleService.reset_session_state(v_id)
+        StolenVehicleService.reset_session_state(session_id)
+
+        for frame_num, timestamp_sec, raw_frame, preprocessed_frame in frame_gen:
+            # 🛑 Check cancellation flag or session superseding
+            if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
+                print(f"🛑 [Session {session_id}] Cancellation detected for video {video_id}. Halting loop immediately.")
+                break
+
+            # ⏸️ Handle pause state asynchronously
+            while global_session_manager.is_paused and not cancel_event.is_set() and global_session_manager.active_session_id == session_id:
+                await asyncio.sleep(0.15)
+
+            if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
+                break
+
+            frames_processed_count += 1
+            frame_detections = []
+
+            # Backend Log: Frame read
+            print(f"🎬 [Backend] Frame read: #{frame_num} (ts: {timestamp_sec:.2f}s)")
+
+            # Default GPS Coordinates computed deterministically per frame number
+            base_lat = 28.4595 + (frame_num * 0.00008)
+            base_lon = 77.0266 + (frame_num * 0.00009)
+
+            # Multi-Model YOLO detection on preprocessed frame
+            raw_detections = detector_instance.detect(
+                preprocessed_frame,
+                conf_threshold=confidence_threshold
             )
+            has_damage = len(raw_detections) > 0
 
-            print(f"⚡ [Pipeline Step 3/7: Inference Loop Started] frame_skip={frame_skip} | Confidence Threshold={confidence_threshold}")
-            await send_ws_update("Running YOLO", 30, "FastAPI WS: Executing real-time YOLO multi-model damage detection...")
+            # Backend Log: Inference complete
+            print(f"⚡ [Backend] Inference complete: Frame #{frame_num} ({len(raw_detections)} detections)")
 
-            # Output MP4 video writer
-            output_mp4_path = os.path.join(settings.PROCESSED_DIR, f"processed_{video.id}.mp4")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video_writer = cv2.VideoWriter(
-                output_mp4_path,
-                fourcc,
-                processor.fps or 30.0,
-                (processor.width, processor.height)
-            )
-
-            # Category tracking counters
-            pothole_count = 0
-            crack_count = 0
-            broken_road_count = 0
-            missing_asphalt_count = 0
-            road_damage_count = 0
-            vehicle_count = 0
-            helmet_count = 0
-            number_plate_count = 0
-            helmet_violations_count = 0
-            stolen_vehicle_count = 0
-            violations_list = []
-            stolen_alerts_list = []
-            frame_detections: List[Dict[str, Any]] = []
-
-            # Reset deduplication cache for this new video session
-            HelmetANPRService.reset_dedup_cache(video.id)
-
-            for frame_num, timestamp_sec, raw_frame, preprocessed_frame in frame_gen:
-                # 🛑 Check cancellation flag or session superseding
-                if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
-                    print(f"🛑 [Session {session_id}] Cancellation detected for video {video_id}. Halting loop immediately.")
-                    break
-
-                # ⏸️ Handle pause state asynchronously
-                while global_session_manager.is_paused and not cancel_event.is_set() and global_session_manager.active_session_id == session_id:
-                    await asyncio.sleep(0.15)
-
-                if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
-                    break
-
-                frames_processed_count += 1
-                frame_detections = []
-
-                # Backend Log: Frame read
-                print(f"🎬 [Backend] Frame read: #{frame_num} (ts: {timestamp_sec:.2f}s)")
-
-                # Default GPS Coordinates computed deterministically per frame number
-                base_lat = 28.4595 + (frame_num * 0.00008)
-                base_lon = 77.0266 + (frame_num * 0.00009)
-
-                # Multi-Model YOLO detection on preprocessed frame
-                raw_detections = detector_instance.detect(
-                    preprocessed_frame,
-                    conf_threshold=confidence_threshold
+            # 🚨 IMMEDIATE STOLEN VEHICLE & PLATE NORMALIZATION CHECK (Inside YOLO Loop)
+            frame_stolen_alerts = []
+            try:
+                frame_stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
+                    raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
+                    detections=raw_detections,
+                    frame_number=frame_num,
+                    timestamp_sec=timestamp_sec,
+                    video_id=v_id,
+                    session_id=session_id,
+                    camera_id=v_camera_id,
+                    camera_name="Highway Surveillance ANPR",
+                    camera_location="National Highway 48 - Sector 29",
+                    latitude=base_lat,
+                    longitude=base_lon,
+                    db_session=None
                 )
-                has_damage = len(raw_detections) > 0
-
-                # Backend Log: Inference complete
-                print(f"⚡ [Backend] Inference complete: Frame #{frame_num} ({len(raw_detections)} detections)")
-
-                # 🚨 IMMEDIATE STOLEN VEHICLE & PLATE NORMALIZATION CHECK (Inside YOLO Loop)
-                frame_stolen_alerts = []
-                try:
-                    frame_stolen_alerts = await StolenVehicleService.evaluate_frame_stolen_vehicles(
-                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        camera_name="Highway Surveillance ANPR",
-                        camera_location="National Highway 48 - Sector 29",
-                        latitude=base_lat,
-                        longitude=base_lon,
-                        db_session=db
-                    )
-                    for st_alert in frame_stolen_alerts:
+                for st_alert in frame_stolen_alerts:
+                    if st_alert.get("is_new_event", False) or not any(x.get("id") == st_alert.get("id") for x in stolen_alerts_list):
                         stolen_vehicle_count += 1
                         stolen_alerts_list.append(st_alert)
-                        # Immediate Real-time WebSocket Alert Dispatch
-                        stolen_ws_msg = {
-                            "type": "stolen_alert",
-                            "event": "STOLEN_VEHICLE_DETECTED",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "alert": st_alert
-                        }
-                        await ws_manager.broadcast(stolen_ws_msg)
-                        await ws_broadcaster.broadcast(stolen_ws_msg)
-                except Exception as stolen_err:
-                    print(f"⚠️ [Stolen Vehicle Evaluation in YOLO Loop Notice]: {stolen_err}")
+            except Exception as stolen_err:
+                print(f"⚠️ [Stolen Vehicle Evaluation in YOLO Loop Notice]: {stolen_err}")
 
-                # ⚠️ Traffic / Helmet Violation Evaluation (Inside YOLO Loop)
-                try:
-                    frame_violations = HelmetANPRService.evaluate_frame_violations(
-                        raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
-                        detections=raw_detections,
-                        frame_number=frame_num,
-                        timestamp_sec=timestamp_sec,
-                        video_id=video.id,
-                        camera_id=video.camera_id if hasattr(video, "camera_id") and video.camera_id else "CAM-01",
-                        location_name="National Highway 48 - Sector 29",
-                        base_lat=base_lat,
-                        base_lon=base_lon
-                    )
-                    for v_data in frame_violations:
-                        helmet_violations_count += 1
-                        violations_list.append(v_data)
-                        violation_ws_msg = {
-                            "type": "violation",
-                            "session_id": session_id,
-                            "video_id": video.id,
-                            "violation": v_data
-                        }
-                        await ws_manager.broadcast(violation_ws_msg)
-                        await ws_broadcaster.broadcast(violation_ws_msg)
-                except Exception as viol_err:
-                    print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
-
-                for det in raw_detections:
-                    sev_level, sev_score = SeverityAnalysisService.calculate_detection_severity(
-                        det,
-                        frame_width=processor.width,
-                        frame_height=processor.height,
-                        cluster_count=len(raw_detections)
-                    )
-
-                    cat_raw = str(det.get("category", "pothole")).strip().lower()
-                    det_type = det.get("type", "damage")
-
-                    # Update live multi-model counters
-                    if "pothole" in cat_raw:
-                        pothole_count += 1
-                        road_damage_count += 1
-                    elif "crack" in cat_raw:
-                        crack_count += 1
-                        road_damage_count += 1
-                    elif "broken" in cat_raw:
-                        broken_road_count += 1
-                        road_damage_count += 1
-                    elif "asphalt" in cat_raw:
-                        missing_asphalt_count += 1
-                        road_damage_count += 1
-                    elif det_type == "damage":
-                        road_damage_count += 1
-
-                    if cat_raw in ["car", "truck", "bus", "motorcycle", "bicycle", "person", "vehicle"] or det_type == "vehicle":
-                        vehicle_count += 1
-                    if "helmet" in cat_raw:
-                        helmet_count += 1
-                    if "plate" in cat_raw or "number_plate" in cat_raw or "license" in cat_raw:
-                        number_plate_count += 1
-
-                    distance_est = SeverityAnalysisService.estimate_perspective_distance(
-                        det,
-                        frame_height=processor.height
-                    )
-
-                    det_record = {
-                        "category": cat_raw,
-                        "type": det_type,
-                        "confidence": float(det["confidence"]),
-                        "severity": sev_level.value if hasattr(sev_level, "value") else str(sev_level),
-                        "severity_score": float(sev_score),
-                        "x_min": float(det["x_min"]),
-                        "y_min": float(det["y_min"]),
-                        "x_max": float(det["x_max"]),
-                        "y_max": float(det["y_max"]),
-                        "distance_meters": distance_est,
-                        "is_stolen": bool(det.get("is_stolen", False)),
-                        "plate_number": det.get("plate_number") or det.get("vehicle_number")
+            # ⚠️ Traffic / Helmet Violation Evaluation (Inside YOLO Loop)
+            try:
+                frame_violations = await HelmetANPRService.evaluate_frame_violations(
+                    raw_frame=raw_frame if (raw_frame is not None and raw_frame.size > 0) else preprocessed_frame,
+                    detections=raw_detections,
+                    frame_number=frame_num,
+                    timestamp_sec=timestamp_sec,
+                    video_id=v_id,
+                    camera_id=v_camera_id,
+                    location_name="National Highway 48 - Sector 29",
+                    base_lat=base_lat,
+                    base_lon=base_lon
+                )
+                for v_data in frame_violations:
+                    helmet_violations_count += 1
+                    violations_list.append(v_data)
+                    violation_ws_msg = {
+                        "type": "violation",
+                        "session_id": session_id,
+                        "video_id": v_id,
+                        "violation": v_data
                     }
-                    frame_detections.append(det_record)
-                    all_detections_list.append(det_record)
+                    await ws_manager.broadcast(violation_ws_msg)
+                    await ws_broadcaster.broadcast(violation_ws_msg)
+            except Exception as viol_err:
+                print(f"⚠️ [Helmet Violation Evaluation Notice]: {viol_err}")
 
-                # 1. Annotate Frame with high-contrast color-coded bounding boxes
-                annotated_img = raw_frame.copy() if (raw_frame is not None and raw_frame.size > 0) else processor._generate_procedural_road_frame(frame_num)
-                for d in frame_detections:
-                    cat_name = d["category"].lower()
-                    d_type = d.get("type", "damage")
-                    is_stolen_car = d.get("is_stolen", False)
+            for det in raw_detections:
+                sev_level, sev_score = SeverityAnalysisService.calculate_detection_severity(
+                    det,
+                    frame_width=processor.width,
+                    frame_height=processor.height,
+                    cluster_count=len(raw_detections)
+                )
 
-                    # Distinct BGR color coding
-                    if is_stolen_car:
-                        box_color = (0, 0, 255)  # Crimson Alert Red for Stolen Vehicle
-                    elif "pothole" in cat_name:
-                        box_color = (0, 0, 255)  # Bright Red
-                    elif "crack" in cat_name or "broken" in cat_name or "asphalt" in cat_name or d_type == "damage":
-                        box_color = (0, 140, 255)  # Vivid Orange
-                    elif cat_name in ["car", "truck", "bus", "motorcycle", "bicycle", "person", "vehicle"] or d_type == "vehicle":
-                        box_color = (255, 120, 0)  # Neon Cyan/Blue
-                    elif "helmet" in cat_name:
-                        box_color = (0, 215, 255)  # Gold / Yellow
-                    elif "plate" in cat_name or "number_plate" in cat_name:
-                        box_color = (0, 255, 0)  # Emerald Green
-                    else:
-                        box_color = (0, 255, 255)
+                cat_raw = str(det.get("category", "pothole")).strip().lower()
+                det_type = det.get("type", "damage")
 
-                    x1, y1 = max(0, int(d["x_min"])), max(0, int(d["y_min"]))
-                    x2, y2 = min(processor.width, int(d["x_max"])), min(processor.height, int(d["y_max"]))
+                # Update live multi-model counters
+                if "pothole" in cat_raw:
+                    pothole_count += 1
+                    road_damage_count += 1
+                elif "crack" in cat_raw:
+                    crack_count += 1
+                    road_damage_count += 1
+                elif "broken" in cat_raw:
+                    broken_road_count += 1
+                    road_damage_count += 1
+                elif "asphalt" in cat_raw:
+                    missing_asphalt_count += 1
+                    road_damage_count += 1
+                elif det_type == "damage":
+                    road_damage_count += 1
 
-                    # Draw bounding box (Thicker 3px for high-priority stolen vehicle)
-                    border_w = 3 if is_stolen_car else 2
-                    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, border_w)
+                if cat_raw in ["car", "truck", "bus", "motorcycle", "bicycle", "person", "vehicle"] or det_type == "vehicle":
+                    vehicle_count += 1
+                if "helmet" in cat_raw:
+                    helmet_count += 1
+                if "plate" in cat_raw or "number_plate" in cat_raw or "license" in cat_raw:
+                    number_plate_count += 1
 
-                    # Draw label badge with solid background
-                    if is_stolen_car:
-                        pl_text = d.get("plate_number") or "WANTED"
-                        label_text = f"STOLEN: {pl_text.upper()}"
-                    else:
-                        display_cat = d["category"].replace("_", " ").upper()
-                        label_text = f"{display_cat} {int(d['confidence'] * 100)}%"
+                distance_est = SeverityAnalysisService.estimate_perspective_distance(
+                    det,
+                    frame_height=processor.height
+                )
 
-                    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-                    badge_y1 = max(0, y1 - th - 6)
-                    badge_y2 = y1
-                    badge_x2 = min(processor.width, x1 + tw + 8)
-
-                    cv2.rectangle(annotated_img, (x1, badge_y1), (badge_x2, badge_y2), box_color, -1)
-                    cv2.putText(
-                        annotated_img,
-                        label_text,
-                        (x1 + 4, max(th + 2, badge_y2 - 3)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.45,
-                        (255, 255, 255) if box_color != (0, 215, 255) else (0, 0, 0),
-                        1,
-                        cv2.LINE_AA
-                    )
-
-                # 2. Ultra-fast live UI streaming image encoding:
-                # Downscale preview to 960px width max for low latency and zero network packet bloat
-                stream_img = annotated_img
-                if processor.width > 960:
-                    scale = 960.0 / float(processor.width)
-                    stream_w = 960
-                    stream_h = int(processor.height * scale)
-                    stream_img = cv2.resize(annotated_img, (stream_w, stream_h), interpolation=cv2.INTER_LINEAR)
-
-                _, buffer = cv2.imencode('.jpg', stream_img, [cv2.IMWRITE_JPEG_QUALITY, 68])
-                base64_str = base64.b64encode(buffer).decode('utf-8')
-                frame_base64 = f"data:image/jpeg;base64,{base64_str}"
-
-                # Backend Log: Frame encoded
-                print(f"📦 [Backend] Frame encoded: Frame #{frame_num} (JPEG Base64 ready, size: {len(base64_str)} bytes)")
-
-                formatted_detections = []
-                for det in frame_detections:
-                    x1 = int(det.get("x_min", 0))
-                    y1 = int(det.get("y_min", 0))
-                    x2 = int(det.get("x_max", 0))
-                    y2 = int(det.get("y_max", 0))
-                    formatted_detections.append({
-                        "category": det["category"],
-                        "type": det.get("type", "damage"),
-                        "confidence": round(float(det["confidence"]), 2),
-                        "severity": det.get("severity", "high").upper(),
-                        "x_min": x1,
-                        "y_min": y1,
-                        "x_max": x2,
-                        "y_max": y2,
-                        "box": [x1, y1, x2, y2],
-                        "width": max(0, x2 - x1),
-                        "height": max(0, y2 - y1),
-                        "is_stolen": bool(det.get("is_stolen", False)),
-                        "plate_number": det.get("plate_number")
-                    })
-
-                total_batches = max(1, int(total_expected_frames / max(1, frame_skip)))
-                current_progress = min(99, max(1, int((frames_processed_count / total_batches) * 100)))
-                live_road_health = round(max(20.0, 100.0 - (road_damage_count * 4.0)), 1)
-                remaining_frames = max(0, total_batches - frames_processed_count)
-                effective_fps = max(1.0, float(processor.fps or 30.0) / max(1, frame_skip))
-                eta_sec = max(0, round(remaining_frames / effective_fps, 1))
-
-                # Update global progress state
-                processing_progress_state["is_processing"] = True
-                processing_progress_state["video_id"] = video.id
-                processing_progress_state["current_frame"] = frame_num
-                processing_progress_state["total_frames"] = total_expected_frames
-                processing_progress_state["progress_percent"] = current_progress
-                processing_progress_state["current_fps"] = round(float(processor.fps or 30.0), 1)
-                processing_progress_state["estimated_time_remaining_sec"] = eta_sec
-                processing_progress_state["pothole_count"] = pothole_count
-                processing_progress_state["crack_count"] = crack_count
-                processing_progress_state["road_health_index"] = live_road_health
-                processing_progress_state["status"] = f"Detecting frame {frame_num}/{total_expected_frames}"
-
-                ws_frame_msg = {
-                    "type": "frame",
-                    "session_id": session_id,
-                    "video_id": video.id,
-                    "stage": "Detecting",
-                    "frame": frame_base64,
-                    "frame_number": frame_num,
-                    "total_frames": total_expected_frames,
-                    "frame_width": int(processor.width or 1280),
-                    "frame_height": int(processor.height or 720),
-                    "timestamp": round(float(timestamp_sec), 2),
-                    "elapsed_time": round(float(timestamp_sec), 2),
-                    "eta_seconds": eta_sec,
-                    "fps": round(float(processor.fps or 30.0), 1),
-                    "progress": current_progress,
-                    "image_data": frame_base64,
-                    "image_base64": base64_str,
-                    "image_url": frame_base64,
-                    "road_health": live_road_health,
-                    "gps": {
-                        "latitude": round(base_lat, 6),
-                        "longitude": round(base_lon, 6)
-                    },
-                    "telemetry": {
-                        "road_health": live_road_health,
-                        "fps": round(float(processor.fps or 30.0), 1),
-                        "eta_seconds": eta_sec,
-                        "progress": current_progress,
-                        "latitude": round(base_lat, 6),
-                        "longitude": round(base_lon, 6)
-                    },
-                    "detections": formatted_detections,
-                    "counts": {
-                        "pothole": pothole_count,
-                        "crack": crack_count,
-                        "broken_road": broken_road_count,
-                        "missing_asphalt": missing_asphalt_count,
-                        "road_damage": road_damage_count,
-                        "vehicle": vehicle_count,
-                        "helmet": helmet_count,
-                        "number_plate": number_plate_count,
-                        "helmet_violations": helmet_violations_count,
-                        "stolen_vehicle": stolen_vehicle_count,
-                        "total": len(all_detections_list)
-                    },
-                    "helmet_violations_count": helmet_violations_count,
-                    "latest_violations": violations_list[-5:],
-                    "violations": violations_list,
-                    "stolen_vehicle_detected": len(frame_stolen_alerts) > 0,
-                    "stolen_alerts": frame_stolen_alerts,
-                    "stolen_count": stolen_vehicle_count,
-                    "latest_stolen_alerts": stolen_alerts_list[-5:]
+                det_record = {
+                    "category": cat_raw,
+                    "type": det_type,
+                    "confidence": float(det["confidence"]),
+                    "severity": sev_level.value if hasattr(sev_level, "value") else str(sev_level),
+                    "severity_score": float(sev_score),
+                    "x_min": float(det["x_min"]),
+                    "y_min": float(det["y_min"]),
+                    "x_max": float(det["x_max"]),
+                    "y_max": float(det["y_max"]),
+                    "distance_meters": distance_est,
+                    "is_stolen": bool(det.get("is_stolen", False)),
+                    "plate_number": det.get("plate_number") or det.get("vehicle_number")
                 }
-                
-                # Check cancellation again before broadcast
-                if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
-                    break
+                frame_detections.append(det_record)
+                all_detections_list.append(det_record)
 
-                # 3. IMMEDIATELY SEND OVER WEBSOCKET FIRST (STREAMING HAS HIGHEST PRIORITY)
-                await ws_manager.broadcast(ws_frame_msg)
-                await ws_broadcaster.broadcast(ws_frame_msg)
+            # 1. Annotate Frame with high-contrast color-coded bounding boxes
+            annotated_img = raw_frame.copy() if (raw_frame is not None and raw_frame.size > 0) else processor._generate_procedural_road_frame(frame_num)
+            for d in frame_detections:
+                cat_name = d["category"].lower()
+                d_type = d.get("type", "damage")
+                is_stolen_car = d.get("is_stolen", False)
 
-                # Backend Log: Frame sent
-                print(f"🚀 [Backend] Frame sent: Frame #{frame_num} broadcast to WebSocket clients (progress: {current_progress}%)")
+                # Distinct BGR color coding
+                if is_stolen_car:
+                    box_color = (0, 0, 255)  # Crimson Alert Red for Stolen Vehicle
+                elif "pothole" in cat_name:
+                    box_color = (0, 0, 255)  # Bright Red
+                elif "crack" in cat_name or "broken" in cat_name or "asphalt" in cat_name or d_type == "damage":
+                    box_color = (0, 140, 255)  # Vivid Orange
+                elif cat_name in ["car", "truck", "bus", "motorcycle", "bicycle", "person", "vehicle"] or d_type == "vehicle":
+                    box_color = (255, 120, 0)  # Neon Cyan/Blue
+                elif "helmet" in cat_name:
+                    box_color = (0, 215, 255)  # Gold / Yellow
+                elif "plate" in cat_name or "number_plate" in cat_name:
+                    box_color = (0, 255, 0)  # Emerald Green
+                else:
+                    box_color = (0, 255, 255)
 
-                # 4. AFTER WEBSOCKET BROADCAST: Non-blocking write to output MP4
-                if video_writer:
-                    try:
-                        video_writer.write(annotated_img)
-                    except Exception as vw_err:
-                        print(f"⚠️ [VideoWriter Frame Error]: {vw_err}")
+                x1, y1 = max(0, int(d["x_min"])), max(0, int(d["y_min"]))
+                x2, y2 = min(processor.width, int(d["x_max"])), min(processor.height, int(d["y_max"]))
 
-                # 5. AFTER WEBSOCKET BROADCAST: Database Persistence (Isolated in try-except so DB NEVER stops streaming)
+                # Draw bounding box (Thicker 3px for high-priority stolen vehicle)
+                border_w = 3 if is_stolen_car else 2
+                cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, border_w)
+
+                # Draw label badge with solid background
+                if is_stolen_car:
+                    pl_text = d.get("plate_number") or "WANTED"
+                    label_text = f"STOLEN: {pl_text.upper()}"
+                else:
+                    display_cat = d["category"].replace("_", " ").upper()
+                    label_text = f"{display_cat} {int(d['confidence'] * 100)}%"
+
+                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                badge_y1 = max(0, y1 - th - 6)
+                badge_y2 = y1
+                badge_x2 = min(processor.width, x1 + tw + 8)
+
+                cv2.rectangle(annotated_img, (x1, badge_y1), (badge_x2, badge_y2), box_color, -1)
+                cv2.putText(
+                    annotated_img,
+                    label_text,
+                    (x1 + 4, max(th + 2, badge_y2 - 3)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 255, 255) if box_color != (0, 215, 255) else (0, 0, 0),
+                    1,
+                    cv2.LINE_AA
+                )
+
+            # 2. Ultra-fast live UI streaming image encoding:
+            stream_img = annotated_img
+            if processor.width > 960:
+                scale = 960.0 / float(processor.width)
+                stream_w = 960
+                stream_h = int(processor.height * scale)
+                stream_img = cv2.resize(annotated_img, (stream_w, stream_h), interpolation=cv2.INTER_LINEAR)
+
+            _, buffer = cv2.imencode('.jpg', stream_img, [cv2.IMWRITE_JPEG_QUALITY, 68])
+            base64_str = base64.b64encode(buffer).decode('utf-8')
+            frame_base64 = f"data:image/jpeg;base64,{base64_str}"
+
+            # Backend Log: Frame encoded
+            print(f"📦 [Backend] Frame encoded: Frame #{frame_num} (JPEG Base64 ready, size: {len(base64_str)} bytes)")
+
+            formatted_detections = []
+            for det in frame_detections:
+                x1 = int(det.get("x_min", 0))
+                y1 = int(det.get("y_min", 0))
+                x2 = int(det.get("x_max", 0))
+                y2 = int(det.get("y_max", 0))
+                formatted_detections.append({
+                    "category": det["category"],
+                    "type": det.get("type", "damage"),
+                    "confidence": round(float(det["confidence"]), 2),
+                    "severity": det.get("severity", "high").upper(),
+                    "x_min": x1,
+                    "y_min": y1,
+                    "x_max": x2,
+                    "y_max": y2,
+                    "box": [x1, y1, x2, y2],
+                    "width": max(0, x2 - x1),
+                    "height": max(0, y2 - y1),
+                    "is_stolen": bool(det.get("is_stolen", False)),
+                    "plate_number": det.get("plate_number")
+                })
+
+            total_batches = max(1, int(total_expected_frames / max(1, frame_skip)))
+            current_progress = min(99, max(1, int((frames_processed_count / total_batches) * 100)))
+            live_road_health = round(max(20.0, 100.0 - (road_damage_count * 4.0)), 1)
+            remaining_frames = max(0, total_batches - frames_processed_count)
+            effective_fps = max(1.0, float(processor.fps or 30.0) / max(1, frame_skip))
+            eta_sec = max(0, round(remaining_frames / effective_fps, 1))
+
+            # Update global progress state
+            processing_progress_state["is_processing"] = True
+            processing_progress_state["video_id"] = v_id
+            processing_progress_state["current_frame"] = frame_num
+            processing_progress_state["total_frames"] = total_expected_frames
+            processing_progress_state["progress_percent"] = current_progress
+            processing_progress_state["current_fps"] = round(float(processor.fps or 30.0), 1)
+            processing_progress_state["estimated_time_remaining_sec"] = eta_sec
+            processing_progress_state["pothole_count"] = pothole_count
+            processing_progress_state["crack_count"] = crack_count
+            processing_progress_state["road_health_index"] = live_road_health
+            processing_progress_state["status"] = f"Detecting frame {frame_num}/{total_expected_frames}"
+
+            ws_frame_msg = {
+                "type": "frame",
+                "session_id": session_id,
+                "video_id": v_id,
+                "stage": "Detecting",
+                "frame": frame_base64,
+                "frame_number": frame_num,
+                "total_frames": total_expected_frames,
+                "frame_width": int(processor.width or 1280),
+                "frame_height": int(processor.height or 720),
+                "timestamp": round(float(timestamp_sec), 2),
+                "elapsed_time": round(float(timestamp_sec), 2),
+                "eta_seconds": eta_sec,
+                "fps": round(float(processor.fps or 30.0), 1),
+                "progress": current_progress,
+                "image_data": frame_base64,
+                "image_base64": base64_str,
+                "image_url": frame_base64,
+                "road_health": live_road_health,
+                "gps": {
+                    "latitude": round(base_lat, 6),
+                    "longitude": round(base_lon, 6)
+                },
+                "telemetry": {
+                    "road_health": live_road_health,
+                    "fps": round(float(processor.fps or 30.0), 1),
+                    "eta_seconds": eta_sec,
+                    "progress": current_progress,
+                    "latitude": round(base_lat, 6),
+                    "longitude": round(base_lon, 6)
+                },
+                "detections": formatted_detections,
+                "counts": {
+                    "pothole": pothole_count,
+                    "crack": crack_count,
+                    "broken_road": broken_road_count,
+                    "missing_asphalt": missing_asphalt_count,
+                    "road_damage": road_damage_count,
+                    "vehicle": vehicle_count,
+                    "helmet": helmet_count,
+                    "number_plate": number_plate_count,
+                    "helmet_violations": helmet_violations_count,
+                    "stolen_vehicle": stolen_vehicle_count,
+                    "total": len(all_detections_list)
+                },
+                "helmet_violations_count": helmet_violations_count,
+                "latest_violations": violations_list[-5:],
+                "violations": violations_list,
+                "stolen_vehicle_detected": len(frame_stolen_alerts) > 0,
+                "stolen_alerts": frame_stolen_alerts,
+                "stolen_count": stolen_vehicle_count,
+                "latest_stolen_alerts": stolen_alerts_list[-5:]
+            }
+            
+            # Check cancellation again before broadcast
+            if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
+                break
+
+            # 3. IMMEDIATELY SEND OVER WEBSOCKET FIRST (STREAMING HAS HIGHEST PRIORITY)
+            await ws_manager.broadcast(ws_frame_msg)
+            await ws_broadcaster.broadcast(ws_frame_msg)
+
+            # Backend Log: Frame sent
+            print(f"🚀 [Backend] Frame sent: Frame #{frame_num} broadcast to WebSocket clients (progress: {current_progress}%)")
+
+            # 4. AFTER WEBSOCKET BROADCAST: Non-blocking write to output MP4
+            if video_writer:
                 try:
-                    frame_abs_path, frame_rel_path = processor.save_annotated_frame(
-                        frame=annotated_img,
-                        video_id=str(video.id),
-                        frame_num=frame_num
-                    )
+                    video_writer.write(annotated_img)
+                except Exception as vw_err:
+                    print(f"⚠️ [VideoWriter Frame Error]: {vw_err}")
 
+            # 5. AFTER WEBSOCKET BROADCAST: Database Persistence (Isolated in try-except so DB NEVER stops streaming)
+            try:
+                frame_abs_path, frame_rel_path = processor.save_annotated_frame(
+                    frame=annotated_img,
+                    video_id=v_id,
+                    frame_num=frame_num
+                )
+
+                async with AsyncSessionLocal() as frame_db:
+                    frame_uid = str(uuid.uuid4())
                     db_frame = Frame(
-                        video_id=video.id,
+                        id=frame_uid,
+                        video_id=v_id,
                         frame_number=frame_num,
                         timestamp_seconds=timestamp_sec,
                         image_path=frame_rel_path,
                         has_damage=has_damage
                     )
-                    db.add(db_frame)
-                    await db.flush()
+                    frame_db.add(db_frame)
+                    await frame_db.flush()
 
                     for d_rec in frame_detections:
                         db_detection = Detection(
-                            video_id=video.id,
+                            id=str(uuid.uuid4()),
+                            video_id=v_id,
                             camera_id=None,
-                            frame_id=db_frame.id,
+                            frame_id=frame_uid,
                             frame_number=frame_num,
                             timestamp_seconds=timestamp_sec,
                             category=d_rec["category"],
@@ -722,138 +795,143 @@ async def execute_video_processing_task(
                             latitude=base_lat,
                             longitude=base_lon
                         )
-                        db.add(db_detection)
-                    await db.flush()
-                except Exception as db_err:
-                    print(f"⚠️ [DB Non-blocking Persistence Notice]: {db_err}")
-                    try:
-                        await db.rollback()
-                    except Exception:
-                        pass
+                        frame_db.add(db_detection)
+                    await frame_db.commit()
+            except Exception as db_err:
+                print(f"⚠️ [DB Non-blocking Persistence Notice for Frame #{frame_num}]: {db_err}")
 
-                del annotated_img, raw_frame, preprocessed_frame, buffer
-                # Natural playback pacing for smooth real-time CCTV stream experience
-                frame_delay = max(0.02, min(0.05, 0.8 / max(processor.fps or 30.0, 1.0)))
-                await asyncio.sleep(frame_delay)
+            del annotated_img, raw_frame, preprocessed_frame, buffer
+            # Natural playback pacing for smooth real-time CCTV stream experience
+            frame_delay = max(0.02, min(0.05, 0.8 / max(processor.fps or 30.0, 1.0)))
+            await asyncio.sleep(frame_delay)
 
-            # Check if processing was cancelled before writing final report
-            if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
-                print(f"🛑 [Session {session_id}] Video {video_id} loop exited early due to cancellation.")
-                return
+        # Check if processing was cancelled before writing final report
+        if cancel_event.is_set() or global_session_manager.active_session_id != session_id:
+            print(f"🛑 [Session {session_id}] Video {v_id} loop exited early due to cancellation.")
+            return
 
-            print(f"🏁 [Pipeline Step 5/7: Loop Completed] Processed {frames_processed_count} frames. Releasing writers...")
+        print(f"🏁 [Pipeline Step 5/7: Loop Completed] Processed {frames_processed_count} frames. Releasing writers...")
 
-            if video_writer:
+        if video_writer:
+            video_writer.release()
+            video_writer = None
+
+        if processor:
+            processor.close()
+            processor = None
+
+        await send_ws_update("Generating Report", 80, "FastAPI WS: Computing Road Health Index & GPS coordinates...")
+
+        # Compute Road Health Index
+        analytics_res = SeverityAnalysisService.calculate_road_health_index(
+            all_detections_list,
+            video_duration_seconds=v_duration_seconds
+        )
+
+        # Generate GPS Trajectory
+        trajectory = GPSExtractionService.generate_interpolated_trajectory(
+            total_frames=v_total_frames or frames_processed_count or 100,
+            fps=v_fps or 30.0
+        )
+
+        await send_ws_update("Saving Results", 95, f"FastAPI WS: Persisting {len(all_detections_list)} detections to database...")
+
+        # Isolated final DB session
+        try:
+            async with AsyncSessionLocal() as final_db:
+                # 1. Update Video
+                stmt_v = select(Video).where(Video.id == v_id)
+                video_rec = (await final_db.execute(stmt_v)).scalar_one_or_none()
+                if video_rec:
+                    video_rec.processed_file_path = output_mp4_path
+                    video_rec.status = ProcessingStatus.COMPLETED
+
+                # 2. Add GPS Trajectory
+                for point in trajectory:
+                    db_gps = GPSData(
+                        id=str(uuid.uuid4()),
+                        video_id=v_id,
+                        frame_number=point["frame_number"],
+                        latitude=point["latitude"],
+                        longitude=point["longitude"],
+                        altitude_meters=point.get("altitude_meters"),
+                        speed_kmh=point.get("speed_kmh"),
+                        road_name=point.get("road_name")
+                    )
+                    final_db.add(db_gps)
+
+                # 3. Add or update RoadAnalytics
+                stmt_analytics = select(RoadAnalytics).where(RoadAnalytics.video_id == v_id)
+                existing_analytics = (await final_db.execute(stmt_analytics)).scalar_one_or_none()
+                if existing_analytics:
+                    existing_analytics.road_health_score = analytics_res["road_health_score"]
+                    existing_analytics.total_detections = analytics_res["total_detections"]
+                    existing_analytics.pothole_count = analytics_res["pothole_count"]
+                    existing_analytics.crack_count = analytics_res["crack_count"]
+                    existing_analytics.critical_count = analytics_res["critical_count"]
+                    existing_analytics.damage_density_per_km = analytics_res["damage_density_per_km"]
+                    existing_analytics.overall_severity = analytics_res["overall_severity"]
+                else:
+                    db_analytics = RoadAnalytics(
+                        id=str(uuid.uuid4()),
+                        video_id=v_id,
+                        road_health_score=analytics_res["road_health_score"],
+                        total_detections=analytics_res["total_detections"],
+                        pothole_count=analytics_res["pothole_count"],
+                        crack_count=analytics_res["crack_count"],
+                        critical_count=analytics_res["critical_count"],
+                        damage_density_per_km=analytics_res["damage_density_per_km"],
+                        overall_severity=analytics_res["overall_severity"]
+                    )
+                    final_db.add(db_analytics)
+
+                await final_db.commit()
+        except Exception as final_err:
+            print(f"⚠️ [Final Report Persistence Notice]: {final_err}")
+
+        if global_session_manager.active_session_id == session_id:
+            processing_progress_state["is_processing"] = False
+            processing_progress_state["progress_percent"] = 100
+            processing_progress_state["status"] = "Completed"
+
+        await send_ws_update("Finished", 100, "FastAPI WS: Processing pipeline finished successfully!")
+        finished_msg = {
+            "type": "finished",
+            "session_id": session_id,
+            "video_id": v_id,
+            "progress": 100,
+            "message": "AI Processing pipeline completed successfully."
+        }
+        await ws_manager.broadcast(finished_msg)
+        await ws_broadcaster.broadcast(finished_msg)
+
+    except asyncio.CancelledError:
+        print(f"🛑 [Session {session_id}] Background task cancelled cleanly.")
+    except Exception as e:
+        print(f"[Processing Pipeline Error]: {e}")
+        try:
+            async with AsyncSessionLocal() as fail_db:
+                v_fail_stmt = select(Video).where(Video.id == v_id)
+                v_fail_obj = (await fail_db.execute(v_fail_stmt)).scalar_one_or_none()
+                if v_fail_obj:
+                    v_fail_obj.status = ProcessingStatus.FAILED
+                    await fail_db.commit()
+        except Exception:
+            pass
+        await send_ws_update("Finished", 0, f"FastAPI WS Error: {str(e)}")
+    finally:
+        if video_writer:
+            try:
                 video_writer.release()
-                video_writer = None
-                video.processed_file_path = output_mp4_path
-
-            if processor:
+            except Exception:
+                pass
+        if processor:
+            try:
                 processor.close()
-                processor = None
-
-            await send_ws_update("Generating Report", 80, "FastAPI WS: Computing Road Health Index & GPS coordinates...")
-
-            # Compute Road Health Index
-            analytics_res = SeverityAnalysisService.calculate_road_health_index(
-                all_detections_list,
-                video_duration_seconds=video.duration_seconds
-            )
-
-            # Generate GPS Trajectory
-            trajectory = GPSExtractionService.generate_interpolated_trajectory(
-                total_frames=video.total_frames,
-                fps=video.fps
-            )
-            for point in trajectory:
-                db_gps = GPSData(
-                    video_id=video.id,
-                    frame_number=point["frame_number"],
-                    latitude=point["latitude"],
-                    longitude=point["longitude"],
-                    altitude_meters=point["altitude_meters"],
-                    speed_kmh=point["speed_kmh"],
-                    road_name=point["road_name"]
-                )
-                db.add(db_gps)
-
-            # ORM Analytics Record (safeguard against existing record to avoid UNIQUE IntegrityError)
-            stmt_analytics = select(RoadAnalytics).where(RoadAnalytics.video_id == video.id)
-            existing_analytics = (await db.execute(stmt_analytics)).scalar_one_or_none()
-            if existing_analytics:
-                existing_analytics.road_health_score = analytics_res["road_health_score"]
-                existing_analytics.total_detections = analytics_res["total_detections"]
-                existing_analytics.pothole_count = analytics_res["pothole_count"]
-                existing_analytics.crack_count = analytics_res["crack_count"]
-                existing_analytics.critical_count = analytics_res["critical_count"]
-                existing_analytics.damage_density_per_km = analytics_res["damage_density_per_km"]
-                existing_analytics.overall_severity = analytics_res["overall_severity"]
-            else:
-                db_analytics = RoadAnalytics(
-                    video_id=video.id,
-                    road_health_score=analytics_res["road_health_score"],
-                    total_detections=analytics_res["total_detections"],
-                    pothole_count=analytics_res["pothole_count"],
-                    crack_count=analytics_res["crack_count"],
-                    critical_count=analytics_res["critical_count"],
-                    damage_density_per_km=analytics_res["damage_density_per_km"],
-                    overall_severity=analytics_res["overall_severity"]
-                )
-                db.add(db_analytics)
-
-            await send_ws_update("Saving Results", 95, f"FastAPI WS: Persisting {len(all_detections_list)} detections to database...")
-
-            video.status = ProcessingStatus.COMPLETED
-            await db.commit()
-
-            if global_session_manager.active_session_id == session_id:
-                processing_progress_state["is_processing"] = False
-                processing_progress_state["progress_percent"] = 100
-                processing_progress_state["status"] = "Completed"
-
-            await send_ws_update("Finished", 100, "FastAPI WS: Processing pipeline finished successfully!")
-            finished_msg = {
-                "type": "finished",
-                "session_id": session_id,
-                "video_id": video.id,
-                "progress": 100,
-                "message": "AI Processing pipeline completed successfully."
-            }
-            await ws_manager.broadcast(finished_msg)
-            await ws_broadcaster.broadcast(finished_msg)
-
-        except asyncio.CancelledError:
-            print(f"🛑 [Session {session_id}] Background task cancelled cleanly.")
-            try:
-                await db.rollback()
             except Exception:
                 pass
-        except Exception as e:
-            print(f"[Processing Pipeline Error]: {e}")
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            if video:
-                try:
-                    video.status = ProcessingStatus.FAILED
-                    await db.commit()
-                except Exception:
-                    pass
-            await send_ws_update("Finished", 0, f"FastAPI WS Error: {str(e)}")
-        finally:
-            if video_writer:
-                try:
-                    video_writer.release()
-                except Exception:
-                    pass
-            if processor:
-                try:
-                    processor.close()
-                except Exception:
-                    pass
-            # Force garbage collection to purge memory and frame buffers
-            gc.collect()
+        # Force garbage collection to purge memory and frame buffers
+        gc.collect()
 
 
 @router.post("/run", response_model=ProcessVideoResponse)

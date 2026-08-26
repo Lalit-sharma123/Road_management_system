@@ -449,16 +449,37 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     }
   };
 
-  // 8. WebSocket Realtime Engine with Auto-Reconnect and Zero Polling Dependency
+  // 8. WebSocket Realtime Engine with Unique Session Isolation, Auto-Reconnect, and Safe Pruning
   useEffect(() => {
     if (!videoId) return;
+
+    // Reset video-specific detections & alerts state immediately on video switch
+    setLatestStolenAlert(null);
+    setLiveStolenAlerts([]);
+    setIsAlertBannerDismissed(true);
+    setLiveViolations([]);
+    setHelmetViolationsCount(0);
 
     let isSubscribed = true;
     let reconnectTimeout: any = null;
 
     const establishWebSocket = () => {
       if (!isSubscribed) return;
-      const clientId = `live-${videoId}-${Date.now()}`;
+
+      // Cleanly terminate any prior websocket before creating a fresh connection
+      if (wsRef.current) {
+        try {
+          wsRef.current.onclose = null;
+          wsRef.current.onerror = null;
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+      }
+
+      // Generate unique session ID for this live process viewer session
+      const uniqueSessionId = `sess_${videoId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      activeSessionIdRef.current = uniqueSessionId;
+      const clientId = `live-${videoId}-${uniqueSessionId}`;
 
       const ws = videoService.connectWebSocket(
         clientId,
@@ -490,6 +511,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               setHelmetViolationsCount(0);
               setTimelineEvents([]);
               setSelectedTimelineEvent(null);
+              setLatestStolenAlert(null);
+              setLiveStolenAlerts([]);
+              setIsAlertBannerDismissed(true);
+              setLiveViolations([]);
               routePointsRef.current = [];
               damageLayerGroupRef.current?.clearLayers();
               polylineRef.current?.setLatLngs([]);
@@ -697,8 +722,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           // Direct Stolen Vehicle Intercept Alerts from Frame payload
           if (Array.isArray(msg.stolen_alerts) && msg.stolen_alerts.length > 0) {
             for (const st of msg.stolen_alerts) {
+              const isNew = st.is_new_event !== false;
               const stAlert = {
                 id: st.id || `sta-${Date.now()}`,
+                stolen_vehicle_id: st.stolen_vehicle_id,
                 vehicle_number: st.vehicle_number || st.plate_number || 'UNKNOWN',
                 display_number: st.display_number || st.vehicle_number,
                 owner_name: st.owner_name || 'Registered Owner',
@@ -708,6 +735,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 latitude: st.latitude || 28.4595,
                 longitude: st.longitude || 77.0266,
                 timestamp: st.timestamp || new Date().toISOString(),
+                first_detected_at: st.first_detected_at || st.timestamp,
+                last_detected_at: st.last_detected_at || st.timestamp,
                 vehicle_snapshot_url: st.vehicle_snapshot_url || '/processed/violations/sample_vehicle.jpg',
                 plate_crop_url: st.plate_crop_url || '/processed/violations/sample_plate.jpg',
                 ocr_text: st.ocr_text || st.vehicle_number,
@@ -716,19 +745,35 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 plate_confidence: st.plate_confidence || 0.90,
                 status: st.status || 'ACTIVE',
                 source: st.source || 'video',
+                video_id: st.video_id || videoId,
+                session_id: st.session_id,
+                detection_count: st.detection_count || 1,
+                is_new_event: isNew,
                 remarks: st.remarks || `Stolen vehicle detected: ${st.vehicle_number}`
               };
               setLatestStolenAlert(stAlert);
               setIsAlertBannerDismissed(false);
               setLiveStolenAlerts((prev) => {
-                const exists = prev.some((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
-                if (!exists) return [stAlert, ...prev];
-                return prev;
+                const idx = prev.findIndex((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
+                if (idx >= 0) {
+                  const updated = [...prev];
+                  updated[idx] = {
+                    ...updated[idx],
+                    detection_count: stAlert.detection_count,
+                    last_detected_at: stAlert.last_detected_at,
+                    confidence: Math.max(updated[idx].confidence, stAlert.confidence),
+                    remarks: stAlert.remarks
+                  };
+                  return updated;
+                }
+                return [stAlert, ...prev];
               });
-              try {
-                window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
-                stolenAlertAudio.playAlarmSound();
-              } catch (e) {}
+              if (isNew) {
+                try {
+                  window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
+                  stolenAlertAudio.playAlarmSound();
+                } catch (e) {}
+              }
             }
           }
 
@@ -745,7 +790,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             });
           }
 
-          // Direct Stolen Vehicle Intercept Alert
+          // Direct Stolen Vehicle Intercept Alert (Standalone WebSocket notification)
           const isStolenEvent = (
             msg.type === 'stolen_alert' ||
             msg.type === 'stolen_vehicle_alert' ||
@@ -755,10 +800,12 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             (msg.data && msg.data.vehicle_number && msg.event?.includes('stolen'))
           );
 
-          if (isStolenEvent) {
+          if (isStolenEvent && msg.type !== 'frame') {
             const rawAlert = msg.alert || msg.data || msg;
+            const isNew = rawAlert.is_new_event !== false;
             const stAlert = {
               id: rawAlert.id || `sta-${Date.now()}`,
+              stolen_vehicle_id: rawAlert.stolen_vehicle_id,
               vehicle_number: rawAlert.vehicle_number || rawAlert.plate_number || rawAlert.normalized_vehicle_number || 'UNKNOWN',
               display_number: rawAlert.display_number || rawAlert.vehicle_number,
               owner_name: rawAlert.owner_name || 'Registered Owner',
@@ -768,6 +815,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               latitude: rawAlert.latitude || 28.4595,
               longitude: rawAlert.longitude || 77.0266,
               timestamp: rawAlert.timestamp || new Date().toISOString(),
+              first_detected_at: rawAlert.first_detected_at || rawAlert.timestamp,
+              last_detected_at: rawAlert.last_detected_at || rawAlert.timestamp,
               vehicle_snapshot_url: rawAlert.vehicle_snapshot_url || rawAlert.snapshot_url || '/processed/violations/sample_vehicle.jpg',
               plate_crop_url: rawAlert.plate_crop_url || rawAlert.plate_image_url || '/processed/violations/sample_plate.jpg',
               ocr_text: rawAlert.ocr_text || rawAlert.vehicle_number,
@@ -776,6 +825,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               plate_confidence: rawAlert.plate_confidence || 0.90,
               status: rawAlert.status || 'ACTIVE',
               source: rawAlert.source || 'video',
+              video_id: rawAlert.video_id || videoId,
+              session_id: rawAlert.session_id,
+              detection_count: rawAlert.detection_count || 1,
+              is_new_event: isNew,
               bbox: rawAlert.bbox,
               plate_bbox: rawAlert.plate_bbox,
               remarks: rawAlert.remarks || rawAlert.message || `Stolen vehicle detected: ${rawAlert.vehicle_number}`
@@ -784,26 +837,32 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             setLatestStolenAlert(stAlert);
             setIsAlertBannerDismissed(false);
             setLiveStolenAlerts((prev) => {
-              const exists = prev.some((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
-              if (!exists) {
-                return [stAlert, ...prev];
+              const idx = prev.findIndex((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = {
+                  ...updated[idx],
+                  detection_count: stAlert.detection_count,
+                  last_detected_at: stAlert.last_detected_at,
+                  confidence: Math.max(updated[idx].confidence, stAlert.confidence),
+                  remarks: stAlert.remarks
+                };
+                return updated;
               }
-              return prev;
+              return [stAlert, ...prev];
             });
 
-            // Dispatch global event for App.tsx modal and toast notification
-            try {
-              window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
-            } catch (e) {}
-
-            try {
-              stolenAlertAudio.playAlarmSound();
-              stolenAlertAudio.triggerBrowserNotification(
-                stAlert.vehicle_number,
-                stAlert.camera_location || 'ANPR Camera',
-                stAlert.fir_number || 'Stolen Vehicle FIR'
-              );
-            } catch (e) {}
+            if (isNew) {
+              try {
+                window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
+                stolenAlertAudio.playAlarmSound();
+                stolenAlertAudio.triggerBrowserNotification(
+                  stAlert.vehicle_number,
+                  stAlert.camera_location || 'ANPR Camera',
+                  stAlert.fir_number || 'Stolen Vehicle FIR'
+                );
+              } catch (e) {}
+            }
           }
 
           // Completion Handling (Only when explicitly finished or progress reaches 100 with Completed stage)
@@ -825,7 +884,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(establishWebSocket, 1500);
           }
-        }
+        },
+        uniqueSessionId,
+        videoId
       );
 
       // Listen for socket close to auto-reconnect
@@ -845,7 +906,14 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     return () => {
       isSubscribed = false;
       clearTimeout(reconnectTimeout);
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        try {
+          wsRef.current.onclose = null;
+          wsRef.current.onerror = null;
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+      }
     };
   }, [videoId]);
 

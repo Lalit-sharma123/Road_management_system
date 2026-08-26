@@ -169,8 +169,42 @@ export default function App() {
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: any = null;
+    const recentAlertsMap = new Map<string, number>();
+    const seenAlertIds = new Set<string>();
 
-    const handleStolenAlertData = (alert: StolenVehicleAlert) => {
+    const handleStolenAlertData = (alert: any) => {
+      if (!alert) return;
+      if (alert.is_new_event === false) return;
+
+      // Event/Alert IDempotency check: if this specific encounter ID was already alarmed, skip
+      const alertId = alert.id || alert.alert_id || alert.event_id;
+      if (alertId && seenAlertIds.has(alertId)) {
+        return;
+      }
+
+      const alertKey = `${alert.vehicle_number || alert.plate_number || 'UNKNOWN'}_${alert.id || alert.session_id || ''}`;
+      const now = Date.now();
+      const lastTriggered = recentAlertsMap.get(alertKey);
+
+      // Secondary safety debouncing window per vehicle/session
+      if (lastTriggered && now - lastTriggered < 4000) {
+        return;
+      }
+      recentAlertsMap.set(alertKey, now);
+      if (alertId) {
+        seenAlertIds.add(alertId);
+      }
+
+      // Clean up maps periodically
+      for (const [k, ts] of recentAlertsMap.entries()) {
+        if (now - ts > 60000) {
+          recentAlertsMap.delete(k);
+        }
+      }
+      if (seenAlertIds.size > 500) {
+        seenAlertIds.clear();
+      }
+
       setActiveStolenAlert(alert);
       stolenAlertAudio.playAlarmSound();
       stolenAlertAudio.triggerBrowserNotification(

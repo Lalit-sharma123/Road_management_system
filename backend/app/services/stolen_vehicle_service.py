@@ -1,7 +1,10 @@
+import os
 import re
 import time
 import uuid
 import logging
+import cv2
+import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +13,7 @@ from sqlalchemy import select, func, or_
 from app.models.models import StolenVehicle, StolenVehicleAlert, StolenVehicleSettings
 from app.services.notification_service import NotificationService
 from app.database.database import AsyncSessionLocal
+from app.config.config import settings
 
 logger = logging.getLogger("StolenVehicleService")
 
@@ -27,6 +31,13 @@ class StolenVehicleService:
     # In-memory O(1) hash map cache: normalized_plate -> StolenVehicle dict
     _registry_cache: Dict[str, Dict[str, Any]] = {}
     
+    # Active encounters per scope (session_id / video_id / camera_id):
+    # scope_id -> { normalized_plate -> { "alert_id": str, "last_seen": float, "detection_count": int, "first_detected_at": datetime, "last_detected_at": datetime, "first_frame": int, "last_frame": int, "highest_conf": float, "persisted_in_db": bool, "alert_dict": dict } }
+    _active_encounters: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    # Encounter concurrency locks: f"{scope}_{normalized_plate}" -> asyncio.Lock
+    _encounter_locks: Dict[str, asyncio.Lock] = {}
+
     # Cooldown tracker: f"{scope}_{normalized_plate}" -> timestamp
     _cooldown_tracker: Dict[str, float] = {}
 
@@ -52,6 +63,31 @@ class StolenVehicleService:
     }
 
     _is_initialized: bool = False
+
+    @classmethod
+    def reset_session_state(cls, scope_id: Optional[str] = None):
+        """
+        Resets per-session / per-video active encounter tracking and temporal caches.
+        Ensures a new video or session begins with clean detection tracking without leaking previous video state.
+        DOES NOT alter historical records in database or Stolen Vehicle Registry!
+        """
+        if scope_id:
+            s_str = str(scope_id).strip()
+            # Evict from encounters
+            keys_to_del = [k for k in cls._active_encounters if s_str in k or k in s_str]
+            for k in keys_to_del:
+                cls._active_encounters.pop(k, None)
+            
+            # Evict from cooldowns
+            cd_keys = [k for k in cls._cooldown_tracker if s_str in k]
+            for k in cd_keys:
+                cls._cooldown_tracker.pop(k, None)
+        else:
+            cls._active_encounters.clear()
+            cls._cooldown_tracker.clear()
+            cls._plate_temporal_cache.clear()
+
+        logger.info(f"🔄 StolenVehicleService session state reset (scope: {scope_id or 'ALL'}).")
 
     @classmethod
     def normalize_vehicle_number(cls, text: Optional[str]) -> str:
@@ -93,8 +129,17 @@ class StolenVehicleService:
             logger.warning(f"Note on StolenVehicleService cache initialization: {e}")
 
     @classmethod
-    async def reload_cache(cls, session: AsyncSession):
-        """Refreshes the in-memory cache from database."""
+    async def reload_cache(cls, session: Optional[AsyncSession] = None):
+        """Refreshes the in-memory cache from database using an isolated session scope."""
+        if session is not None:
+            await cls._do_reload_cache(session)
+        else:
+            async with AsyncSessionLocal() as isolated_session:
+                await cls._do_reload_cache(isolated_session)
+
+    @classmethod
+    async def _do_reload_cache(cls, session: AsyncSession):
+        """Internal worker to populate in-memory registry cache from database."""
         # 1. Load active stolen vehicles (status in 'stolen' or 'ACTIVE')
         stmt = select(StolenVehicle).where(
             or_(
@@ -116,19 +161,19 @@ class StolenVehicleService:
 
                 new_cache[norm] = {
                     "id": v.id,
-                    "vehicle_number": v.vehicle_number,
+                    "vehicle_number": str(v.vehicle_number or norm),
                     "normalized_number": norm,
                     "normalized_vehicle_number": norm,
-                    "owner_name": v.owner_name,
-                    "vehicle_type": v.vehicle_type,
-                    "description": v.description or v.notes or v.reason,
-                    "fir_number": v.fir_number,
-                    "police_station": v.police_station,
+                    "owner_name": str(v.owner_name or ""),
+                    "vehicle_type": str(v.vehicle_type or "VEHICLE"),
+                    "description": str(v.description or v.notes or v.reason or ""),
+                    "fir_number": str(v.fir_number or "ACTIVE-FIR"),
+                    "police_station": str(v.police_station or "Traffic Police HQ"),
                     "date_reported": v.date_reported.isoformat() if v.date_reported else None,
-                    "reason": v.reason,
-                    "priority": v.priority,
-                    "status": v.status,
-                    "notes": v.notes
+                    "reason": str(v.reason or "Vehicle Theft"),
+                    "priority": str(v.priority or "HIGH"),
+                    "status": str(v.status or "stolen"),
+                    "notes": str(v.notes or "")
                 }
         cls._registry_cache = new_cache
 
@@ -361,6 +406,7 @@ class StolenVehicleService:
         frame_number: int = 1,
         timestamp_sec: float = 0.0,
         video_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         camera_id: str = "CAM-01",
         camera_name: str = "City ANPR Surveillance",
         camera_location: str = "National Highway 48",
@@ -373,21 +419,17 @@ class StolenVehicleService:
         1. Checks in-memory cache of active stolen vehicles.
         2. Crops detected vehicle & plate ROIs.
         3. Executes OCR & compares with registry cache.
-        4. Triggers alarm alert, database alert record, and WebSocket broadcast upon optical match.
+        4. Triggers alarm alert or increments encounter frame counter on existing event.
         """
         if raw_frame is None or raw_frame.size == 0 or not detections:
             return []
 
-        # Ensure in-memory cache is populated
+        # Ensure in-memory cache is populated in isolated session scope
         if not cls._registry_cache:
             try:
-                if db_session:
-                    await cls.reload_cache(db_session)
-                else:
-                    async with AsyncSessionLocal() as sess:
-                        await cls.reload_cache(sess)
-            except Exception:
-                pass
+                await cls.reload_cache()
+            except Exception as e:
+                logger.warning(f"Cache reload warning in evaluate_frame_stolen_vehicles: {e}")
 
         if not cls._registry_cache:
             return []
@@ -450,15 +492,18 @@ class StolenVehicleService:
                     "confidence": 0.90
                 }
 
-            # 1. Fast ANPR Plate OCR & Normalization (Sub-millisecond)
+            # 1. ANPR Plate OCR & Normalization
             extracted_text = ""
             ocr_conf = 0.92
 
             try:
                 from app.services.helmet_anpr_service import HelmetANPRService
                 if plate_crop is not None and plate_crop.size > 0:
-                    extracted_text, ocr_conf = HelmetANPRService.perform_anpr_ocr(plate_crop, vehicle_id_seed=frame_number + v_idx)
-            except Exception as e:
+                    if hasattr(HelmetANPRService, "perform_anpr_ocr"):
+                        extracted_text, ocr_conf = HelmetANPRService.perform_anpr_ocr(plate_crop, vehicle_id_seed=frame_number + v_idx)
+                    elif hasattr(HelmetANPRService, "extract_license_plate_text"):
+                        extracted_text, ocr_conf = HelmetANPRService.extract_license_plate_text(plate_crop, vehicle_id_seed=frame_number + v_idx)
+            except Exception:
                 pass
 
             # 2. Check if extracted_text matches any registered stolen vehicle in memory
@@ -467,25 +512,9 @@ class StolenVehicleService:
                 norm_extracted = cls.normalize_vehicle_number(extracted_text)
                 stolen_record = cls.is_stolen_in_memory(norm_extracted)
 
-            # 3. For video demo matching: Trigger on prominent foreground vehicle with interval spacing (e.g. every 75 frames)
-            if not stolen_record and cls._registry_cache and (frame_number % 75 == 12) and v_idx == 0:
-                active_plates = list(cls._registry_cache.keys())
-                cand_plate = active_plates[(frame_number // 75) % len(active_plates)]
-                stolen_record = cls._registry_cache.get(cand_plate)
-                extracted_text = cand_plate
-                ocr_conf = 0.95
-
             if stolen_record:
                 target_plate = stolen_record.get("vehicle_number", extracted_text)
                 norm_p = cls.normalize_vehicle_number(target_plate)
-                
-                # Check duplicate cooldown per camera/video scope
-                if cls.check_cooldown(camera_id or video_id, norm_p):
-                    # Even if cooldown is active, mark detection visually
-                    v["is_stolen"] = True
-                    v["vehicle_number"] = target_plate
-                    v["plate_number"] = target_plate
-                    continue
 
                 # Generate Evidence Snapshots
                 snap_path, snap_url, pl_path, pl_url = cls.generate_stolen_evidence_snapshot(
@@ -499,7 +528,7 @@ class StolenVehicleService:
                     camera_id=camera_id
                 )
 
-                # Process detection, save alert, and dispatch alarm & WebSockets immediately
+                # Process detection with session-scoped encounter deduplication & DB tracking
                 alert_dict = await cls.process_plate_detection(
                     plate_str=target_plate,
                     camera_id=camera_id,
@@ -515,8 +544,9 @@ class StolenVehicleService:
                     plate_confidence=float(matched_plate.get("confidence", 0.90) if matched_plate else 0.90),
                     vehicle_bbox=v,
                     plate_bbox=matched_plate,
-                    source="video" if video_id else "camera",
+                    source="video" if (video_id or session_id) else "camera",
                     stream_id=video_id,
+                    session_id=session_id,
                     frame_number=frame_number,
                     tracking_id=f"TRK-{frame_number}-{v_idx}",
                     db_session=db_session
@@ -550,134 +580,314 @@ class StolenVehicleService:
         plate_bbox: Optional[Dict[str, float]] = None,
         source: Optional[str] = None,
         stream_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         frame_number: Optional[int] = None,
         tracking_id: Optional[str] = None,
         db_session: Optional[AsyncSession] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Main Stolen Vehicle Evaluation & Alert Dispatch Pipeline:
+        Main Stolen Vehicle Evaluation & Alert Persistence Pipeline:
         
-        1. Checks O(1) in-memory cache.
-        2. Evaluates camera/video cooldown.
-        3. Persists StolenVehicleAlert to database.
-        4. Broadcasts WebSocket event & notifies channels.
+        1. Checks O(1) in-memory cache against active registry.
+        2. Evaluates active encounter in current session scope (debouncing continuous detections).
+        3. If CONTINUOUS ENCOUNTER (within cooldown): Updates detection_count, last_detected_at, last_frame_number in DB.
+        4. If NEW ENCOUNTER: Persists new StolenVehicleAlert to database, sets up tracking, and broadcasts notifications.
         """
         stolen_record = cls.is_stolen_in_memory(plate_str)
         if not stolen_record:
             return None
 
         norm_plate = stolen_record.get("normalized_number") or cls.normalize_vehicle_number(plate_str)
-
-        # Check duplicate cooldown per camera/video stream
-        cooldown_scope = stream_id or camera_id or "global"
-        if cls.check_cooldown(cooldown_scope, norm_plate):
-            logger.info(f"Stolen vehicle {norm_plate} detected again on {cooldown_scope} (suppressed by cooldown).")
-            return None
-
-        alert_id = str(uuid.uuid4())
         now_dt = datetime.now(timezone.utc)
-        disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
+        now_sec = time.time()
+        cooldown_sec = cls._settings_cache.get(
+            "alert_cooldown_seconds",
+            getattr(settings, "STOLEN_VEHICLE_ALERT_COOLDOWN_SECONDS", 10)
+        )
 
-        formatted_v_bbox = {
-            "x_min": float(vehicle_bbox.get("x_min", 0)) if vehicle_bbox else 0.0,
-            "y_min": float(vehicle_bbox.get("y_min", 0)) if vehicle_bbox else 0.0,
-            "x_max": float(vehicle_bbox.get("x_max", 0)) if vehicle_bbox else 0.0,
-            "y_max": float(vehicle_bbox.get("y_max", 0)) if vehicle_bbox else 0.0
-        } if vehicle_bbox else {}
+        scope_key = str(session_id or stream_id or camera_id or "global")
+        encounter_lock_key = f"{scope_key}_{norm_plate}"
+        if encounter_lock_key not in cls._encounter_locks:
+            cls._encounter_locks[encounter_lock_key] = asyncio.Lock()
+        encounter_lock = cls._encounter_locks[encounter_lock_key]
 
-        formatted_p_bbox = {
-            "x_min": float(plate_bbox.get("x_min", 0)) if plate_bbox else 0.0,
-            "y_min": float(plate_bbox.get("y_min", 0)) if plate_bbox else 0.0,
-            "x_max": float(plate_bbox.get("x_max", 0)) if plate_bbox else 0.0,
-            "y_max": float(plate_bbox.get("y_max", 0)) if plate_bbox else 0.0
-        } if plate_bbox else {}
+        async with encounter_lock:
+            scope_encounters = cls._active_encounters.setdefault(scope_key, {})
+            existing_encounter = scope_encounters.get(norm_plate)
 
-        alert_dict = {
-            "id": alert_id,
-            "stolen_vehicle_id": stolen_record.get("id"),
-            "vehicle_number": stolen_record.get("vehicle_number", norm_plate),
-            "normalized_vehicle_number": norm_plate,
-            "display_number": disp_number,
-            "owner_name": stolen_record.get("owner_name"),
-            "fir_number": stolen_record.get("fir_number"),
-            "vehicle_type": stolen_record.get("vehicle_type", "VEHICLE"),
-            "priority": stolen_record.get("priority", "HIGH"),
-            "police_station": stolen_record.get("police_station"),
-            "camera_id": camera_id,
-            "camera_name": camera_name,
-            "camera_location": camera_location,
-            "latitude": latitude,
-            "longitude": longitude,
-            "timestamp": now_dt.isoformat(),
-            "vehicle_snapshot_url": vehicle_snapshot_url,
-            "vehicle_snapshot_path": vehicle_snapshot_path,
-            "plate_crop_url": plate_crop_url,
-            "plate_crop_path": plate_crop_path,
-            "ocr_text": plate_str,
-            "confidence": round(float(ocr_confidence), 2),
-            "plate_confidence": round(float(plate_confidence), 2),
-            "ocr_confidence": round(float(ocr_confidence), 2),
-            "source": source or ("video" if stream_id else "camera"),
-            "bbox": formatted_v_bbox,
-            "plate_bbox": formatted_p_bbox,
-            "stream_id": stream_id,
-            "video_id": stream_id,
-            "frame_number": frame_number,
-            "tracking_id": tracking_id,
-            "status": "ACTIVE",
-            "message": f"STOLEN VEHICLE DETECTED: {norm_plate}",
-            "remarks": f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')}). Flagged by {camera_name}."
-        }
+            # Re-hydrate from database if memory was cleared but active alert exists in this session
+            if not existing_encounter and (session_id or stream_id):
+                try:
+                    async with AsyncSessionLocal() as chk_db:
+                        q_conditions = [
+                            or_(
+                                StolenVehicleAlert.vehicle_number == stolen_record.get("vehicle_number", norm_plate),
+                                StolenVehicleAlert.vehicle_number == norm_plate
+                            ),
+                            StolenVehicleAlert.status.in_(["ACTIVE", "INVESTIGATING"])
+                        ]
+                        if session_id:
+                            q_conditions.append(StolenVehicleAlert.session_id == session_id)
+                        elif stream_id:
+                            q_conditions.append(or_(StolenVehicleAlert.stream_id == stream_id, StolenVehicleAlert.video_id == stream_id))
 
-        # 1. Save alert in DB (using provided session or new session)
-        async def _save_alert(sess: AsyncSession):
-            alert_db = StolenVehicleAlert(
-                id=alert_id,
-                stolen_vehicle_id=stolen_record.get("id"),
-                vehicle_number=stolen_record.get("vehicle_number", norm_plate),
-                owner_name=stolen_record.get("owner_name"),
-                fir_number=stolen_record.get("fir_number"),
-                camera_id=camera_id,
-                camera_name=camera_name,
-                camera_location=camera_location,
-                latitude=latitude,
-                longitude=longitude,
-                timestamp=now_dt,
-                vehicle_snapshot_url=vehicle_snapshot_url,
-                vehicle_snapshot_path=vehicle_snapshot_path,
-                plate_crop_url=plate_crop_url,
-                plate_crop_path=plate_crop_path,
-                ocr_text=plate_str,
-                confidence=float(ocr_confidence),
-                stream_id=stream_id,
-                frame_number=frame_number,
-                tracking_id=tracking_id,
-                status="ACTIVE",
-                remarks=alert_dict["remarks"]
-            )
-            sess.add(alert_db)
-            await sess.commit()
+                        stmt_chk = select(StolenVehicleAlert).where(and_(*q_conditions)).order_by(StolenVehicleAlert.timestamp.desc()).limit(1)
+                        db_existing = (await chk_db.execute(stmt_chk)).scalars().first()
+                        if db_existing:
+                            existing_encounter = {
+                                "alert_id": db_existing.id,
+                                "last_seen": now_sec,
+                                "detection_count": db_existing.detection_count or 1,
+                                "first_detected_at": db_existing.first_detected_at or db_existing.timestamp or now_dt,
+                                "last_detected_at": now_dt,
+                                "first_frame": db_existing.frame_number or frame_number or 1,
+                                "last_frame": frame_number or db_existing.frame_number or 1,
+                                "highest_conf": float(db_existing.confidence or ocr_confidence),
+                                "persisted_in_db": True,
+                                "alert_dict": None
+                            }
+                            scope_encounters[norm_plate] = existing_encounter
+                except Exception as dbe:
+                    logger.warning(f"Note on encounter re-hydration: {dbe}")
 
-        if db_session:
+            # Check if encounter is active (continuous detection during same pass)
+            if existing_encounter and (now_sec - existing_encounter["last_seen"]) < cooldown_sec:
+                # 🔄 CONTINUOUS ENCOUNTER: Increment counter and update timestamps
+                existing_encounter["last_seen"] = now_sec
+                existing_encounter["detection_count"] += 1
+                existing_encounter["last_detected_at"] = now_dt
+                if frame_number is not None:
+                    existing_encounter["last_frame"] = frame_number
+                if ocr_confidence > existing_encounter["highest_conf"]:
+                    existing_encounter["highest_conf"] = float(ocr_confidence)
+
+                cur_alert_id = existing_encounter["alert_id"]
+                updated_count = existing_encounter["detection_count"]
+
+                # Asynchronously update database record with atomic increment & retry
+                async def _update_db_alert():
+                    for attempt in range(3):
+                        try:
+                            async with AsyncSessionLocal() as u_session:
+                                # If initial insert failed, attempt reconciliation insertion first
+                                if not existing_encounter.get("persisted_in_db", True):
+                                    alert_db = StolenVehicleAlert(
+                                        id=cur_alert_id,
+                                        stolen_vehicle_id=stolen_record.get("id"),
+                                        vehicle_number=stolen_record.get("vehicle_number", norm_plate),
+                                        owner_name=stolen_record.get("owner_name"),
+                                        fir_number=stolen_record.get("fir_number"),
+                                        camera_id=camera_id if (camera_id and not str(camera_id).startswith("CAM-")) else None,
+                                        camera_name=camera_name,
+                                        camera_location=camera_location,
+                                        latitude=latitude,
+                                        longitude=longitude,
+                                        timestamp=existing_encounter.get("first_detected_at", now_dt),
+                                        first_detected_at=existing_encounter.get("first_detected_at", now_dt),
+                                        last_detected_at=now_dt,
+                                        detection_count=updated_count,
+                                        vehicle_snapshot_url=vehicle_snapshot_url,
+                                        vehicle_snapshot_path=vehicle_snapshot_path,
+                                        plate_crop_url=plate_crop_url,
+                                        plate_crop_path=plate_crop_path,
+                                        ocr_text=plate_str,
+                                        confidence=float(ocr_confidence),
+                                        stream_id=stream_id,
+                                        video_id=stream_id,
+                                        session_id=session_id,
+                                        frame_number=existing_encounter.get("first_frame", frame_number),
+                                        last_frame_number=frame_number,
+                                        tracking_id=tracking_id,
+                                        status="ACTIVE",
+                                        remarks=f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')})."
+                                    )
+                                    u_session.add(alert_db)
+                                    await u_session.commit()
+                                    existing_encounter["persisted_in_db"] = True
+                                    return
+
+                                # Atomic update statement
+                                stmt_u = select(StolenVehicleAlert).where(StolenVehicleAlert.id == cur_alert_id)
+                                target_alert = (await u_session.execute(stmt_u)).scalars().first()
+                                if target_alert:
+                                    target_alert.detection_count = max(target_alert.detection_count or 0, updated_count)
+                                    target_alert.last_detected_at = now_dt
+                                    if frame_number is not None:
+                                        target_alert.last_frame_number = frame_number
+                                    target_alert.updated_at = now_dt
+                                    await u_session.commit()
+                                    return
+                        except Exception as ue:
+                            if attempt == 2:
+                                logger.error(f"Error updating StolenVehicleAlert {cur_alert_id} after 3 attempts: {ue}")
+                            await asyncio.sleep(0.05 * (attempt + 1))
+
+                await _update_db_alert()
+
+                # Return updated event info without firing new alarms/popups
+                disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
+                return {
+                    "id": cur_alert_id,
+                    "stolen_vehicle_id": stolen_record.get("id"),
+                    "vehicle_number": stolen_record.get("vehicle_number", norm_plate),
+                    "normalized_vehicle_number": norm_plate,
+                    "display_number": disp_number,
+                    "owner_name": stolen_record.get("owner_name"),
+                    "fir_number": stolen_record.get("fir_number"),
+                    "vehicle_type": stolen_record.get("vehicle_type", "VEHICLE"),
+                    "priority": stolen_record.get("priority", "HIGH"),
+                    "police_station": stolen_record.get("police_station"),
+                    "camera_id": camera_id,
+                    "camera_name": camera_name,
+                    "camera_location": camera_location,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "timestamp": now_dt.isoformat(),
+                    "first_detected_at": existing_encounter["first_detected_at"].isoformat() if hasattr(existing_encounter["first_detected_at"], "isoformat") else str(existing_encounter["first_detected_at"]),
+                    "last_detected_at": now_dt.isoformat(),
+                    "vehicle_snapshot_url": vehicle_snapshot_url,
+                    "plate_crop_url": plate_crop_url,
+                    "ocr_text": plate_str,
+                    "confidence": round(float(ocr_confidence), 2),
+                    "source": source or ("video" if stream_id else "camera"),
+                    "stream_id": stream_id,
+                    "video_id": stream_id,
+                    "session_id": session_id,
+                    "frame_number": frame_number,
+                    "last_frame_number": frame_number,
+                    "detection_count": updated_count,
+                    "status": "ACTIVE",
+                    "is_new_event": False,
+                    "message": f"STOLEN VEHICLE DETECTED: {norm_plate} (Count: {updated_count})"
+                }
+
+            # 🚨 NEW ENCOUNTER: Vehicle detected for the first time or re-entered after cooldown
+            alert_id = str(uuid.uuid4())
+            disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
+
+            formatted_v_bbox = {
+                "x_min": float(vehicle_bbox.get("x_min", 0)) if vehicle_bbox else 0.0,
+                "y_min": float(vehicle_bbox.get("y_min", 0)) if vehicle_bbox else 0.0,
+                "x_max": float(vehicle_bbox.get("x_max", 0)) if vehicle_bbox else 0.0,
+                "y_max": float(vehicle_bbox.get("y_max", 0)) if vehicle_bbox else 0.0
+            } if vehicle_bbox else {}
+
+            formatted_p_bbox = {
+                "x_min": float(plate_bbox.get("x_min", 0)) if plate_bbox else 0.0,
+                "y_min": float(plate_bbox.get("y_min", 0)) if plate_bbox else 0.0,
+                "x_max": float(plate_bbox.get("x_max", 0)) if plate_bbox else 0.0,
+                "y_max": float(plate_bbox.get("y_max", 0)) if plate_bbox else 0.0
+            } if plate_bbox else {}
+
+            alert_dict = {
+                "id": alert_id,
+                "stolen_vehicle_id": stolen_record.get("id"),
+                "vehicle_number": stolen_record.get("vehicle_number", norm_plate),
+                "normalized_vehicle_number": norm_plate,
+                "display_number": disp_number,
+                "owner_name": stolen_record.get("owner_name"),
+                "fir_number": stolen_record.get("fir_number"),
+                "vehicle_type": stolen_record.get("vehicle_type", "VEHICLE"),
+                "priority": stolen_record.get("priority", "HIGH"),
+                "police_station": stolen_record.get("police_station"),
+                "camera_id": camera_id,
+                "camera_name": camera_name,
+                "camera_location": camera_location,
+                "latitude": latitude,
+                "longitude": longitude,
+                "timestamp": now_dt.isoformat(),
+                "first_detected_at": now_dt.isoformat(),
+                "last_detected_at": now_dt.isoformat(),
+                "vehicle_snapshot_url": vehicle_snapshot_url,
+                "vehicle_snapshot_path": vehicle_snapshot_path,
+                "plate_crop_url": plate_crop_url,
+                "plate_crop_path": plate_crop_path,
+                "ocr_text": plate_str,
+                "confidence": round(float(ocr_confidence), 2),
+                "plate_confidence": round(float(plate_confidence), 2),
+                "ocr_confidence": round(float(ocr_confidence), 2),
+                "source": source or ("video" if stream_id else "camera"),
+                "bbox": formatted_v_bbox,
+                "plate_bbox": formatted_p_bbox,
+                "stream_id": stream_id,
+                "video_id": stream_id,
+                "session_id": session_id,
+                "frame_number": frame_number,
+                "last_frame_number": frame_number,
+                "detection_count": 1,
+                "tracking_id": tracking_id,
+                "status": "ACTIVE",
+                "is_new_event": True,
+                "message": f"STOLEN VEHICLE DETECTED: {norm_plate}",
+                "remarks": f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')}). Flagged by {camera_name}."
+            }
+
+            # 1. Save new alert in DB with 3 retries
+            persisted = False
+            for attempt in range(3):
+                try:
+                    async with AsyncSessionLocal() as session:
+                        alert_db = StolenVehicleAlert(
+                            id=alert_id,
+                            stolen_vehicle_id=stolen_record.get("id"),
+                            vehicle_number=stolen_record.get("vehicle_number", norm_plate),
+                            owner_name=stolen_record.get("owner_name"),
+                            fir_number=stolen_record.get("fir_number"),
+                            camera_id=camera_id if (camera_id and not str(camera_id).startswith("CAM-")) else None,
+                            camera_name=camera_name,
+                            camera_location=camera_location,
+                            latitude=latitude,
+                            longitude=longitude,
+                            timestamp=now_dt,
+                            first_detected_at=now_dt,
+                            last_detected_at=now_dt,
+                            detection_count=1,
+                            vehicle_snapshot_url=vehicle_snapshot_url,
+                            vehicle_snapshot_path=vehicle_snapshot_path,
+                            plate_crop_url=plate_crop_url,
+                            plate_crop_path=plate_crop_path,
+                            ocr_text=plate_str,
+                            confidence=float(ocr_confidence),
+                            stream_id=stream_id,
+                            video_id=stream_id,
+                            session_id=session_id,
+                            frame_number=frame_number,
+                            last_frame_number=frame_number,
+                            tracking_id=tracking_id,
+                            status="ACTIVE",
+                            remarks=alert_dict["remarks"]
+                        )
+                        session.add(alert_db)
+                        await session.commit()
+                        persisted = True
+                        break
+                except Exception as e:
+                    if attempt == 2:
+                        logger.error(f"Error saving new StolenVehicleAlert {alert_id} after 3 attempts: {e}")
+                    await asyncio.sleep(0.05 * (attempt + 1))
+
+            # 2. Register encounter in active tracker
+            scope_encounters[norm_plate] = {
+                "alert_id": alert_id,
+                "last_seen": now_sec,
+                "detection_count": 1,
+                "first_detected_at": now_dt,
+                "last_detected_at": now_dt,
+                "first_frame": frame_number or 1,
+                "last_frame": frame_number or 1,
+                "highest_conf": float(ocr_confidence),
+                "persisted_in_db": persisted,
+                "alert_dict": alert_dict
+            }
+
+            # 3. Dispatch multi-channel notifications (WebSocket, Sound, Browser, SMS/WhatsApp)
             try:
-                await _save_alert(db_session)
-            except Exception as e:
-                logger.error(f"Error saving StolenVehicleAlert in existing session: {e}")
-        else:
-            try:
-                async with AsyncSessionLocal() as session:
-                    await _save_alert(session)
-            except Exception as e:
-                logger.error(f"Error saving StolenVehicleAlert in new session: {e}")
+                await NotificationService.dispatch_stolen_vehicle_alert(
+                    alert_data=alert_dict,
+                    settings_dict=cls._settings_cache
+                )
+            except Exception as ne:
+                logger.error(f"Error dispatching stolen vehicle notifications: {ne}")
 
-        # 2. Dispatch multi-channel notifications (WebSocket, Sound, Browser, SMS/WhatsApp)
-        try:
-            await NotificationService.dispatch_stolen_vehicle_alert(
-                alert_data=alert_dict,
-                settings_dict=cls._settings_cache
-            )
-        except Exception as ne:
-            logger.error(f"Error dispatching stolen vehicle notifications: {ne}")
-
-        logger.warning(f"🚨🚨 [STOLEN VEHICLE ALERT DISPATCHED]: Plate {norm_plate} at {camera_location} (FIR: {stolen_record.get('fir_number')})")
-        return alert_dict
+            logger.warning(f"🚨🚨 [STOLEN VEHICLE ALERT DISPATCHED]: Plate {norm_plate} at {camera_location} (FIR: {stolen_record.get('fir_number')})")
+            return alert_dict

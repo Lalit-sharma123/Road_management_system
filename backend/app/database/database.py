@@ -1,6 +1,7 @@
 import os
 import asyncio
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -15,15 +16,28 @@ SQLITE_FALLBACK_URL = f"sqlite+aiosqlite:///{SQLITE_DB_PATH}"
 active_database_url = settings.DATABASE_URL
 
 def _create_engine_for_url(url: str):
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and not ("+asyncpg" in url or "+psycopg" in url):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
     if "postgresql" in url.lower():
-        return create_async_engine(
-            url,
-            echo=False,
-            future=True,
-            pool_size=10,
-            max_overflow=5,
-            pool_pre_ping=True
-        )
+        try:
+            return create_async_engine(
+                url,
+                echo=False,
+                future=True,
+                pool_size=10,
+                max_overflow=5,
+                pool_pre_ping=True
+            )
+        except Exception:
+            return create_async_engine(
+                SQLITE_FALLBACK_URL,
+                echo=False,
+                future=True,
+                connect_args={"check_same_thread": False}
+            )
     else:
         return create_async_engine(
             url,
@@ -219,9 +233,15 @@ async def ensure_schema_alignment(conn) -> None:
             ("plate_crop_path", "TEXT", "TEXT"),
             ("ocr_text", "VARCHAR(100) NOT NULL", "VARCHAR(100) NOT NULL"),
             ("confidence", "DOUBLE PRECISION DEFAULT 0.95", "FLOAT DEFAULT 0.95"),
+            ("video_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("session_id", "VARCHAR(100)", "VARCHAR(100)"),
             ("stream_id", "VARCHAR(100)", "VARCHAR(100)"),
             ("frame_number", "INTEGER", "INTEGER"),
+            ("last_frame_number", "INTEGER", "INTEGER"),
             ("tracking_id", "VARCHAR(50)", "VARCHAR(50)"),
+            ("detection_count", "INTEGER DEFAULT 1", "INTEGER DEFAULT 1"),
+            ("first_detected_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("last_detected_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("status", "VARCHAR(50) DEFAULT 'ACTIVE'", "VARCHAR(50) DEFAULT 'ACTIVE'"),
             ("resolved_by", "VARCHAR(255)", "VARCHAR(255)"),
             ("remarks", "TEXT", "TEXT"),

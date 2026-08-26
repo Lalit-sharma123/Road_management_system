@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Union, Dict, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base directories using pathlib

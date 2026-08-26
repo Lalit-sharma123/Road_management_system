@@ -393,9 +393,20 @@ class StolenVehicleAlert(Base):
     ocr_text: Mapped[str] = mapped_column(String(100), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.95, nullable=False)
     
+    video_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("videos.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     stream_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     frame_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_frame_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tracking_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    detection_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    
+    first_detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    last_detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     
     status: Mapped[str] = mapped_column(String(50), default="ACTIVE", index=True, nullable=False)  # ACTIVE, INVESTIGATING, INTERCEPTED, RESOLVED, FALSE_POSITIVE
     resolved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

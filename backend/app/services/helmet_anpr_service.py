@@ -280,7 +280,7 @@ class HelmetANPRService:
         )
 
     @classmethod
-    def evaluate_frame_violations(
+    async def evaluate_frame_violations(
         cls,
         raw_frame: np.ndarray,
         detections: List[Dict[str, Any]],
@@ -290,7 +290,8 @@ class HelmetANPRService:
         camera_id: Optional[str] = "CAM-01",
         location_name: str = "National Highway 48 - Sector 29",
         base_lat: float = 28.4595,
-        base_lon: float = 77.0266
+        base_lon: float = 77.0266,
+        persist_to_db: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Multi-Model Real-Time Violation & ANPR Execution:
@@ -489,5 +490,44 @@ class HelmetANPRService:
                 }
 
                 violations.append(violation_record)
+
+        # Isolated database persistence for detected traffic violations
+        if violations and persist_to_db:
+            try:
+                from app.database.database import AsyncSessionLocal
+                from app.models.models import TrafficViolation
+                async with AsyncSessionLocal() as session:
+                    for v_item in violations:
+                        cam_id = v_item.get("camera_id")
+                        valid_cam_id = cam_id if (cam_id and not str(cam_id).startswith("CAM-")) else None
+                        
+                        db_viol = TrafficViolation(
+                            id=v_item["id"],
+                            challan_number=v_item["challan_number"],
+                            violation_type=v_item.get("violation_type", "NO_HELMET"),
+                            license_plate_number=v_item["license_plate_number"],
+                            confidence=float(v_item.get("confidence", 0.92)),
+                            rider_confidence=float(v_item.get("rider_confidence", 0.88)),
+                            fine_amount=float(v_item.get("fine_amount", 1000.0)),
+                            fine_status=v_item.get("fine_status", "ISSUED"),
+                            video_id=v_item.get("video_id"),
+                            camera_id=valid_cam_id,
+                            frame_number=v_item.get("frame_number"),
+                            timestamp_seconds=float(v_item.get("timestamp_seconds", 0.0)),
+                            evidence_image_path=v_item.get("evidence_image_path"),
+                            evidence_image_url=v_item.get("evidence_image_url"),
+                            plate_crop_url=v_item.get("plate_crop_url"),
+                            rider_crop_url=v_item.get("rider_crop_url"),
+                            vehicle_type=v_item.get("vehicle_type", "MOTORCYCLE"),
+                            latitude=float(v_item.get("latitude", base_lat)),
+                            longitude=float(v_item.get("longitude", base_lon)),
+                            location_name=v_item.get("location_name", location_name),
+                            notes=v_item.get("notes")
+                        )
+                        session.add(db_viol)
+                    await session.commit()
+            except Exception as dbe:
+                # Log without halting frame inference
+                print(f"⚠️ [TrafficViolation DB Isolated Save Notice]: {dbe}")
 
         return violations

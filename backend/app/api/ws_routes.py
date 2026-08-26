@@ -1,7 +1,9 @@
 import asyncio
 import json
+import time
+import uuid
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -17,6 +19,7 @@ router = APIRouter(tags=["WebSockets & Live Telemetry"])
 processing_progress_state: Dict[str, Any] = {
     "is_processing": False,
     "video_id": None,
+    "session_id": None,
     "current_frame": 0,
     "total_frames": 0,
     "progress_percent": 0.0,
@@ -33,34 +36,85 @@ processing_progress_state: Dict[str, Any] = {
 @router.websocket("/ws/dashboard")
 @router.websocket("/ws")
 @router.websocket("/ws/{client_id}")
-async def websocket_telemetry_endpoint(websocket: WebSocket, client_id: str = "client"):
+async def websocket_telemetry_endpoint(
+    websocket: WebSocket,
+    client_id: str = "client",
+    session_id: Optional[str] = Query(default=None),
+    video_id: Optional[str] = Query(default=None)
+):
     """
     Real-Time WebSocket Endpoint for Live Detections & Dashboard Updates.
-    Channels:
-    - /ws/live-detections
-    - /ws/dashboard
+    Guarantees unique session_id isolation, video_id channel routing, and robust
+    unresponsive client pruning without affecting other connected subscribers.
     """
-    await ws_broadcaster.connect(websocket)
+    video_id_scope = video_id
+    session_id_scope = session_id
+
+    # Parse scoping metadata from client_id if not explicitly provided as query params
+    if not video_id_scope and client_id.startswith("live-"):
+        # Format: live-{video_id}-{session_id} or live-{video_id}-{timestamp}
+        raw = client_id[5:]
+        last_dash_idx = raw.rfind("-")
+        if last_dash_idx != -1:
+            video_id_scope = raw[:last_dash_idx]
+            if not session_id_scope:
+                potential_sess = raw[last_dash_idx + 1:]
+                if potential_sess.startswith("sess_"):
+                    session_id_scope = potential_sess
+        else:
+            video_id_scope = raw
+    elif not video_id_scope and client_id not in ["default", "client", "dashboard", "live-detections"]:
+        video_id_scope = client_id
+
+    # Guarantee an explicit unique session_id for every process connection session
+    if not session_id_scope:
+        if processing_progress_state.get("session_id") and processing_progress_state.get("video_id") == video_id_scope:
+            session_id_scope = processing_progress_state["session_id"]
+        else:
+            session_id_scope = f"sess_{video_id_scope or 'live'}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+
+    await ws_broadcaster.connect(
+        websocket,
+        client_id=client_id,
+        session_id=session_id_scope,
+        video_id=video_id_scope
+    )
+
     try:
         # Send initial confirmation connection handshake
         await websocket.send_text(json.dumps({
             "type": "connection_established",
             "message": f"Connected to Smart Road Damage Telemetry Stream ({client_id})",
+            "session_id": session_id_scope,
+            "video_id": video_id_scope,
             "camera_active": driver_camera_manager.is_running,
-            "processing_active": processing_progress_state["is_processing"]
+            "processing_active": processing_progress_state["is_processing"],
+            "current_progress": processing_progress_state.get("progress_percent", 0),
+            "timestamp": time.time()
         }))
 
         while True:
             data = await websocket.receive_text()
-            # Handle incoming ping / client messages if needed
+            # Handle incoming ping / client messages with immediate reply
             try:
                 msg = json.loads(data)
-                if msg.get("action") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": asyncio.get_event_loop().time()}))
+                action = msg.get("action") or msg.get("type")
+                if action in ["ping", "heartbeat"]:
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "session_id": session_id_scope,
+                        "video_id": video_id_scope,
+                        "timestamp": time.time()
+                    }))
             except Exception:
                 pass
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        pass
+    finally:
         ws_broadcaster.disconnect(websocket)
+
 
 
 @router.get("/processing/status")

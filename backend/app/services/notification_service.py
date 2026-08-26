@@ -55,7 +55,9 @@ class NotificationService:
                     "plate_confidence": alert_data.get("plate_confidence", 0.95),
                     "ocr_confidence": alert_data.get("ocr_confidence", alert_data.get("confidence", 0.95)),
                     "source": alert_data.get("source", "video" if alert_data.get("stream_id") else "camera"),
-                    "video_id": alert_data.get("stream_id"),
+                    "video_id": alert_data.get("video_id") or alert_data.get("stream_id"),
+                    "session_id": alert_data.get("session_id"),
+                    "stream_id": alert_data.get("stream_id"),
                     "camera_id": alert_data.get("camera_id"),
                     "bbox": alert_data.get("bbox", {}),
                     "plate_bbox": alert_data.get("plate_bbox", {}),
@@ -68,7 +70,8 @@ class NotificationService:
                         "plate_confidence": alert_data.get("plate_confidence", 0.95),
                         "ocr_confidence": alert_data.get("ocr_confidence", alert_data.get("confidence", 0.95)),
                         "source": alert_data.get("source", "video" if alert_data.get("stream_id") else "camera"),
-                        "video_id": alert_data.get("stream_id"),
+                        "video_id": alert_data.get("video_id") or alert_data.get("stream_id"),
+                        "session_id": alert_data.get("session_id"),
                         "camera_id": alert_data.get("camera_id"),
                         "timestamp": alert_data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                         "bbox": alert_data.get("bbox", {}),
@@ -79,22 +82,17 @@ class NotificationService:
                         "police_station": alert_data.get("police_station"),
                         "vehicle_snapshot_url": alert_data.get("vehicle_snapshot_url"),
                         "plate_crop_url": alert_data.get("plate_crop_url"),
-                        "alert_id": alert_data.get("id")
+                        "alert_id": alert_data.get("id"),
+                        "detection_count": alert_data.get("detection_count", 1)
                     }
                 }
-                # Also send payload with type 'stolen_alert' for backwards compatibility
-                ws_payload_alt = dict(ws_payload)
-                ws_payload_alt["type"] = "stolen_alert"
 
-                # Broadcast to global dashboard/telemetry broadcasters
+                # Single broadcast to active WebSocket connection managers
                 await ws_broadcaster.broadcast(ws_payload)
-                await ws_broadcaster.broadcast(ws_payload_alt)
 
-                # Also broadcast to video processing WebSocket manager if available
                 try:
                     from app.api.process import ws_manager
                     await ws_manager.broadcast(ws_payload)
-                    await ws_manager.broadcast(ws_payload_alt)
                 except Exception:
                     pass
 
@@ -141,22 +139,24 @@ class NotificationService:
             email_res = await cls._dispatch_email(alert_data)
             dispatched_logs.append(email_res)
 
-        # Persist notification logs to database if session provided
-        if db_session:
+        # Persist notification logs to database using an isolated AsyncSession scope
+        if dispatched_logs and alert_data.get("id"):
             try:
+                from app.database.database import AsyncSessionLocal
                 from app.models.models import NotificationLog
-                for log_item in dispatched_logs:
-                    nlog = NotificationLog(
-                        id=str(uuid.uuid4()),
-                        alert_id=alert_data.get("id"),
-                        channel=log_item.get("channel", "SYSTEM"),
-                        recipient=log_item.get("recipient", "Dashboard"),
-                        status=log_item.get("status", "SENT"),
-                        payload_json=log_item.get("payload"),
-                        error_message=log_item.get("error")
-                    )
-                    db_session.add(nlog)
-                await db_session.commit()
+                async with AsyncSessionLocal() as isolated_session:
+                    for log_item in dispatched_logs:
+                        nlog = NotificationLog(
+                            id=str(uuid.uuid4()),
+                            alert_id=alert_data.get("id"),
+                            channel=log_item.get("channel", "SYSTEM"),
+                            recipient=log_item.get("recipient", "Dashboard"),
+                            status=log_item.get("status", "SENT"),
+                            payload_json=log_item.get("payload"),
+                            error_message=log_item.get("error")
+                        )
+                        isolated_session.add(nlog)
+                    await isolated_session.commit()
             except Exception as dbe:
                 logger.warning(f"Could not persist notification log: {dbe}")
 

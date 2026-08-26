@@ -420,14 +420,18 @@ export const stolenVehicleService = {
     search?: string;
     status?: string;
     camera_id?: string;
+    video_id?: string;
+    session_id?: string;
     days?: number;
     skip?: number;
     limit?: number;
   }): Promise<StolenVehicleAlert[]> {
     try {
       const res = await apiClient.get<StolenVehicleAlert[]>('/stolen-alerts', { params });
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        saveStoredAlerts(res.data);
+      if (Array.isArray(res.data)) {
+        if (res.data.length > 0) {
+          saveStoredAlerts(res.data);
+        }
         return res.data;
       }
     } catch (e) {
@@ -436,6 +440,12 @@ export const stolenVehicleService = {
 
     let list = getStoredAlerts();
 
+    if (params?.video_id) {
+      list = list.filter(a => a.video_id === params.video_id || a.stream_id === params.video_id);
+    }
+    if (params?.session_id) {
+      list = list.filter(a => a.session_id === params.session_id);
+    }
     if (params?.status && params.status !== 'ALL') {
       list = list.filter(a => a.status.toUpperCase() === params.status?.toUpperCase());
     }
@@ -461,7 +471,7 @@ export const stolenVehicleService = {
       const res = await apiClient.get<StolenVehicleAlert[]>('/stolen-alerts/live', {
         params: { limit }
       });
-      if (Array.isArray(res.data) && res.data.length > 0) {
+      if (Array.isArray(res.data)) {
         return res.data;
       }
     } catch (e) {

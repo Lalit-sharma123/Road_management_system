@@ -431,8 +431,16 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
                       <span>•</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        {new Date(alert.timestamp).toLocaleTimeString()} ({new Date(alert.timestamp).toLocaleDateString()})
+                        {new Date(alert.last_detected_at || alert.timestamp).toLocaleTimeString()}
                       </span>
+                      {typeof alert.detection_count === 'number' && alert.detection_count > 1 && (
+                        <>
+                          <span>•</span>
+                          <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 font-mono rounded text-[11px] font-semibold border border-blue-500/30">
+                            {alert.detection_count} detections
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
