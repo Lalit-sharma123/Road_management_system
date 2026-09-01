@@ -801,8 +801,8 @@ async def execute_video_processing_task(
                 print(f"⚠️ [DB Non-blocking Persistence Notice for Frame #{frame_num}]: {db_err}")
 
             del annotated_img, raw_frame, preprocessed_frame, buffer
-            # Natural playback pacing for smooth real-time CCTV stream experience
-            frame_delay = max(0.02, min(0.05, 0.8 / max(processor.fps or 30.0, 1.0)))
+            # High-throughput real-time streaming pacing
+            frame_delay = max(0.005, min(0.02, 0.35 / max(processor.fps or 30.0, 1.0)))
             await asyncio.sleep(frame_delay)
 
         # Check if processing was cancelled before writing final report

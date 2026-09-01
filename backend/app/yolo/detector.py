@@ -285,14 +285,31 @@ class YOLODamageDetector:
 
         try:
             t0 = time.perf_counter()
-            dmg_results = self.damage_model.predict(
-                source=frame,
-                conf=conf_threshold,
-                iou=iou_threshold,
-                imgsz=640,
-                half=(getattr(self, "device", "cpu") != "cpu"),
-                verbose=False
-            )
+            try:
+                import torch
+                inf_ctx = torch.inference_mode()
+            except Exception:
+                inf_ctx = None
+
+            if inf_ctx is not None:
+                with inf_ctx:
+                    dmg_results = self.damage_model.predict(
+                        source=frame,
+                        conf=conf_threshold,
+                        iou=iou_threshold,
+                        imgsz=640,
+                        half=(getattr(self, "device", "cpu") != "cpu"),
+                        verbose=False
+                    )
+            else:
+                dmg_results = self.damage_model.predict(
+                    source=frame,
+                    conf=conf_threshold,
+                    iou=iou_threshold,
+                    imgsz=640,
+                    half=(getattr(self, "device", "cpu") != "cpu"),
+                    verbose=False
+                )
             dt_ms = (time.perf_counter() - t0) * 1000.0
             
             if dmg_results and len(dmg_results) > 0:
@@ -351,15 +368,33 @@ class YOLODamageDetector:
 
         try:
             t0 = time.perf_counter()
-            veh_results = self.vehicle_model.predict(
-                source=frame,
-                conf=conf_threshold,
-                iou=iou_threshold,
-                classes=[0, 1, 2, 3, 5, 7],
-                imgsz=640,
-                half=(getattr(self, "device", "cpu") != "cpu"),
-                verbose=False
-            )
+            try:
+                import torch
+                inf_ctx = torch.inference_mode()
+            except Exception:
+                inf_ctx = None
+
+            if inf_ctx is not None:
+                with inf_ctx:
+                    veh_results = self.vehicle_model.predict(
+                        source=frame,
+                        conf=conf_threshold,
+                        iou=iou_threshold,
+                        classes=[0, 1, 2, 3, 5, 7],
+                        imgsz=640,
+                        half=(getattr(self, "device", "cpu") != "cpu"),
+                        verbose=False
+                    )
+            else:
+                veh_results = self.vehicle_model.predict(
+                    source=frame,
+                    conf=conf_threshold,
+                    iou=iou_threshold,
+                    classes=[0, 1, 2, 3, 5, 7],
+                    imgsz=640,
+                    half=(getattr(self, "device", "cpu") != "cpu"),
+                    verbose=False
+                )
             dt_ms = (time.perf_counter() - t0) * 1000.0
             
             if veh_results and len(veh_results) > 0:
