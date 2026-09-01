@@ -67,7 +67,11 @@ class Settings(BaseSettings):
     NUM_INFERENCE_THREADS: int = 4
     CONFIDENCE_THRESHOLD: float = 0.35
     IOU_THRESHOLD: float = 0.45
-    FRAME_SKIP: int = 5  # Process every 5th frame for performance
+    FRAME_SKIP: int = 5  # Process every 5th frame for default batch performance
+    ENABLE_DYNAMIC_FRAME_SKIP: bool = True
+    MIN_FRAME_SKIP: int = 1
+    MAX_FRAME_SKIP: int = 8
+    TARGET_FPS: float = 30.0
     
     # Severity Formula Weights
     WEIGHT_AREA: float = 0.40

@@ -16,15 +16,18 @@ async def get_models_telemetry():
     """
     GET /api/v1/models/telemetry
     Returns real-time inference latency (ms), throughput (FPS), active status,
-    and performance metrics for the active YOLO models.
+    performance metrics, and dynamic adaptive frame-skip controller telemetry for YOLO models.
     """
+    from app.yolo.adaptive_frame_skip import adaptive_frame_controller
+    adaptive_telemetry = adaptive_frame_controller.get_telemetry()
     try:
         from app.services.camera_manager import detector_instance
         telemetry_data = detector_instance.get_models_telemetry()
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_active_models": len(telemetry_data),
-            "models": telemetry_data
+            "models": telemetry_data,
+            "adaptive_frame_skip": adaptive_telemetry
         }
     except Exception as e:
         print(f"Warning in get_models_telemetry: {e}")
@@ -210,3 +213,32 @@ async def delete_ai_model(model_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(target_model)
     await db.commit()
     return None
+
+
+@router.get("/adaptive-frame-skip")
+async def get_adaptive_frame_skip_status():
+    """
+    GET /api/v1/models/adaptive-frame-skip
+    Retrieve real-time asynchronous adaptive frame skip controller metrics,
+    system CPU/GPU utilization, pressure score, and dynamic skip history.
+    """
+    from app.yolo.adaptive_frame_skip import adaptive_frame_controller
+    return adaptive_frame_controller.get_telemetry()
+
+
+@router.post("/adaptive-frame-skip/configure")
+async def configure_adaptive_frame_skip(
+    mode: str = "dynamic",
+    manual_skip: int = 2
+):
+    """
+    POST /api/v1/models/adaptive-frame-skip/configure
+    Configure dynamic vs manual mode and manual override frame skip parameter.
+    """
+    from app.yolo.adaptive_frame_skip import adaptive_frame_controller
+    adaptive_frame_controller.set_mode(mode=mode, manual_skip=manual_skip)
+    return {
+        "status": "success",
+        "message": f"Adaptive Frame-Skip Controller configured to {mode} mode (skip={adaptive_frame_controller.get_frame_skip()}).",
+        "telemetry": adaptive_frame_controller.get_telemetry()
+    }

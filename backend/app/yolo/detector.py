@@ -587,6 +587,17 @@ class YOLODamageDetector:
         total_lat = (self.telemetry["helmet"]["avg_latency_ms"] + self.telemetry["numberplate"]["avg_latency_ms"])
         self._update_telemetry("helmet_plate", total_lat, len([d for d in merged_detections if d.get("type") in ["helmet", "plate"]]))
 
+        # Update dynamic adaptive frame controller with inference metrics
+        try:
+            from app.yolo.adaptive_frame_skip import adaptive_frame_controller
+            total_inf_time_ms = (self.telemetry["damage"]["last_latency_ms"] + self.telemetry["vehicle"]["last_latency_ms"])
+            adaptive_frame_controller.update_inference_metrics(
+                latency_ms=total_inf_time_ms,
+                object_count=len(merged_detections)
+            )
+        except Exception:
+            pass
+
         # Computer vision heuristic fallback if no models or zero results returned
         if not merged_detections and self.damage_model is None:
             return self._heuristic_fallback(frame, conf_threshold)

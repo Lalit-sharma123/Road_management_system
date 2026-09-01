@@ -203,15 +203,21 @@ class VideoProcessor:
 
     def extract_frames_generator(
         self,
-        frame_skip: int = 5,
+        frame_skip: Optional[int] = None,
         target_size: Optional[Tuple[int, int]] = None,
         enable_histogram_eq: bool = True,
-        enable_gaussian_blur: bool = True
+        enable_gaussian_blur: bool = True,
+        use_adaptive_skip: bool = True
     ) -> Generator[Tuple[int, float, np.ndarray, np.ndarray], None, None]:
         """
-        Stream frames with skipping and optional pre-processing pipeline.
+        Stream frames with dynamic asynchronous frame-skipping and pre-processing pipeline.
+        Dynamically adjusts frame stride based on real-time CPU/GPU system load.
         Yields: (frame_number, timestamp_sec, original_frame, preprocessed_frame)
         """
+        from app.yolo.adaptive_frame_skip import adaptive_frame_controller
+
+        active_skip = frame_skip if frame_skip is not None else getattr(settings, "FRAME_SKIP", 5)
+
         if self.cap and self.cap.isOpened():
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             current_frame = 0
@@ -223,7 +229,9 @@ class VideoProcessor:
 
                 current_frame += 1
 
-                if current_frame % frame_skip != 0:
+                # Query dynamic frame skip controller if adaptive mode enabled
+                effective_skip = adaptive_frame_controller.get_frame_skip() if use_adaptive_skip else active_skip
+                if current_frame % max(1, effective_skip) != 0:
                     continue
 
                 timestamp_sec = current_frame / self.fps if self.fps > 0 else 0.0
@@ -248,9 +256,10 @@ class VideoProcessor:
 
             self.cap.release()
         else:
-            # Stream procedural frames
+            # Stream procedural frames with adaptive dynamic stride
             total = self.total_frames
-            for current_frame in range(1, total + 1, frame_skip):
+            current_frame = 1
+            while current_frame <= total:
                 timestamp_sec = current_frame / self.fps
                 synth_frame = self._generate_procedural_road_frame(current_frame)
                 
@@ -270,6 +279,9 @@ class VideoProcessor:
                     processed_frame = cv2.GaussianBlur(processed_frame, (3, 3), 0)
 
                 yield current_frame, timestamp_sec, frame_resized, processed_frame
+
+                effective_skip = adaptive_frame_controller.get_frame_skip() if use_adaptive_skip else active_skip
+                current_frame += max(1, effective_skip)
 
     @staticmethod
     def apply_perspective_transform(frame: np.ndarray) -> np.ndarray:

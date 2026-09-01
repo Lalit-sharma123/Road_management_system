@@ -389,11 +389,12 @@ async def execute_video_processing_task(
         print(f"📹 [Pipeline Step 2/7: Video Loaded] Width: {processor.width} | Height: {processor.height} | Total Frames: {total_expected_frames} | FPS: {processor.fps}")
         await send_ws_update("Extracting Frames", 25, f"FastAPI WS: Decoding stream (Total Frames: {total_expected_frames}, FPS: {processor.fps})...")
 
-        # Extract frames generator with optimized fast decoding
+        # Extract frames generator with dynamic adaptive frame skipping
         frame_gen = processor.extract_frames_generator(
             frame_skip=frame_skip,
             enable_histogram_eq=False,
-            enable_gaussian_blur=False
+            enable_gaussian_blur=False,
+            use_adaptive_skip=getattr(settings, "ENABLE_DYNAMIC_FRAME_SKIP", True)
         )
 
         print(f"⚡ [Pipeline Step 3/7: Inference Loop Started] frame_skip={frame_skip} | Confidence Threshold={confidence_threshold}")

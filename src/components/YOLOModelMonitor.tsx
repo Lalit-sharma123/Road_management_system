@@ -37,18 +37,49 @@ export interface ModelTelemetryItem {
   latency_history: number[];
 }
 
+export interface AdaptiveFrameSkipTelemetry {
+  mode: string;
+  current_frame_skip: number;
+  base_frame_skip: number;
+  min_frame_skip: number;
+  max_frame_skip: number;
+  effective_inference_fps: number;
+  target_stream_fps: number;
+  pressure_score: number;
+  load_status: string;
+  adaptation_reason: string;
+  cpu_utilization_pct: number;
+  gpu_utilization_pct: number;
+  gpu_memory_allocated_mb: number;
+  avg_inference_latency_ms: number;
+  traffic_density_objects: number;
+  is_active: boolean;
+  history?: Array<{
+    timestamp: number;
+    frame_skip: number;
+    status: string;
+    pressure_score: number;
+    avg_latency_ms: number;
+    traffic_density: number;
+    reason: string;
+  }>;
+}
+
 export interface TelemetryResponse {
   timestamp: string;
   total_active_models: number;
   models: ModelTelemetryItem[];
+  adaptive_frame_skip?: AdaptiveFrameSkipTelemetry;
 }
 
 export const YOLOModelMonitor: React.FC = () => {
   const [telemetry, setTelemetry] = useState<ModelTelemetryItem[]>([]);
+  const [adaptiveData, setAdaptiveData] = useState<AdaptiveFrameSkipTelemetry | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isPolling, setIsPolling] = useState<boolean>(true);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [isConfiguringMode, setIsConfiguringMode] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fallback state if backend is offline or loading initial frame
@@ -138,6 +169,9 @@ export const YOLOModelMonitor: React.FC = () => {
       } else {
         setTelemetry(defaultTelemetry);
       }
+      if (response.data && response.data.adaptive_frame_skip) {
+        setAdaptiveData(response.data.adaptive_frame_skip);
+      }
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
@@ -166,6 +200,25 @@ export const YOLOModelMonitor: React.FC = () => {
       setIsLoading(false);
     }
   }, []);
+
+  const handleToggleAdaptiveMode = async (newMode: 'dynamic' | 'manual', skipVal?: number) => {
+    setIsConfiguringMode(true);
+    try {
+      await apiClient.post(`/models/adaptive-frame-skip/configure?mode=${newMode}&manual_skip=${skipVal || 2}`);
+      await fetchTelemetry();
+    } catch (e) {
+      console.warn('Failed to configure adaptive skip on server, updating local state:', e);
+      if (adaptiveData) {
+        setAdaptiveData({
+          ...adaptiveData,
+          mode: newMode,
+          current_frame_skip: skipVal || (newMode === 'dynamic' ? 2 : 3)
+        });
+      }
+    } finally {
+      setIsConfiguringMode(false);
+    }
+  };
 
   useEffect(() => {
     fetchTelemetry();
@@ -332,6 +385,95 @@ export const YOLOModelMonitor: React.FC = () => {
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
             {totalDetections.toLocaleString()} total objects extracted
+          </div>
+        </div>
+      </div>
+
+      {/* Dynamic Asynchronous Frame-Skipping Governor Section */}
+      <div className="mb-6 bg-slate-950/90 border border-cyan-900/40 rounded-xl p-4 shadow-lg relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+              <Cpu className="w-4 h-4" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Asynchronous Dynamic Frame-Skipping Governor
+                </h3>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                  (adaptiveData?.pressure_score || 0.3) < 0.6
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : (adaptiveData?.pressure_score || 0.3) < 1.0
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                }`}>
+                  {adaptiveData?.load_status || 'Optimal Speed'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {adaptiveData?.adaptation_reason || 'Dynamically modulates YOLO frame sampling rate based on system CPU/GPU utilization and traffic density.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Mode switch */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleToggleAdaptiveMode('dynamic')}
+              disabled={isConfiguringMode}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                adaptiveData?.mode !== 'manual'
+                  ? 'bg-cyan-600 text-white border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              ⚡ Dynamic Auto
+            </button>
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+              {[1, 2, 3, 5].map((skip) => (
+                <button
+                  key={skip}
+                  onClick={() => handleToggleAdaptiveMode('manual', skip)}
+                  disabled={isConfiguringMode}
+                  className={`px-2 py-1 rounded text-[11px] font-mono transition-all ${
+                    adaptiveData?.mode === 'manual' && adaptiveData?.current_frame_skip === skip
+                      ? 'bg-indigo-600 text-white font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  1/{skip}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Live Gauges Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 pt-1">
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5">
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">Active Frame Skip</span>
+            <div className="text-lg font-black text-cyan-400 font-mono mt-0.5">
+              {adaptiveData?.current_frame_skip || 2} <span className="text-xs text-slate-400 font-normal">(every {adaptiveData?.current_frame_skip || 2}nd frame)</span>
+            </div>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5">
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">System CPU Utilization</span>
+            <div className="text-lg font-black text-white font-mono mt-0.5">
+              {adaptiveData?.cpu_utilization_pct || 18.5}%
+            </div>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5">
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">GPU / VRAM Utilization</span>
+            <div className="text-lg font-black text-white font-mono mt-0.5">
+              {adaptiveData?.gpu_utilization_pct || 15.0}%
+            </div>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5">
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">Effective Inference FPS</span>
+            <div className="text-lg font-black text-emerald-400 font-mono mt-0.5">
+              {adaptiveData?.effective_inference_fps || 15.0} FPS
+            </div>
           </div>
         </div>
       </div>

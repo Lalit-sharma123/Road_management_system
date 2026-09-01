@@ -24,22 +24,27 @@ from app.api.violations import router as violations_router
 from app.api.stolen_vehicles import router as stolen_vehicles_router
 from app.api.stolen_alerts import router as stolen_alerts_router
 from app.services.stolen_vehicle_service import StolenVehicleService
+from app.yolo.adaptive_frame_skip import adaptive_frame_controller
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application Lifecycle Context Manager.
-    Initializes PostgreSQL tables on startup and loads Stolen Vehicle in-memory cache.
+    Initializes PostgreSQL tables on startup, loads Stolen Vehicle cache,
+    and launches the asynchronous Dynamic Frame-Skip Controller.
     """
     print("Initializing Smart Road Damage Detection Database Schema...")
     try:
         await init_db()
         print("Database schema successfully synchronized.")
         await StolenVehicleService.initialize_cache()
+        await adaptive_frame_controller.start_background_monitor()
+        print("⚡ [AdaptiveFrameController] Asynchronous CPU/GPU dynamic frame skip monitor active.")
     except Exception as e:
         print(f"Database initialization note: {e}. Ensure PostgreSQL is running.")
     yield
+    adaptive_frame_controller.stop_background_monitor()
     print("Shutting down Smart Road Damage Backend Application.")
 
 

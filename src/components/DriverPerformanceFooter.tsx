@@ -19,6 +19,25 @@ import {
   SlidersHorizontal
 } from 'lucide-react';
 
+export interface AdaptiveFrameSkipTelemetry {
+  mode: string;
+  current_frame_skip: number;
+  base_frame_skip: number;
+  min_frame_skip: number;
+  max_frame_skip: number;
+  effective_inference_fps: number;
+  target_stream_fps: number;
+  pressure_score: number;
+  load_status: string;
+  adaptation_reason: string;
+  cpu_utilization_pct: number;
+  gpu_utilization_pct: number;
+  gpu_memory_allocated_mb: number;
+  avg_inference_latency_ms: number;
+  traffic_density_objects: number;
+  is_active: boolean;
+}
+
 export interface HardwareTelemetryData {
   is_cuda: boolean;
   device_name: string;
@@ -34,6 +53,7 @@ export interface HardwareTelemetryData {
   dropped_frames: number;
   latency_history: number[];
   pipeline_status: 'optimal' | 'moderate' | 'degraded';
+  adaptive_frame_skip?: AdaptiveFrameSkipTelemetry;
 }
 
 export interface StageBreakdownMs {
@@ -419,24 +439,58 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
                   </div>
                 </div>
 
-                {/* Performance Speed Governor Toggle */}
-                <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-semibold text-slate-200 block">Low Latency Boost</span>
-                    <span className="text-[10px] text-slate-500">Bypasses CPU buffer jitter</span>
+                {/* Performance Speed Governor & Adaptive Frame Skip Toggle */}
+                <div className="pt-2 border-t border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-slate-200 flex items-center gap-1">
+                        <SlidersHorizontal className="w-3 h-3 text-cyan-400" />
+                        Dynamic Frame-Skip
+                      </span>
+                      <span className="text-[9px] text-slate-500">
+                        {activeTelemetry.adaptive_frame_skip?.load_status || 'Auto Load Governor'} (Stride: {activeTelemetry.adaptive_frame_skip?.current_frame_skip || 2})
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950/60 border border-cyan-500/30 text-cyan-400">
+                      {activeTelemetry.adaptive_frame_skip?.mode === 'manual' ? 'MANUAL' : 'DYNAMIC'}
+                    </span>
                   </div>
-                  <button
-                    onClick={() => setLowLatencyBoost(!lowLatencyBoost)}
-                    className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-                      lowLatencyBoost ? 'bg-emerald-600' : 'bg-slate-700'
-                    }`}
-                  >
-                    <div 
-                      className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                        lowLatencyBoost ? 'translate-x-4' : 'translate-x-0'
+
+                  {activeTelemetry.adaptive_frame_skip && (
+                    <div className="p-2 rounded bg-slate-900/90 border border-slate-800/80 text-[10px] font-mono space-y-1 text-slate-400">
+                      <div className="flex justify-between">
+                        <span>System Pressure:</span>
+                        <span className="text-cyan-300 font-bold">{(activeTelemetry.adaptive_frame_skip.pressure_score * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>CPU / GPU Load:</span>
+                        <span className="text-slate-300">{activeTelemetry.adaptive_frame_skip.cpu_utilization_pct}% / {activeTelemetry.adaptive_frame_skip.gpu_utilization_pct}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Inference Throughput:</span>
+                        <span className="text-emerald-400 font-bold">{activeTelemetry.adaptive_frame_skip.effective_inference_fps} FPS</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div>
+                      <span className="text-xs font-semibold text-slate-200 block">Low Latency Boost</span>
+                      <span className="text-[10px] text-slate-500">Bypasses CPU buffer jitter</span>
+                    </div>
+                    <button
+                      onClick={() => setLowLatencyBoost(!lowLatencyBoost)}
+                      className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
+                        lowLatencyBoost ? 'bg-emerald-600' : 'bg-slate-700'
                       }`}
-                    />
-                  </button>
+                    >
+                      <div 
+                        className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                          lowLatencyBoost ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
