@@ -460,4 +460,43 @@ class StolenVehicleSettings(Base):
     )
 
 
+class PotholeComplaint(Base):
+    """
+    Official Pothole & Road Damage Public Grievance / Complaint Record.
+    Enables drivers and inspectors to report confirmed potholes with GPS geotags,
+    evidence imagery, road authority routing, and resolution lifecycle tracking.
+    """
+    __tablename__ = "pothole_complaints"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    complaint_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    detection_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("detections.id", ondelete="SET NULL"), nullable=True)
+    driver_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    road_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    road_authority: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    damage_category: Mapped[str] = mapped_column(String(50), default="pothole", nullable=False)
+    severity: Mapped[str] = mapped_column(String(50), default="high", nullable=False)  # low, medium, high, critical
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    status: Mapped[str] = mapped_column(String(50), default="Submitted", index=True, nullable=False)  # Submitted, Under Review, In Progress, Resolved
+    assigned_department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+
 

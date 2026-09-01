@@ -1,22 +1,25 @@
 import cv2
 import numpy as np
 import base64
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Body, Response
+import time
+import uuid
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Body, Response, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, and_, desc
 
 from app.database.database import get_db
-from app.models.models import DriverSettings, DriverAlertLog, Detection, DamageCategory, SeverityLevel
+from app.models.models import DriverSettings, DriverAlertLog, Detection, DamageCategory, SeverityLevel, PotholeComplaint
 from app.driver.camera import driver_camera_manager
 from app.driver.detector import driver_pipeline
 from app.driver.distance import distance_estimator
 from app.driver.alerts import alert_evaluator
 from app.driver.tts import driver_tts
 from app.services.websocket_manager import ws_broadcaster
+from app.services.road_lookup_service import RoadLookupService
 
 router = APIRouter(prefix="/driver", tags=["Driver Assistance System"])
 
@@ -42,12 +45,44 @@ class FrameProcessingRequest(BaseModel):
     speed_kmh: Optional[float] = 45.0
 
 
+class ComplaintCreateSchema(BaseModel):
+    detection_id: Optional[str] = None
+    driver_id: Optional[str] = None
+    session_id: Optional[str] = None
+    latitude: float
+    longitude: float
+    road_name: Optional[str] = None
+    road_authority: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    damage_category: Optional[str] = "pothole"
+    severity: Optional[str] = "high"
+    description: Optional[str] = None
+    evidence_image_url: Optional[str] = None
+
+
+class ComplaintStatusUpdateSchema(BaseModel):
+    status: str
+    assigned_department: Optional[str] = None
+    resolution_notes: Optional[str] = None
+
+
 # In-memory session state
 driver_session_state = {
     "is_active": False,
+    "session_id": None,
     "started_at": None,
     "last_warning": None,
     "total_alerts_triggered": 0,
+    "session_potholes": [],
+    "session_pothole_count": 0,
+    "current_road_info": {
+        "road_name": "Scanning Road...",
+        "road_authority": None,
+        "city": None,
+        "state": None,
+        "is_resolved": False
+    },
     "current_settings": {
         "alert_distance_meters": 30.0,
         "voice_alerts_enabled": True,
@@ -61,6 +96,7 @@ driver_session_state = {
         "speed_kmh": 45.0
     }
 }
+
 
 
 async def _get_or_create_settings(db: AsyncSession) -> DriverSettings:
@@ -109,8 +145,12 @@ async def start_driver_assistance(
     # Launch camera stream worker
     success = driver_camera_manager.start_camera(db_settings.camera_source)
 
+    session_id = f"drv_sess_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     driver_session_state["is_active"] = True
+    driver_session_state["session_id"] = session_id
     driver_session_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    driver_session_state["session_potholes"] = []
+    driver_session_state["session_pothole_count"] = 0
     driver_session_state["current_settings"] = {
         "alert_distance_meters": db_settings.alert_distance_meters,
         "voice_alerts_enabled": db_settings.voice_alerts_enabled,
@@ -127,6 +167,7 @@ async def start_driver_assistance(
     await ws_broadcaster.broadcast({
         "type": "camera_status",
         "status": "online",
+        "session_id": session_id,
         "message": "Live camera processing started",
         "settings": driver_session_state["current_settings"]
     })
@@ -135,6 +176,7 @@ async def start_driver_assistance(
         "status": "success",
         "message": "Driver Assistance System initiated successfully.",
         "session_active": True,
+        "session_id": session_id,
         "camera_status": driver_camera_manager.get_status(),
         "settings": driver_session_state["current_settings"]
     }
@@ -153,6 +195,7 @@ async def stop_driver_assistance():
     await ws_broadcaster.broadcast({
         "type": "camera_status",
         "status": "offline",
+        "session_id": driver_session_state.get("session_id"),
         "message": "Live camera processing stopped"
     })
 
@@ -173,12 +216,314 @@ async def get_driver_status():
     
     return {
         "session_active": driver_session_state["is_active"],
+        "session_id": driver_session_state.get("session_id"),
         "started_at": driver_session_state["started_at"],
         "camera_status": cam_status,
         "fps": cam_status.get("fps", driver_pipeline.fps),
         "total_alerts_triggered": driver_session_state["total_alerts_triggered"],
+        "session_pothole_count": driver_session_state.get("session_pothole_count", 0),
+        "current_road_info": driver_session_state.get("current_road_info"),
         "current_warning": driver_session_state["last_warning"],
         "settings": driver_session_state["current_settings"]
+    }
+
+
+@router.get("/road-info")
+async def get_road_info(
+    latitude: float = Query(..., description="Vehicle latitude"),
+    longitude: float = Query(..., description="Vehicle longitude"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    GET /api/v1/driver/road-info
+    Reverse geocode live coordinates to resolve real road name, authority, and nearby pothole count.
+    """
+    road_info = await RoadLookupService.lookup_road(latitude, longitude)
+    driver_session_state["current_road_info"] = road_info
+
+    # Count real potholes on this road / nearby cluster (~1km)
+    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    
+    # Query database for potholes today
+    today_potholes_res = await db.execute(
+        select(func.count(Detection.id)).where(
+            and_(
+                Detection.category == "pothole",
+                Detection.created_at >= one_day_ago
+            )
+        )
+    )
+    today_count = today_potholes_res.scalar() or 0
+
+    # Query database for potholes near this coordinate cluster
+    road_potholes_res = await db.execute(
+        select(func.count(Detection.id)).where(
+            and_(
+                Detection.category == "pothole",
+                Detection.latitude.between(latitude - 0.015, latitude + 0.015),
+                Detection.longitude.between(longitude - 0.015, longitude + 0.015)
+            )
+        )
+    )
+    road_count = road_potholes_res.scalar() or 0
+
+    return {
+        **road_info,
+        "potholes_this_road": road_count,
+        "potholes_this_session": driver_session_state.get("session_pothole_count", 0),
+        "potholes_today": today_count
+    }
+
+
+@router.get("/stats")
+async def get_driver_realtime_stats(
+    latitude: Optional[float] = Query(default=37.7749),
+    longitude: Optional[float] = Query(default=-122.4194),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    GET /api/v1/driver/stats
+    Retrieve real database metrics: Session Potholes, Today's Potholes, Road Potholes, Total Complaints.
+    """
+    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    
+    # Today's detections
+    today_res = await db.execute(
+        select(func.count(Detection.id)).where(
+            and_(
+                Detection.category == "pothole",
+                Detection.created_at >= one_day_ago
+            )
+        )
+    )
+    today_count = today_res.scalar() or 0
+
+    # Road-specific detections (if coordinates given)
+    road_count = 0
+    if latitude is not None and longitude is not None:
+        road_res = await db.execute(
+            select(func.count(Detection.id)).where(
+                and_(
+                    Detection.category == "pothole",
+                    Detection.latitude.between(latitude - 0.015, latitude + 0.015),
+                    Detection.longitude.between(longitude - 0.015, longitude + 0.015)
+                )
+            )
+        )
+        road_count = road_res.scalar() or 0
+
+    # Total complaints submitted
+    complaints_res = await db.execute(select(func.count(PotholeComplaint.id)))
+    complaints_count = complaints_res.scalar() or 0
+
+    return {
+        "session_potholes": driver_session_state.get("session_pothole_count", 0),
+        "today_potholes": today_count,
+        "road_potholes": road_count,
+        "total_complaints": complaints_count,
+        "total_alerts": driver_session_state.get("total_alerts_triggered", 0),
+        "current_road": driver_session_state.get("current_road_info", {}).get("road_name", "Scanning...")
+    }
+
+
+@router.get("/potholes")
+async def get_session_potholes(
+    limit: int = Query(default=30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    GET /api/v1/driver/potholes
+    Retrieve recent real pothole detections with coordinates, severity, and road information.
+    """
+    # Query latest real pothole detections from database
+    result = await db.execute(
+        select(Detection)
+        .where(Detection.category == "pothole")
+        .order_by(desc(Detection.created_at))
+        .limit(limit)
+    )
+    detections = result.scalars().all()
+
+    potholes = []
+    for d in detections:
+        potholes.append({
+            "id": d.id,
+            "detection_id": d.id,
+            "pothole_id": f"POT-{d.id[:8].upper()}",
+            "latitude": d.latitude or 37.7749,
+            "longitude": d.longitude or -122.4194,
+            "severity": d.severity or "medium",
+            "confidence": d.confidence or 0.85,
+            "distance_meters": d.distance_meters or 0.0,
+            "created_at": d.created_at.isoformat() if d.created_at else datetime.now(timezone.utc).isoformat()
+        })
+
+    return {
+        "total": len(potholes),
+        "session_count": driver_session_state.get("session_pothole_count", 0),
+        "potholes": potholes
+    }
+
+
+@router.post("/complaints")
+async def create_pothole_complaint(
+    payload: ComplaintCreateSchema,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    POST /api/v1/driver/complaints
+    Submit an official pothole public grievance / maintenance complaint with real detection telemetry.
+    """
+    # Generate unique human-readable complaint ticket number
+    complaint_num = f"CMP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:5].upper()}"
+
+    # Auto resolve road authority if not provided
+    road_auth = payload.road_authority
+    if not road_auth and payload.latitude and payload.longitude:
+        road_lookup = await RoadLookupService.lookup_road(payload.latitude, payload.longitude)
+        road_auth = road_lookup.get("road_authority")
+        if not payload.road_name:
+            payload.road_name = road_lookup.get("road_name")
+
+    complaint = PotholeComplaint(
+        complaint_number=complaint_num,
+        detection_id=payload.detection_id,
+        driver_id=payload.driver_id,
+        session_id=payload.session_id or driver_session_state.get("session_id"),
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        road_name=payload.road_name or "National Highway / Urban Corridor",
+        road_authority=road_auth or "Local Road Authority & Municipal Corporation",
+        city=payload.city,
+        state=payload.state,
+        damage_category=payload.damage_category or "pothole",
+        severity=payload.severity or "high",
+        description=payload.description or "Hazardous pothole identified via onboard Driver Assistance System.",
+        evidence_image_url=payload.evidence_image_url,
+        status="Submitted",
+        assigned_department=f"{road_auth or 'Municipal PWD'} Maintenance Division"
+    )
+
+    db.add(complaint)
+    await db.commit()
+    await db.refresh(complaint)
+
+    # Broadcast real-time complaint created event via WebSocket
+    await ws_broadcaster.broadcast({
+        "type": "complaint_created",
+        "complaint_id": complaint.id,
+        "complaint_number": complaint.complaint_number,
+        "road_name": complaint.road_name,
+        "road_authority": complaint.road_authority,
+        "severity": complaint.severity,
+        "status": complaint.status,
+        "latitude": complaint.latitude,
+        "longitude": complaint.longitude,
+        "created_at": complaint.created_at.isoformat()
+    })
+
+    return {
+        "status": "success",
+        "message": f"Pothole complaint {complaint_num} filed successfully with {complaint.road_authority}.",
+        "complaint": {
+            "id": complaint.id,
+            "complaint_number": complaint.complaint_number,
+            "status": complaint.status,
+            "road_name": complaint.road_name,
+            "road_authority": complaint.road_authority,
+            "assigned_department": complaint.assigned_department,
+            "latitude": complaint.latitude,
+            "longitude": complaint.longitude,
+            "severity": complaint.severity,
+            "created_at": complaint.created_at.isoformat()
+        }
+    }
+
+
+@router.get("/complaints")
+async def list_pothole_complaints(
+    limit: int = Query(default=20, ge=1, le=100),
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    GET /api/v1/driver/complaints
+    List all submitted pothole grievances and track their maintenance lifecycle status.
+    """
+    query = select(PotholeComplaint).order_by(desc(PotholeComplaint.created_at)).limit(limit)
+    if status:
+        query = query.where(PotholeComplaint.status == status)
+
+    result = await db.execute(query)
+    complaints = result.scalars().all()
+
+    return {
+        "total": len(complaints),
+        "complaints": [
+            {
+                "id": c.id,
+                "complaint_number": c.complaint_number,
+                "detection_id": c.detection_id,
+                "road_name": c.road_name,
+                "road_authority": c.road_authority,
+                "city": c.city,
+                "state": c.state,
+                "severity": c.severity,
+                "description": c.description,
+                "evidence_image_url": c.evidence_image_url,
+                "status": c.status,
+                "assigned_department": c.assigned_department,
+                "resolution_notes": c.resolution_notes,
+                "latitude": c.latitude,
+                "longitude": c.longitude,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None
+            }
+            for c in complaints
+        ]
+    }
+
+
+@router.patch("/complaints/{complaint_id}/status")
+async def update_complaint_status(
+    complaint_id: str,
+    payload: ComplaintStatusUpdateSchema,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    PATCH /api/v1/driver/complaints/{complaint_id}/status
+    Update complaint lifecycle status (Submitted -> Under Review -> In Progress -> Resolved).
+    """
+    result = await db.execute(select(PotholeComplaint).where(PotholeComplaint.id == complaint_id))
+    complaint = result.scalars().first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found.")
+
+    complaint.status = payload.status
+    if payload.assigned_department:
+        complaint.assigned_department = payload.assigned_department
+    if payload.resolution_notes:
+        complaint.resolution_notes = payload.resolution_notes
+
+    await db.commit()
+    await db.refresh(complaint)
+
+    # Broadcast real-time status update
+    await ws_broadcaster.broadcast({
+        "type": "complaint_status_updated",
+        "complaint_id": complaint.id,
+        "complaint_number": complaint.complaint_number,
+        "status": complaint.status,
+        "assigned_department": complaint.assigned_department,
+        "resolution_notes": complaint.resolution_notes,
+        "updated_at": complaint.updated_at.isoformat() if complaint.updated_at else datetime.now(timezone.utc).isoformat()
+    })
+
+    return {
+        "status": "success",
+        "message": f"Complaint {complaint.complaint_number} updated to {complaint.status}.",
+        "complaint_id": complaint.id,
+        "complaint_status": complaint.status
     }
 
 
@@ -276,7 +621,7 @@ async def process_driver_camera_frame(
     POST /api/v1/driver/process-frame
     Process base64 camera frame (from browser webcam, mobile camera, or dashcam stream).
     Executes real-time YOLOv11 + distance estimation + tracking + driver alert evaluation.
-    Returns processed frame with HUD overlay and warning JSON payload.
+    Returns processed frame with HUD overlay, reverse-geocoded road data, and warning JSON payload.
     """
     try:
         # Decode base64 frame
@@ -302,7 +647,15 @@ async def process_driver_camera_frame(
         _, buffer = cv2.imencode(".jpg", overlay_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         processed_base64 = base64.b64encode(buffer).decode("utf-8")
 
+        # Perform real reverse geocoding on driver's actual GPS location
+        lat = req.latitude or 37.7749
+        lng = req.longitude or -122.4194
+        road_info = await RoadLookupService.lookup_road(lat, lng)
+        driver_session_state["current_road_info"] = road_info
+
         primary_warning = res_payload.get("primary_warning")
+        detected_pothole_event = None
+
         if primary_warning:
             driver_session_state["last_warning"] = primary_warning
             if primary_warning.get("should_speak_voice"):
@@ -316,13 +669,13 @@ async def process_driver_camera_frame(
                     lane_position=primary_warning.get("lane_position", "Center lane"),
                     confidence=primary_warning.get("confidence", 0.85),
                     voice_message=primary_warning.get("voice_message", "Road damage ahead"),
-                    latitude=req.latitude or 37.7749,
-                    longitude=req.longitude or -122.4194,
+                    latitude=lat,
+                    longitude=lng,
                     speed_kmh=req.speed_kmh or settings_dict.get("speed_kmh", 45.0)
                 )
                 db.add(alert_log)
 
-        # Save all detected hazards into the Detection table
+        # Save all detected hazards into the Detection table with real coordinates
         for hazard in res_payload.get("tracked_hazards", []):
             cat_str = hazard.get("category", "pothole").lower()
             cat_enum = DamageCategory(cat_str) if cat_str in DamageCategory._value2member_map_ else DamageCategory.POTHOLE
@@ -342,16 +695,70 @@ async def process_driver_camera_frame(
                 severity=sev_enum,
                 severity_score=hazard.get("severity_score", 0.5),
                 distance_meters=hazard.get("distance_meters", 0.0),
-                latitude=req.latitude or 37.7749,
-                longitude=req.longitude or -122.4194
+                latitude=lat,
+                longitude=lng
             )
             db.add(det)
 
+            # Check if this is a pothole to track in real-time session
+            if cat_str == "pothole":
+                # Spatial-temporal deduplication for real-time map marker
+                track_id = hazard.get("track_id", 1)
+                existing = next((p for p in driver_session_state["session_potholes"] if p.get("track_id") == track_id), None)
+                
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if not existing:
+                    pothole_record = {
+                        "pothole_id": f"POT-{uuid.uuid4().hex[:6].upper()}",
+                        "detection_id": det.id,
+                        "track_id": track_id,
+                        "latitude": lat,
+                        "longitude": lng,
+                        "severity": sev_str,
+                        "confidence": hazard.get("confidence", 0.85),
+                        "distance_meters": hazard.get("distance_meters", 0.0),
+                        "lane_position": hazard.get("lane_position", "Center lane"),
+                        "road_name": road_info.get("road_name"),
+                        "road_authority": road_info.get("road_authority"),
+                        "timestamp": now_iso,
+                        "image_url": f"data:image/jpeg;base64,{processed_base64}"
+                    }
+                    driver_session_state["session_potholes"].append(pothole_record)
+                    driver_session_state["session_pothole_count"] = len(driver_session_state["session_potholes"])
+                    detected_pothole_event = pothole_record
+                else:
+                    existing["distance_meters"] = hazard.get("distance_meters", 0.0)
+                    existing["confidence"] = hazard.get("confidence", 0.85)
+
         await db.commit()
+
+        # Fetch real-time count metrics from DB
+        one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+        today_res = await db.execute(
+            select(func.count(Detection.id)).where(
+                and_(
+                    Detection.category == "pothole",
+                    Detection.created_at >= one_day_ago
+                )
+            )
+        )
+        today_potholes_count = today_res.scalar() or 0
+
+        road_res = await db.execute(
+            select(func.count(Detection.id)).where(
+                and_(
+                    Detection.category == "pothole",
+                    Detection.latitude.between(lat - 0.015, lat + 0.015),
+                    Detection.longitude.between(lng - 0.015, lng + 0.015)
+                )
+            )
+        )
+        road_potholes_count = road_res.scalar() or 0
 
         # Broadcast live detection frame to WebSockets (/ws/live-detections and /ws/dashboard)
         ws_frame_msg = {
             "type": "live_camera_frame",
+            "session_id": driver_session_state.get("session_id"),
             "fps": res_payload["fps"],
             "latency_ms": res_payload["latency_ms"],
             "total_hazards_detected": res_payload["total_hazards_detected"],
@@ -359,12 +766,34 @@ async def process_driver_camera_frame(
             "tts_payload": res_payload.get("tts_payload"),
             "tracked_hazards": res_payload.get("tracked_hazards", []),
             "image_url": f"data:image/jpeg;base64,{processed_base64}",
+            "road_info": road_info,
+            "counts": {
+                "session_potholes": driver_session_state.get("session_pothole_count", 0),
+                "today_potholes": today_potholes_count,
+                "road_potholes": road_potholes_count
+            },
             "gps": {
-                "latitude": req.latitude or 37.7749,
-                "longitude": req.longitude or -122.4194
+                "latitude": lat,
+                "longitude": lng
             }
         }
         await ws_broadcaster.broadcast(ws_frame_msg)
+
+        # If a new physical pothole event was registered, broadcast dedicated pothole event
+        if detected_pothole_event:
+            await ws_broadcaster.broadcast({
+                "type": "pothole_detected",
+                "session_id": driver_session_state.get("session_id"),
+                "event_id": f"EVT-{uuid.uuid4().hex[:8]}",
+                "pothole": detected_pothole_event,
+                "road_name": road_info.get("road_name"),
+                "road_authority": road_info.get("road_authority"),
+                "city": road_info.get("city"),
+                "state": road_info.get("state"),
+                "potholes_this_session": driver_session_state.get("session_pothole_count", 0),
+                "potholes_today": today_potholes_count,
+                "potholes_this_road": road_potholes_count
+            })
 
         return {
             "fps": res_payload["fps"],
@@ -373,11 +802,16 @@ async def process_driver_camera_frame(
             "primary_warning": primary_warning,
             "tts_payload": res_payload.get("tts_payload"),
             "tracked_hazards": res_payload.get("tracked_hazards", []),
-            "overlay_image_base64": f"data:image/jpeg;base64,{processed_base64}"
+            "overlay_image_base64": f"data:image/jpeg;base64,{processed_base64}",
+            "road_info": road_info,
+            "potholes_this_session": driver_session_state.get("session_pothole_count", 0),
+            "potholes_today": today_potholes_count,
+            "potholes_this_road": road_potholes_count
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Driver frame processing failure: {str(e)}")
+
 
 
 @router.get("/mjpeg-stream")

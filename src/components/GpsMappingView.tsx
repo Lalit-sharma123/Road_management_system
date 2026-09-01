@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import L from 'leaflet';
 import { 
   MapPin, 
@@ -15,17 +15,48 @@ import {
   Filter,
   Maximize2,
   Crosshair,
-  Maximize
+  Maximize,
+  Car,
+  Send,
+  Building2,
+  ShieldAlert
 } from 'lucide-react';
-import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, Detection } from '../types/inspection';
+import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory } from '../types/inspection';
 
-interface GpsMappingViewProps {
-  video: InspectionVideo;
-  onNavigate: (tab: string) => void;
+export interface DynamicPotholeMarker {
+  id?: string;
+  pothole_id?: string;
+  detection_id?: string;
+  track_id?: number;
+  frame_number?: number;
+  timestamp_sec?: number;
+  timestamp?: string;
+  latitude: number;
+  longitude: number;
+  category?: DamageCategory | string;
+  severity?: SeverityLevel | string;
+  confidence?: number;
+  road_name?: string;
+  road_authority?: string;
+  image_url?: string;
+  evidence_image_url?: string;
+  distance_meters?: number;
+  lane_position?: string;
 }
 
-interface GPSDamageMarker {
+export interface GpsMappingViewProps {
+  video?: InspectionVideo | null;
+  onNavigate?: (tab: string) => void;
+  potholeMarkers?: DynamicPotholeMarker[];
+  currentVehiclePosition?: { lat: number; lng: number };
+  compact?: boolean;
+  onReportPothole?: (marker: DynamicPotholeMarker) => void;
+  heightClass?: string;
+}
+
+export interface GPSDamageMarker {
   id: string;
+  pothole_id?: string;
   frame_number: number;
   timestamp_sec: number;
   latitude: number;
@@ -34,20 +65,118 @@ interface GPSDamageMarker {
   severity: SeverityLevel;
   confidence: number;
   road_name: string;
+  road_authority?: string;
   image_url: string;
+  distance_meters?: number;
+  lane_position?: string;
 }
 
-export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigate }) => {
+const defaultStaticMarkers: GPSDamageMarker[] = [
+  {
+    id: 'marker-101',
+    pothole_id: 'POT-101',
+    frame_number: 120,
+    timestamp_sec: 4.0,
+    latitude: 28.4600,
+    longitude: 77.0270,
+    category: 'pothole',
+    severity: 'critical',
+    confidence: 0.94,
+    road_name: 'NH-48 Sector 14 Corridor A',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'marker-102',
+    pothole_id: 'CRK-102',
+    frame_number: 280,
+    timestamp_sec: 9.3,
+    latitude: 28.4612,
+    longitude: 77.0282,
+    category: 'longitudinal_crack',
+    severity: 'medium',
+    confidence: 0.82,
+    road_name: 'NH-48 Sector 14 Corridor A',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'marker-103',
+    pothole_id: 'POT-103',
+    frame_number: 468,
+    timestamp_sec: 15.6,
+    latitude: 28.4628,
+    longitude: 77.0298,
+    category: 'broken_road',
+    severity: 'critical',
+    confidence: 0.91,
+    road_name: 'NH-48 Sector 14 Corridor B',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'marker-104',
+    pothole_id: 'CRK-104',
+    frame_number: 663,
+    timestamp_sec: 22.1,
+    latitude: 28.4640,
+    longitude: 77.0310,
+    category: 'transverse_crack',
+    severity: 'low',
+    confidence: 0.76,
+    road_name: 'NH-48 Sector 14 Corridor B',
+    road_authority: 'State PWD Division',
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'marker-105',
+    pothole_id: 'POT-105',
+    frame_number: 954,
+    timestamp_sec: 31.8,
+    latitude: 28.4660,
+    longitude: 77.0330,
+    category: 'pothole',
+    severity: 'high',
+    confidence: 0.89,
+    road_name: 'NH-48 Sector 14 Corridor C',
+    road_authority: 'State PWD Division',
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'marker-106',
+    pothole_id: 'ASP-106',
+    frame_number: 1260,
+    timestamp_sec: 42.0,
+    latitude: 28.4682,
+    longitude: 77.0352,
+    category: 'missing_asphalt',
+    severity: 'medium',
+    confidence: 0.85,
+    road_name: 'NH-48 Sector 14 Corridor C',
+    road_authority: 'Municipal Corporation Road Division',
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  }
+];
+
+export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ 
+  video, 
+  onNavigate,
+  potholeMarkers,
+  currentVehiclePosition,
+  compact = false,
+  onReportPothole,
+  heightClass
+}) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const vehicleMarkerRef = useRef<L.Marker | null>(null);
 
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [mapTileStyle, setMapTileStyle] = useState<'dark' | 'street'>('dark');
 
   // Base road GPS track points
-  const gpsTracks: GPSPoint[] = video.gps_tracks || [
+  const gpsTracks: GPSPoint[] = video?.gps_tracks || [
     { frame_number: 1, latitude: 28.4595, longitude: 77.0266, altitude_meters: 215.4, speed_kmh: 42.5, road_name: 'NH-48 Sector 14' },
     { frame_number: 150, latitude: 28.4608, longitude: 77.0278, altitude_meters: 215.8, speed_kmh: 44.1, road_name: 'NH-48 Sector 14' },
     { frame_number: 300, latitude: 28.4621, longitude: 77.0291, altitude_meters: 216.2, speed_kmh: 41.8, road_name: 'NH-48 Sector 14' },
@@ -55,92 +184,77 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
     { frame_number: 600, latitude: 28.4649, longitude: 77.0318, altitude_meters: 214.7, speed_kmh: 39.2, road_name: 'NH-48 Sector 14' }
   ];
 
-  // Derive Geotagged Damage Markers from Video Frames or fallback list
-  const damageMarkers: GPSDamageMarker[] = [
-    {
-      id: 'marker-101',
-      frame_number: 120,
-      timestamp_sec: 4.0,
-      latitude: 28.4600,
-      longitude: 77.0270,
-      category: 'pothole',
-      severity: 'critical',
-      confidence: 0.94,
-      road_name: 'NH-48 Sector 14 Corridor A',
-      image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-    },
-    {
-      id: 'marker-102',
-      frame_number: 280,
-      timestamp_sec: 9.3,
-      latitude: 28.4612,
-      longitude: 77.0282,
-      category: 'longitudinal_crack',
-      severity: 'medium',
-      confidence: 0.82,
-      road_name: 'NH-48 Sector 14 Corridor A',
-      image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
-    },
-    {
-      id: 'marker-103',
-      frame_number: 468,
-      timestamp_sec: 15.6,
-      latitude: 28.4628,
-      longitude: 77.0298,
-      category: 'broken_road',
-      severity: 'critical',
-      confidence: 0.91,
-      road_name: 'NH-48 Sector 14 Corridor B',
-      image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-    },
-    {
-      id: 'marker-104',
-      frame_number: 663,
-      timestamp_sec: 22.1,
-      latitude: 28.4640,
-      longitude: 77.0310,
-      category: 'transverse_crack',
-      severity: 'low',
-      confidence: 0.76,
-      road_name: 'NH-48 Sector 14 Corridor B',
-      image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
-    },
-    {
-      id: 'marker-105',
-      frame_number: 954,
-      timestamp_sec: 31.8,
-      latitude: 28.4660,
-      longitude: 77.0330,
-      category: 'pothole',
-      severity: 'high',
-      confidence: 0.89,
-      road_name: 'NH-48 Sector 14 Corridor C',
-      image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-    },
-    {
-      id: 'marker-106',
-      frame_number: 1260,
-      timestamp_sec: 42.0,
-      latitude: 28.4682,
-      longitude: 77.0352,
-      category: 'missing_asphalt',
-      severity: 'medium',
-      confidence: 0.85,
-      road_name: 'NH-48 Sector 14 Corridor C',
-      image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  // Derive Geotagged Damage Markers dynamically from props or video frames
+  const damageMarkers: GPSDamageMarker[] = useMemo(() => {
+    if (potholeMarkers && potholeMarkers.length > 0) {
+      return potholeMarkers.map((m, idx) => ({
+        id: m.id || m.pothole_id || m.detection_id || `pot-${idx}-${m.latitude}-${m.longitude}`,
+        pothole_id: m.pothole_id || `POT-${m.track_id || idx + 1}`,
+        frame_number: m.frame_number ?? (idx * 15),
+        timestamp_sec: m.timestamp_sec ?? (m.timestamp ? Math.round(new Date(m.timestamp).getTime() / 1000) : idx * 2),
+        latitude: m.latitude,
+        longitude: m.longitude,
+        category: ((m.category as DamageCategory) || 'pothole'),
+        severity: ((m.severity as SeverityLevel) || 'high'),
+        confidence: m.confidence ?? 0.92,
+        road_name: m.road_name || 'Active Road Corridor',
+        road_authority: m.road_authority || 'National Highway Authority',
+        image_url: m.image_url || m.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+        distance_meters: m.distance_meters,
+        lane_position: m.lane_position
+      }));
     }
-  ];
 
-  const [selectedMarker, setSelectedMarker] = useState<GPSDamageMarker>(damageMarkers[0]);
+    if (video?.frames && video.frames.length > 0) {
+      const extracted: GPSDamageMarker[] = [];
+      video.frames.forEach((f) => {
+        if (f.has_damage && f.detections && f.detections.length > 0) {
+          f.detections.forEach((d) => {
+            const gpsPt = video.gps_tracks?.find((g) => g.frame_number >= f.frame_number) || video.gps_tracks?.[0];
+            extracted.push({
+              id: d.id,
+              pothole_id: `POT-${d.id.slice(-4)}`,
+              frame_number: f.frame_number,
+              timestamp_sec: f.timestamp_sec,
+              latitude: gpsPt ? gpsPt.latitude : 28.4635 + (Math.random() - 0.5) * 0.008,
+              longitude: gpsPt ? gpsPt.longitude : 77.0305 + (Math.random() - 0.5) * 0.008,
+              category: d.category,
+              severity: d.severity,
+              confidence: d.confidence,
+              road_name: gpsPt?.road_name || 'NH-48 Corridor',
+              image_url: f.image_url
+            });
+          });
+        }
+      });
+      if (extracted.length > 0) return extracted;
+    }
+
+    return defaultStaticMarkers;
+  }, [potholeMarkers, video]);
+
+  const [selectedMarker, setSelectedMarker] = useState<GPSDamageMarker>(damageMarkers[0] || defaultStaticMarkers[0]);
+
+  // Sync selectedMarker when damageMarkers change
+  useEffect(() => {
+    if (damageMarkers.length > 0) {
+      setSelectedMarker((prev) => {
+        const found = damageMarkers.find((m) => m.id === prev?.id);
+        return found || damageMarkers[0];
+      });
+    }
+  }, [damageMarkers]);
 
   // Filter markers based on dropdown selections
-  const filteredMarkers = damageMarkers.filter((m) => {
-    const matchesSev = severityFilter === 'all' || m.severity === severityFilter;
-    const matchesCat = categoryFilter === 'all' || m.category === categoryFilter;
-    return matchesSev && matchesCat;
-  });
+  const filteredMarkers = useMemo(() => {
+    return damageMarkers.filter((m) => {
+      const matchesSev = severityFilter === 'all' || m.severity === severityFilter;
+      const matchesCat = categoryFilter === 'all' || m.category === categoryFilter;
+      return matchesSev && matchesCat;
+    });
+  }, [damageMarkers, severityFilter, categoryFilter]);
 
-  const getSeverityHexColor = (severity: SeverityLevel) => {
+  const getSeverityHexColor = (severity: SeverityLevel | string) => {
     switch (severity) {
       case 'critical':
         return '#FF3B30'; // Red
@@ -161,108 +275,68 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
     return `${mins.toString().padStart(2, '0')}:${padded}`;
   };
 
-  // Initialize and update Leaflet map
+  // 1. Initialize Map Instance (Only on mount)
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
-      // Create map instance centered over NH-48 coordinates
+      const initialCenter: [number, number] = currentVehiclePosition 
+        ? [currentVehiclePosition.lat, currentVehiclePosition.lng]
+        : (damageMarkers[0] ? [damageMarkers[0].latitude, damageMarkers[0].longitude] : [28.4635, 77.0305]);
+
       const map = L.map(mapContainerRef.current, {
-        center: [28.4635, 77.0305],
-        zoom: 15,
-        zoomControl: true
+        center: initialCenter,
+        zoom: compact ? 14 : 15,
+        zoomControl: !compact,
+        attributionControl: false
       });
 
-      // CartoDB Dark Matter tile layer for tech theme
-      const darkLayer = L.tileLayer(
+      // CartoDB Dark Matter tile layer
+      L.tileLayer(
         'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
         {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           subdomains: 'abcd',
           maxZoom: 19
         }
-      );
-
-      darkLayer.addTo(map);
+      ).addTo(map);
 
       // Create polyline track
       const polylineCoords: [number, number][] = gpsTracks.map(p => [p.latitude, p.longitude]);
-      L.polyline(polylineCoords, {
-        color: '#2563EB',
-        weight: 3,
-        opacity: 0.8,
-        dashArray: '6, 6'
-      }).addTo(map);
+      if (polylineCoords.length > 1) {
+        L.polyline(polylineCoords, {
+          color: '#3B82F6',
+          weight: 3,
+          opacity: 0.8,
+          dashArray: '6, 6'
+        }).addTo(map);
+      }
 
       // Layer group for dynamic markers
       const markersLayer = L.layerGroup().addTo(map);
       markersLayerRef.current = markersLayer;
 
-      mapInstanceRef.current = map;
-    }
-
-    // Render Markers onto layer
-    if (markersLayerRef.current && mapInstanceRef.current) {
-      markersLayerRef.current.clearLayers();
-
-      filteredMarkers.forEach((marker) => {
-        const hexColor = getSeverityHexColor(marker.severity);
-        const isSelected = selectedMarker.id === marker.id;
-
-        // Custom HTML Marker Icon
-        const customIcon = L.divIcon({
-          className: 'custom-leaflet-marker',
+      // Add vehicle marker if position provided
+      if (currentVehiclePosition) {
+        const carIcon = L.divIcon({
+          className: 'custom-car-marker',
           html: `
-            <div style="
-              width: ${isSelected ? '28px' : '22px'};
-              height: ${isSelected ? '28px' : '22px'};
-              background-color: ${hexColor};
-              border: 2px solid #FFFFFF;
-              border-radius: 50%;
-              box-shadow: 0 0 ${isSelected ? '16px' : '8px'} ${hexColor};
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              cursor: pointer;
-              transition: all 0.2s ease;
-            ">
-              <div style="width: 8px; height: 8px; background-color: #FFFFFF; border-radius: 50%;"></div>
+            <div style="position:relative; width:34px; height:34px; display:flex; align-items:center; justify-content:center;">
+              <div style="position:absolute; width:34px; height:34px; border-radius:50%; background:rgba(99,102,241,0.25); animation:ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
+              <div style="width:22px; height:22px; border-radius:50%; background:#4F46E5; border:2px solid #FFFFFF; box-shadow:0 0 10px rgba(79,70,229,0.9); display:flex; align-items:center; justify-content:center; color:white;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>
+              </div>
             </div>
           `,
-          iconSize: [isSelected ? 28 : 22, isSelected ? 28 : 22],
-          iconAnchor: [isSelected ? 14 : 11, isSelected ? 14 : 11]
+          iconSize: [34, 34],
+          iconAnchor: [17, 17]
         });
 
-        const popupHTML = `
-          <div style="font-family: monospace; color: #E0E0E0; background: #141414; padding: 10px; border: 1px solid #333; min-width: 210px;">
-            <div style="font-size: 9px; color: #888; text-transform: uppercase; margin-bottom: 4px;">
-              ${marker.road_name}
-            </div>
-            <img src="${marker.image_url}" alt="Damage Snapshot" style="width: 100%; height: 95px; object-fit: cover; border: 1px solid #222; margin-bottom: 8px;" />
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <span style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: #FFF;">
-                ${marker.category.replace('_', ' ')}
-              </span>
-              <span style="font-size: 9px; font-weight: bold; background: ${hexColor}33; color: ${hexColor}; border: 1px solid ${hexColor}; padding: 2px 6px; text-transform: uppercase;">
-                ${marker.severity}
-              </span>
-            </div>
-            <div style="font-size: 10px; color: #AAA; line-height: 1.5; margin-bottom: 6px;">
-              <div>⏱ <b>Time:</b> ${formatTimestamp(marker.timestamp_sec)} (${marker.timestamp_sec}s)</div>
-              <div>🎯 <b>Confidence:</b> <span style="color: #FF9500; font-weight: bold;">${(marker.confidence * 100).toFixed(0)}%</span></div>
-              <div>📍 <b>GPS:</b> ${marker.latitude.toFixed(4)}, ${marker.longitude.toFixed(4)}</div>
-            </div>
-          </div>
-        `;
+        const vMarker = L.marker([currentVehiclePosition.lat, currentVehiclePosition.lng], { icon: carIcon }).addTo(map);
+        vehicleMarkerRef.current = vMarker;
+      }
 
-        const leafletMarker = L.marker([marker.latitude, marker.longitude], { icon: customIcon })
-          .bindPopup(popupHTML, { className: 'custom-leaflet-popup' })
-          .on('click', () => {
-            setSelectedMarker(marker);
-          });
-
-        markersLayerRef.current?.addLayer(leafletMarker);
-      });
+      mapInstanceRef.current = map;
     }
 
     return () => {
@@ -271,7 +345,104 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
         mapInstanceRef.current = null;
       }
     };
-  }, [filteredMarkers, selectedMarker, severityFilter, categoryFilter]);
+  }, []);
+
+  // 2. Smoothly update vehicle position marker
+  useEffect(() => {
+    if (!currentVehiclePosition) return;
+    if (mapInstanceRef.current) {
+      if (!vehicleMarkerRef.current) {
+        const carIcon = L.divIcon({
+          className: 'custom-car-marker',
+          html: `
+            <div style="position:relative; width:34px; height:34px; display:flex; align-items:center; justify-content:center;">
+              <div style="position:absolute; width:34px; height:34px; border-radius:50%; background:rgba(99,102,241,0.25); animation:ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
+              <div style="width:22px; height:22px; border-radius:50%; background:#4F46E5; border:2px solid #FFFFFF; box-shadow:0 0 10px rgba(79,70,229,0.9); display:flex; align-items:center; justify-content:center; color:white;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>
+              </div>
+            </div>
+          `,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17]
+        });
+        vehicleMarkerRef.current = L.marker([currentVehiclePosition.lat, currentVehiclePosition.lng], { icon: carIcon }).addTo(mapInstanceRef.current);
+      } else {
+        vehicleMarkerRef.current.setLatLng([currentVehiclePosition.lat, currentVehiclePosition.lng]);
+      }
+    }
+  }, [currentVehiclePosition?.lat, currentVehiclePosition?.lng]);
+
+  const handleCenterOnVehicle = () => {
+    if (currentVehiclePosition && mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([currentVehiclePosition.lat, currentVehiclePosition.lng], 16, { duration: 0.8 });
+    }
+  };
+
+  // 3. Render and Update Pothole Markers when filteredMarkers changes
+  useEffect(() => {
+    if (!markersLayerRef.current || !mapInstanceRef.current) return;
+
+    markersLayerRef.current.clearLayers();
+
+    filteredMarkers.forEach((marker) => {
+      const hexColor = getSeverityHexColor(marker.severity);
+      const isSelected = selectedMarker?.id === marker.id;
+
+      // Custom HTML Marker Icon
+      const customIcon = L.divIcon({
+        className: 'custom-leaflet-marker',
+        html: `
+          <div style="
+            width: ${isSelected ? '28px' : '22px'};
+            height: ${isSelected ? '28px' : '22px'};
+            background-color: ${hexColor};
+            border: 2px solid #FFFFFF;
+            border-radius: 50%;
+            box-shadow: 0 0 ${isSelected ? '16px' : '8px'} ${hexColor};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+          ">
+            <div style="width: 7px; height: 7px; background-color: #FFFFFF; border-radius: 50%;"></div>
+          </div>
+        `,
+        iconSize: [isSelected ? 28 : 22, isSelected ? 28 : 22],
+        iconAnchor: [isSelected ? 14 : 11, isSelected ? 14 : 11]
+      });
+
+      const popupHTML = `
+        <div style="font-family: ui-monospace, SFMono-Regular, monospace; color: #E0E0E0; background: #141414; padding: 10px; border: 1px solid #333; border-radius: 6px; min-width: 220px;">
+          <div style="font-size: 9px; color: #888; text-transform: uppercase; margin-bottom: 4px; font-weight: bold;">
+            ${marker.road_name}
+          </div>
+          ${marker.image_url ? `<img src="${marker.image_url}" alt="Damage Snapshot" style="width: 100%; height: 95px; object-fit: cover; border: 1px solid #222; border-radius: 4px; margin-bottom: 8px;" />` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: #FFF;">
+              ${marker.category.replace('_', ' ')}
+            </span>
+            <span style="font-size: 9px; font-weight: bold; background: ${hexColor}33; color: ${hexColor}; border: 1px solid ${hexColor}; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;">
+              ${marker.severity}
+            </span>
+          </div>
+          <div style="font-size: 10px; color: #AAA; line-height: 1.5; margin-bottom: 6px;">
+            <div>🎯 <b>Confidence:</b> <span style="color: #FF9500; font-weight: bold;">${(marker.confidence * 100).toFixed(0)}%</span></div>
+            <div>📍 <b>GPS:</b> ${marker.latitude.toFixed(5)}°, ${marker.longitude.toFixed(5)}°</div>
+            ${marker.road_authority ? `<div>🏛 <b>Authority:</b> <span style="color:#60A5FA;">${marker.road_authority}</span></div>` : ''}
+          </div>
+        </div>
+      `;
+
+      const leafletMarker = L.marker([marker.latitude, marker.longitude], { icon: customIcon })
+        .bindPopup(popupHTML, { className: 'custom-leaflet-popup' })
+        .on('click', () => {
+          setSelectedMarker(marker);
+        });
+
+      markersLayerRef.current?.addLayer(leafletMarker);
+    });
+  }, [filteredMarkers, selectedMarker?.id]);
 
   const handleCenterOnMarker = (marker: GPSDamageMarker) => {
     setSelectedMarker(marker);
@@ -280,6 +451,70 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
     }
   };
 
+  // Compact View Layout (for embedding in HUD / Driver Mode)
+  if (compact) {
+    return (
+      <div className="w-full space-y-3 font-mono text-[#E0E0E0]">
+        <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5 text-indigo-400 font-bold uppercase tracking-wider">
+            <Compass className="w-3.5 h-3.5" />
+            <span>Interactive GPS Pothole Map</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {currentVehiclePosition && (
+              <button
+                onClick={handleCenterOnVehicle}
+                title="Center map on vehicle"
+                className="px-2 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] flex items-center gap-1 transition-all"
+              >
+                <Crosshair className="w-3 h-3" />
+                <span>Recenter</span>
+              </button>
+            )}
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+              {filteredMarkers.length} LIVE MARKERS
+            </span>
+          </div>
+        </div>
+
+        {/* Leaflet DOM Mounting Container */}
+        <div 
+          ref={mapContainerRef} 
+          className={`w-full ${heightClass || 'h-60'} rounded-xl border border-slate-800 bg-[#141414] overflow-hidden relative z-0`} 
+        />
+
+        {/* Compact Selected Marker Bar & Action */}
+        {selectedMarker && (
+          <div className="p-3 bg-slate-950/90 rounded-xl border border-slate-800 flex items-center justify-between gap-3 text-xs">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: getSeverityHexColor(selectedMarker.severity) }} />
+                <span className="font-bold text-white uppercase text-[11px] truncate">{selectedMarker.pothole_id || selectedMarker.category}</span>
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: `${getSeverityHexColor(selectedMarker.severity)}22`, color: getSeverityHexColor(selectedMarker.severity) }}>
+                  {selectedMarker.severity}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 truncate mt-0.5 font-mono">
+                {selectedMarker.road_name} • {selectedMarker.latitude.toFixed(4)}°, {selectedMarker.longitude.toFixed(4)}°
+              </div>
+            </div>
+
+            {onReportPothole && (
+              <button
+                onClick={() => onReportPothole(selectedMarker)}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-[10px] uppercase shrink-0 transition-all flex items-center gap-1 shadow-sm"
+              >
+                <Send className="w-3 h-3" />
+                Report
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Full View Layout (for GPS Mapping Tab)
   return (
     <div className="space-y-6 text-[#E0E0E0] font-mono">
       {/* GIS Mapping Banner */}
@@ -289,9 +524,9 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
             <Globe className="w-3.5 h-3.5" />
             <span>INTERACTIVE LEAFLET GIS ROAD DEFECT MAPPER</span>
           </div>
-          <h2 className="text-base font-bold text-white uppercase">{video.title} Spatial Map</h2>
+          <h2 className="text-base font-bold text-white uppercase">{video?.title || 'Active Corridor'} Spatial Map</h2>
           <p className="text-[11px] text-[#888]">
-            Color-coded severity damage markers (Green, Yellow, Orange, Red) overlaid on Leaflet dark canvas.
+            Color-coded severity damage markers (Green, Yellow, Orange, Red) overlaid on Leaflet dark canvas with real-time GPS coordinate mapping.
           </p>
         </div>
 
@@ -355,7 +590,10 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
           <button
             onClick={() => {
               if (mapInstanceRef.current) {
-                mapInstanceRef.current.flyTo([28.4635, 77.0305], 15);
+                const targetCoord: [number, number] = currentVehiclePosition 
+                  ? [currentVehiclePosition.lat, currentVehiclePosition.lng] 
+                  : (damageMarkers[0] ? [damageMarkers[0].latitude, damageMarkers[0].longitude] : [28.4635, 77.0305]);
+                mapInstanceRef.current.flyTo(targetCoord, 15);
               }
             }}
             className="w-full px-3 py-1.5 bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] text-white flex items-center justify-center space-x-1 font-bold"
@@ -389,15 +627,21 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
           <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div className="bg-[#141414] border border-[#222] p-2">
               <span className="text-[#888]">GPS CENTER:</span>
-              <div className="text-white font-bold">28.4635° N, 77.0305° E</div>
+              <div className="text-white font-bold">
+                {currentVehiclePosition ? `${currentVehiclePosition.lat.toFixed(4)}° N, ${currentVehiclePosition.lng.toFixed(4)}° E` : '28.4635° N, 77.0305° E'}
+              </div>
             </div>
             <div className="bg-[#141414] border border-[#222] p-2">
               <span className="text-[#888]">ROAD CORRIDOR:</span>
-              <div className="text-[#FF9500] font-bold">NH-48 Expressway</div>
+              <div className="text-[#FF9500] font-bold truncate">
+                {selectedMarker?.road_name || 'NH-48 Expressway'}
+              </div>
             </div>
             <div className="bg-[#141414] border border-[#222] p-2">
-              <span className="text-[#888]">INSPECTION DISTANCE:</span>
-              <div className="text-[#34C759] font-bold">1.45 KM COVERED</div>
+              <span className="text-[#888]">POTHOLES DETECTED:</span>
+              <div className="text-[#34C759] font-bold">
+                {filteredMarkers.length} GEOTAGGED
+              </div>
             </div>
           </div>
         </div>
@@ -411,11 +655,13 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
 
           {selectedMarker ? (
             <div className="space-y-3 bg-[#141414] border border-[#2A2A2A] p-3 text-xs">
-              <img 
-                src={selectedMarker.image_url} 
-                alt="Selected damage snapshot" 
-                className="w-full h-36 object-cover border border-[#2A2A2A]"
-              />
+              {selectedMarker.image_url && (
+                <img 
+                  src={selectedMarker.image_url} 
+                  alt="Selected damage snapshot" 
+                  className="w-full h-36 object-cover border border-[#2A2A2A]"
+                />
+              )}
 
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">DAMAGE CATEGORY:</span>
@@ -437,6 +683,18 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
               </div>
 
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
+                <span className="text-[#888]">ROAD CORRIDOR:</span>
+                <span className="text-[#2563EB] font-bold truncate max-w-[170px]">{selectedMarker.road_name}</span>
+              </div>
+
+              {selectedMarker.road_authority && (
+                <div className="flex justify-between items-center border-b border-[#222] pb-2">
+                  <span className="text-[#888]">AUTHORITY:</span>
+                  <span className="text-indigo-300 font-bold truncate max-w-[170px]">{selectedMarker.road_authority}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">TIMESTAMP:</span>
                 <span className="text-[#2563EB] font-bold">{formatTimestamp(selectedMarker.timestamp_sec)} ({selectedMarker.timestamp_sec}s)</span>
               </div>
@@ -456,13 +714,25 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
                 <span className="text-white font-mono">{selectedMarker.longitude.toFixed(6)}° E</span>
               </div>
 
-              <button
-                onClick={() => onNavigate('detector')}
-                className="w-full mt-2 py-2 bg-[#2563EB] hover:bg-blue-600 text-white text-xs uppercase font-bold border border-blue-400 flex items-center justify-center space-x-1.5"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>INSPECT FRAME IN DETECTOR</span>
-              </button>
+              {onReportPothole && (
+                <button
+                  onClick={() => onReportPothole(selectedMarker)}
+                  className="w-full mt-2 py-2 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white text-xs uppercase font-bold border border-rose-400 flex items-center justify-center space-x-1.5 transition-all shadow-md"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>REPORT POTHOLE TO ROAD AUTHORITY</span>
+                </button>
+              )}
+
+              {onNavigate && (
+                <button
+                  onClick={() => onNavigate('detector')}
+                  className="w-full py-2 bg-[#2563EB] hover:bg-blue-600 text-white text-xs uppercase font-bold border border-blue-400 flex items-center justify-center space-x-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>INSPECT FRAME IN DETECTOR</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="p-6 text-center text-[#666] text-xs">
@@ -478,7 +748,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
             <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
               {filteredMarkers.map((m) => {
                 const hexColor = getSeverityHexColor(m.severity);
-                const isSelected = selectedMarker.id === m.id;
+                const isSelected = selectedMarker?.id === m.id;
 
                 return (
                   <div
@@ -505,3 +775,4 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({ video, onNavigat
     </div>
   );
 };
+
