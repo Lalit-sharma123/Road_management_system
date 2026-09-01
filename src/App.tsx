@@ -538,6 +538,9 @@ export default function App() {
             video={selectedVideo}
             onNavigate={setActiveTab}
             currentModel={currentModel}
+            models={models}
+            onSelectModel={handleSelectModel}
+            videosList={videos}
           />
         )}
 
