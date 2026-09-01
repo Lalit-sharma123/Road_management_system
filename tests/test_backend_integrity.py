@@ -269,6 +269,128 @@ class TestWebSocketBroadcasterAndPruning(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(slow_ws, mgr.active_connections)
 
 
+class TestDatabaseSchemaAndModelIntegrity(unittest.TestCase):
+    """Verifies that database.py, Base, session maker, and all ORM models & fields are complete and aligned via AST."""
+
+    def test_database_declarative_base_and_all_models_present(self):
+        models_path = os.path.join(BACKEND_DIR, "models", "models.py")
+        with open(models_path, "r", encoding="utf-8") as f:
+            models_source = f.read()
+
+        tree = ast.parse(models_source)
+
+        expected_models = [
+            "User", "Video", "Frame", "Detection", "GPSData", "RoadAnalytics",
+            "Report", "Camera", "AIModel", "AuditLog", "DriverSettings",
+            "DriverAlertLog", "TrafficViolation", "StolenVehicle",
+            "StolenVehicleAlert", "NotificationLog", "StolenVehicleSettings",
+            "PotholeComplaint"
+        ]
+
+        found_classes = {}
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                # Check base classes
+                base_names = []
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        base_names.append(base.id)
+                
+                # Check __tablename__
+                tablename = None
+                columns = []
+                for item in node.body:
+                    if isinstance(item, ast.Assign):
+                        for target in item.targets:
+                            if isinstance(target, ast.Name) and target.id == "__tablename__":
+                                if isinstance(item.value, ast.Constant):
+                                    tablename = item.value.value
+                    elif isinstance(item, ast.AnnAssign):
+                        if isinstance(item.target, ast.Name):
+                            col_name = item.target.id
+                            if col_name not in ["__tablename__", "videos", "frames", "detections", "gps_tracks", "analytics", "reports", "uploader", "creator", "video", "frame"]:
+                                columns.append(col_name)
+
+                found_classes[node.name] = {
+                    "bases": base_names,
+                    "tablename": tablename,
+                    "columns": columns
+                }
+
+        for model_name in expected_models:
+            self.assertIn(model_name, found_classes, f"Model {model_name} must be defined in models.py")
+            info = found_classes[model_name]
+            self.assertIn("Base", info["bases"], f"Model {model_name} must inherit from Base")
+            self.assertIsNotNone(info["tablename"], f"Model {model_name} must have a __tablename__ attribute")
+            self.assertIn("id", info["columns"], f"Model {model_name} must have an 'id' primary key column")
+
+    def test_required_schema_alignment_covers_all_columns(self):
+        """Verifies that all non-PK columns in every table have migration definitions in database.py."""
+        models_path = os.path.join(BACKEND_DIR, "models", "models.py")
+        with open(models_path, "r", encoding="utf-8") as f:
+            models_source = f.read()
+
+        db_path = os.path.join(BACKEND_DIR, "database", "database.py")
+        with open(db_path, "r", encoding="utf-8") as f:
+            db_source = f.read()
+
+        models_tree = ast.parse(models_source)
+        db_tree = ast.parse(db_source)
+
+        # Extract REQUIRED_SCHEMA dictionary from database.py AST
+        required_schema_tables = {}
+        for node in ast.walk(db_tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "REQUIRED_SCHEMA":
+                        if isinstance(node.value, ast.Dict):
+                            for key, val in zip(node.value.keys, node.value.values):
+                                if isinstance(key, ast.Constant):
+                                    table_name = key.value
+                                    col_list = []
+                                    if isinstance(val, ast.List):
+                                        for elt in val.elts:
+                                            if isinstance(elt, ast.Tuple) and len(elt.elts) >= 1:
+                                                if isinstance(elt.elts[0], ast.Constant):
+                                                    col_list.append(elt.elts[0].value)
+                                    required_schema_tables[table_name] = col_list
+
+        self.assertGreater(len(required_schema_tables), 10, "REQUIRED_SCHEMA should contain table definitions")
+
+        # Now extract tables and columns from models.py
+        for node in models_tree.body:
+            if isinstance(node, ast.ClassDef):
+                base_names = [b.id for b in node.bases if isinstance(b, ast.Name)]
+                if "Base" not in base_names:
+                    continue
+
+                tablename = None
+                columns = []
+                for item in node.body:
+                    if isinstance(item, ast.Assign):
+                        for target in item.targets:
+                            if isinstance(target, ast.Name) and target.id == "__tablename__":
+                                if isinstance(item.value, ast.Constant):
+                                    tablename = item.value.value
+                    elif isinstance(item, ast.AnnAssign):
+                        if isinstance(item.target, ast.Name):
+                            col_name = item.target.id
+                            # Filter out relationships
+                            if col_name not in ["__tablename__", "videos", "frames", "detections", "gps_tracks", "analytics", "reports", "uploader", "creator", "video", "frame"]:
+                                columns.append(col_name)
+
+                if tablename:
+                    self.assertIn(tablename, required_schema_tables, f"Table '{tablename}' must be defined in REQUIRED_SCHEMA in database.py")
+                    schema_cols = required_schema_tables[tablename]
+                    for col in columns:
+                        if col == "id":
+                            continue  # Primary key is created on CREATE TABLE
+                        self.assertIn(
+                            col, schema_cols,
+                            f"Column '{col}' of table '{tablename}' ({node.name}) must be declared in REQUIRED_SCHEMA in database.py"
+                        )
+
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestPythonBackendAST)
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestDistanceAndProjectionCalculations))
@@ -276,6 +398,7 @@ if __name__ == "__main__":
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestMultiModelAIPipelineIntegrity))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestSessionIsolationAndPipelineCleanup))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestWebSocketBroadcasterAndPruning))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestDatabaseSchemaAndModelIntegrity))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)

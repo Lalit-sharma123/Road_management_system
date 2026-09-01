@@ -181,3 +181,40 @@ export interface ViolationStats {
   recent_violations: TrafficViolation[];
 }
 
+export interface PotholeHeatmapPoint {
+  id?: string;
+  latitude: number;
+  longitude: number;
+  intensity: number; // 0.1 to 1.0
+  severity?: SeverityLevel | string;
+  category?: DamageCategory | string;
+  confidence?: number;
+  road_name?: string;
+  road_authority?: string;
+  source?: 'database' | 'detection' | 'driver_alert' | 'complaint' | 'historical_database';
+  created_at?: string;
+}
+
+export interface HeatmapHotspot {
+  corridor: string;
+  center: [number, number];
+  severity: string;
+  pothole_count: number;
+  hazard_index: number;
+}
+
+export interface PotholeHeatmapResponse {
+  status: string;
+  total_records: number;
+  days_window: number;
+  heatmap_points: PotholeHeatmapPoint[];
+  density_summary: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  hotspots?: HeatmapHotspot[];
+}
+
+

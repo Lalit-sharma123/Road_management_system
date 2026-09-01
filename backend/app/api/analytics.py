@@ -63,3 +63,13 @@ async def get_monthly_detection_trends(
         "cracks": [35, 42, 38, 50, 48, 62, 58],
         "average_health_score": [88.2, 86.5, 84.1, 81.0, 82.5, 78.9, 80.4]
     }
+
+
+@router.get("/pothole-heatmap")
+async def get_pothole_heatmap_data(
+    db: AsyncSession = Depends(get_db)
+):
+    """Historical database pothole detection records for GIS heatmap visualization."""
+    from app.driver.routes import get_pothole_density_heatmap
+    return await get_pothole_density_heatmap(db=db)
+

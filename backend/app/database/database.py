@@ -100,6 +100,37 @@ async def ensure_schema_alignment(conn) -> None:
     """
     # Schema definition dictionary: table -> list of (column_name, postgres_type_ddl, sqlite_type_ddl)
     REQUIRED_SCHEMA = {
+        "users": [
+            ("email", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("username", "VARCHAR(100) NOT NULL", "VARCHAR(100) NOT NULL"),
+            ("hashed_password", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("full_name", "VARCHAR(255)", "VARCHAR(255)"),
+            ("role", "VARCHAR(50) DEFAULT 'inspector'", "VARCHAR(50) DEFAULT 'inspector'"),
+            ("is_active", "BOOLEAN DEFAULT TRUE", "BOOLEAN DEFAULT 1"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "videos": [
+            ("title", "VARCHAR(255)", "VARCHAR(255)"),
+            ("filename", "VARCHAR(255)", "VARCHAR(255)"),
+            ("file_path", "TEXT", "TEXT"),
+            ("processed_file_path", "TEXT", "TEXT"),
+            ("thumbnail_path", "TEXT", "TEXT"),
+            ("file_size_bytes", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("duration_seconds", "DOUBLE PRECISION DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
+            ("total_frames", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("fps", "DOUBLE PRECISION DEFAULT 30.0", "FLOAT DEFAULT 30.0"),
+            ("resolution", "VARCHAR(50) DEFAULT '1920x1080'", "VARCHAR(50) DEFAULT '1920x1080'"),
+            ("status", "VARCHAR(50) DEFAULT 'pending'", "VARCHAR(50) DEFAULT 'pending'"),
+            ("uploader_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "frames": [
+            ("video_id", "VARCHAR(36) NOT NULL", "VARCHAR(36) NOT NULL"),
+            ("frame_number", "INTEGER NOT NULL", "INTEGER NOT NULL"),
+            ("timestamp_seconds", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("image_path", "TEXT", "TEXT"),
+            ("has_damage", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0")
+        ],
         "detections": [
             ("video_id", "VARCHAR(36)", "VARCHAR(36)"),
             ("camera_id", "VARCHAR(36)", "VARCHAR(36)"),
@@ -120,19 +151,31 @@ async def ensure_schema_alignment(conn) -> None:
             ("longitude", "DOUBLE PRECISION", "FLOAT"),
             ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ],
-        "videos": [
-            ("title", "VARCHAR(255)", "VARCHAR(255)"),
-            ("filename", "VARCHAR(255)", "VARCHAR(255)"),
-            ("file_path", "TEXT", "TEXT"),
-            ("processed_file_path", "TEXT", "TEXT"),
-            ("thumbnail_path", "TEXT", "TEXT"),
-            ("file_size_bytes", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
-            ("duration_seconds", "DOUBLE PRECISION DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
-            ("total_frames", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
-            ("fps", "DOUBLE PRECISION DEFAULT 30.0", "FLOAT DEFAULT 30.0"),
-            ("resolution", "VARCHAR(50) DEFAULT '1920x1080'", "VARCHAR(50) DEFAULT '1920x1080'"),
-            ("status", "VARCHAR(50) DEFAULT 'pending'", "VARCHAR(50) DEFAULT 'pending'"),
-            ("uploader_id", "VARCHAR(36)", "VARCHAR(36)"),
+        "gps_data": [
+            ("video_id", "VARCHAR(36) NOT NULL", "VARCHAR(36) NOT NULL"),
+            ("frame_number", "INTEGER NOT NULL", "INTEGER NOT NULL"),
+            ("latitude", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("longitude", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("altitude_meters", "DOUBLE PRECISION", "FLOAT"),
+            ("speed_kmh", "DOUBLE PRECISION", "FLOAT"),
+            ("road_name", "VARCHAR(255)", "VARCHAR(255)")
+        ],
+        "road_analytics": [
+            ("video_id", "VARCHAR(36) NOT NULL", "VARCHAR(36) NOT NULL"),
+            ("road_health_score", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("total_detections", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("pothole_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("crack_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("critical_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+            ("damage_density_per_km", "DOUBLE PRECISION DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
+            ("overall_severity", "VARCHAR(50) DEFAULT 'low'", "VARCHAR(50) DEFAULT 'low'"),
+            ("summary_json", "JSON", "TEXT")
+        ],
+        "reports": [
+            ("title", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("report_type", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("file_path", "TEXT NOT NULL", "TEXT NOT NULL"),
+            ("created_by", "VARCHAR(36)", "VARCHAR(36)"),
             ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ],
         "cameras": [
@@ -150,6 +193,26 @@ async def ensure_schema_alignment(conn) -> None:
             ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("last_connected", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP")
+        ],
+        "ai_models": [
+            ("model_name", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("version", "VARCHAR(50) DEFAULT 'v1.0'", "VARCHAR(50) DEFAULT 'v1.0'"),
+            ("model_type", "VARCHAR(50) DEFAULT 'YOLOv11'", "VARCHAR(50) DEFAULT 'YOLOv11'"),
+            ("classes_json", "JSON", "TEXT"),
+            ("accuracy", "DOUBLE PRECISION DEFAULT 0.92", "FLOAT DEFAULT 0.92"),
+            ("map_score", "DOUBLE PRECISION DEFAULT 0.88", "FLOAT DEFAULT 0.88"),
+            ("status", "VARCHAR(50) DEFAULT 'ready'", "VARCHAR(50) DEFAULT 'ready'"),
+            ("is_active", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
+            ("file_path", "TEXT NOT NULL", "TEXT NOT NULL"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "audit_logs": [
+            ("action", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
+            ("category", "VARCHAR(100) DEFAULT 'SYSTEM'", "VARCHAR(100) DEFAULT 'SYSTEM'"),
+            ("details", "TEXT", "TEXT"),
+            ("user_email", "VARCHAR(255)", "VARCHAR(255)"),
+            ("ip_address", "VARCHAR(100)", "VARCHAR(100)"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ],
         "driver_settings": [
             ("alert_distance_meters", "DOUBLE PRECISION DEFAULT 30.0", "FLOAT DEFAULT 30.0"),
@@ -204,8 +267,10 @@ async def ensure_schema_alignment(conn) -> None:
         ],
         "stolen_vehicles": [
             ("vehicle_number", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("normalized_vehicle_number", "VARCHAR(50)", "VARCHAR(50)"),
             ("owner_name", "VARCHAR(255)", "VARCHAR(255)"),
             ("vehicle_type", "VARCHAR(50) DEFAULT 'CAR'", "VARCHAR(50) DEFAULT 'CAR'"),
+            ("description", "TEXT", "TEXT"),
             ("fir_number", "VARCHAR(100) NOT NULL", "VARCHAR(100) NOT NULL"),
             ("police_station", "VARCHAR(255) NOT NULL", "VARCHAR(255) NOT NULL"),
             ("date_reported", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
@@ -253,7 +318,7 @@ async def ensure_schema_alignment(conn) -> None:
             ("channel", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
             ("recipient", "VARCHAR(255)", "VARCHAR(255)"),
             ("status", "VARCHAR(50) DEFAULT 'SENT'", "VARCHAR(50) DEFAULT 'SENT'"),
-            ("payload_json", "JSON", "JSON"),
+            ("payload_json", "JSON", "TEXT"),
             ("error_message", "TEXT", "TEXT"),
             ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ],
@@ -267,6 +332,27 @@ async def ensure_schema_alignment(conn) -> None:
             ("sms_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
             ("whatsapp_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
             ("email_enabled", "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"),
+            ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        ],
+        "pothole_complaints": [
+            ("complaint_number", "VARCHAR(50) NOT NULL", "VARCHAR(50) NOT NULL"),
+            ("detection_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("driver_id", "VARCHAR(36)", "VARCHAR(36)"),
+            ("session_id", "VARCHAR(100)", "VARCHAR(100)"),
+            ("latitude", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("longitude", "DOUBLE PRECISION NOT NULL", "FLOAT NOT NULL"),
+            ("road_name", "VARCHAR(255)", "VARCHAR(255)"),
+            ("road_authority", "VARCHAR(255)", "VARCHAR(255)"),
+            ("city", "VARCHAR(100)", "VARCHAR(100)"),
+            ("state", "VARCHAR(100)", "VARCHAR(100)"),
+            ("damage_category", "VARCHAR(50) DEFAULT 'pothole'", "VARCHAR(50) DEFAULT 'pothole'"),
+            ("severity", "VARCHAR(50) DEFAULT 'high'", "VARCHAR(50) DEFAULT 'high'"),
+            ("description", "TEXT", "TEXT"),
+            ("evidence_image_url", "TEXT", "TEXT"),
+            ("status", "VARCHAR(50) DEFAULT 'Submitted'", "VARCHAR(50) DEFAULT 'Submitted'"),
+            ("assigned_department", "VARCHAR(255)", "VARCHAR(255)"),
+            ("resolution_notes", "TEXT", "TEXT"),
+            ("created_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("updated_at", "TIMESTAMP WITH TIME ZONE DEFAULT NOW()", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         ]
     }
@@ -331,6 +417,9 @@ async def init_db() -> None:
     If PostgreSQL credentials fail, automatically fall back to SQLite and seed defaults.
     """
     global engine
+    # Explicitly import all ORM models so that Base.metadata contains all tables
+    import app.models.models  # noqa: F401
+
     try:
         async with engine.begin() as conn:
             # Test connection with a quick select
@@ -351,7 +440,10 @@ async def init_db() -> None:
 async def _seed_initial_data():
     """Seed default Administrator, Inspector, and System settings if empty."""
     from passlib.context import CryptContext
-    from app.models.models import User, UserRole, DriverSettings, AIModel, Camera, CameraType, CameraStatus, TrafficViolation
+    from app.models.models import (
+        User, UserRole, DriverSettings, AIModel, Camera, CameraType, CameraStatus, 
+        TrafficViolation, StolenVehicle, StolenVehicleAlert, StolenVehicleSettings, PotholeComplaint
+    )
     
     pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -523,7 +615,6 @@ async def _seed_initial_data():
                     session.add(v)
 
             # 7. Seed Default Stolen Vehicle Registry
-            from app.models.models import StolenVehicle, StolenVehicleAlert, StolenVehicleSettings
             from datetime import timedelta
             now = datetime.now(timezone.utc)
 
@@ -533,6 +624,7 @@ async def _seed_initial_data():
                 sample_stolen_vehicles = [
                     StolenVehicle(
                         vehicle_number="DL01AB1234",
+                        normalized_vehicle_number="DL01AB1234",
                         owner_name="Rajesh Kumar Sharma",
                         vehicle_type="MOTORCYCLE",
                         fir_number="FIR-2026-DEL-88912",
@@ -545,6 +637,7 @@ async def _seed_initial_data():
                     ),
                     StolenVehicle(
                         vehicle_number="HR26DQ5519",
+                        normalized_vehicle_number="HR26DQ5519",
                         owner_name="Vikramaditya Singh",
                         vehicle_type="CAR",
                         fir_number="FIR-2026-GGN-44120",
@@ -557,6 +650,7 @@ async def _seed_initial_data():
                     ),
                     StolenVehicle(
                         vehicle_number="MH12DE1432",
+                        normalized_vehicle_number="MH12DE1432",
                         owner_name="Pooja Deshmukh",
                         vehicle_type="SCOOTER",
                         fir_number="FIR-2026-PUN-33109",
@@ -569,6 +663,7 @@ async def _seed_initial_data():
                     ),
                     StolenVehicle(
                         vehicle_number="KA05MK9821",
+                        normalized_vehicle_number="KA05MK9821",
                         owner_name="Anand Murthy",
                         vehicle_type="MOTORCYCLE",
                         fir_number="FIR-2026-BLR-12093",
@@ -639,8 +734,49 @@ async def _seed_initial_data():
                 for sa in sample_alerts:
                     session.add(sa)
 
+            # 10. Seed Initial Pothole Complaint Records
+            stmt_pc = select(PotholeComplaint)
+            pc_rec = (await session.execute(stmt_pc)).scalars().first()
+            if not pc_rec:
+                sample_complaints = [
+                    PotholeComplaint(
+                        complaint_number="GRV-2026-00109",
+                        latitude=28.4595,
+                        longitude=77.0266,
+                        road_name="National Highway 48 (Sector 29 Exit)",
+                        road_authority="National Highways Authority of India (NHAI)",
+                        city="Gurugram",
+                        state="Haryana",
+                        damage_category="pothole",
+                        severity="critical",
+                        description="Deep circular pothole on center lane causing sudden vehicular braking and hazard to two-wheelers.",
+                        status="In Progress",
+                        assigned_department="Highway Maintenance Division 4",
+                        resolution_notes="Cold mix patching crew dispatched with work order #WO-9912.",
+                        created_at=now - timedelta(days=1, hours=4)
+                    ),
+                    PotholeComplaint(
+                        complaint_number="GRV-2026-00110",
+                        latitude=28.4630,
+                        longitude=77.0305,
+                        road_name="Cyber City Underpass Approach Road",
+                        road_authority="Municipal Corporation Gurugram (MCG)",
+                        city="Gurugram",
+                        state="Haryana",
+                        damage_category="broken_road",
+                        severity="high",
+                        description="Substantial road surface erosion and missing asphalt layer post monsoon showers.",
+                        status="Under Review",
+                        assigned_department="Road Works & Asphalt Engineering",
+                        resolution_notes="Site inspection scheduled for road resurfacing assessment.",
+                        created_at=now - timedelta(hours=18)
+                    )
+                ]
+                for pc in sample_complaints:
+                    session.add(pc)
+
             await session.commit()
-            print("✅ Default Database Seeds (Admin, Inspector, Settings, Violations, Stolen Vehicles) checked.")
+            print("✅ Default Database Seeds (Admin, Inspector, Settings, Violations, Stolen Vehicles, Complaints) checked.")
         except Exception as seed_err:
             await session.rollback()
             print(f"Note on seeding database: {seed_err}")

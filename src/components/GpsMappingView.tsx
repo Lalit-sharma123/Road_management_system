@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import L from 'leaflet';
+import 'leaflet.heat';
 import { 
   MapPin, 
   Navigation, 
@@ -19,9 +20,17 @@ import {
   Car,
   Send,
   Building2,
-  ShieldAlert
+  ShieldAlert,
+  Flame,
+  Sliders,
+  Database,
+  RefreshCw,
+  Info,
+  Clock
 } from 'lucide-react';
-import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory } from '../types/inspection';
+import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot } from '../types/inspection';
+import { heatmapService } from '../services/heatmapService';
+
 
 export interface DynamicPotholeMarker {
   id?: string;
@@ -170,10 +179,24 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const heatLayerRef = useRef<any>(null);
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
 
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+  // Heatmap Overlay Controls
+  const [showHeatmap, setShowHeatmap] = useState<boolean>(true);
+  const [showMarkers, setShowMarkers] = useState<boolean>(true);
+  const [heatmapOpacity, setHeatmapOpacity] = useState<number>(0.65);
+  const [heatmapRadius, setHeatmapRadius] = useState<number>(28);
+  const [heatmapBlur, setHeatmapBlur] = useState<number>(18);
+  const [timeWindowDays, setTimeWindowDays] = useState<number>(30);
+  const [includeHistoricalDb, setIncludeHistoricalDb] = useState<boolean>(true);
+  const [showHeatmapSettings, setShowHeatmapSettings] = useState<boolean>(false);
+  const [isLoadingHeatmap, setIsLoadingHeatmap] = useState<boolean>(false);
+  const [historicalHeatmapData, setHistoricalHeatmapData] = useState<PotholeHeatmapPoint[]>([]);
+  const [hotspotsList, setHotspotsList] = useState<HeatmapHotspot[]>([]);
 
   // Base road GPS track points
   const gpsTracks: GPSPoint[] = video?.gps_tracks || [
@@ -183,6 +206,32 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     { frame_number: 450, latitude: 28.4635, longitude: 77.0305, altitude_meters: 215.1, speed_kmh: 45.0, road_name: 'NH-48 Sector 14' },
     { frame_number: 600, latitude: 28.4649, longitude: 77.0318, altitude_meters: 214.7, speed_kmh: 39.2, road_name: 'NH-48 Sector 14' }
   ];
+
+  // Fetch Historical Database Pothole Detections for Heatmap
+  const loadHistoricalHeatmap = useCallback(async () => {
+    setIsLoadingHeatmap(true);
+    try {
+      const data = await heatmapService.getPotholeHeatmap({
+        days: timeWindowDays,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        min_severity: severityFilter !== 'all' ? severityFilter : undefined
+      });
+      if (data && data.heatmap_points) {
+        setHistoricalHeatmapData(data.heatmap_points);
+        if (data.hotspots) {
+          setHotspotsList(data.hotspots);
+        }
+      }
+    } catch (err) {
+      console.warn('Historical heatmap load error:', err);
+    } finally {
+      setIsLoadingHeatmap(false);
+    }
+  }, [timeWindowDays, categoryFilter, severityFilter]);
+
+  useEffect(() => {
+    loadHistoricalHeatmap();
+  }, [loadHistoricalHeatmap]);
 
   // Derive Geotagged Damage Markers dynamically from props or video frames
   const damageMarkers: GPSDamageMarker[] = useMemo(() => {
@@ -253,6 +302,37 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       return matchesSev && matchesCat;
     });
   }, [damageMarkers, severityFilter, categoryFilter]);
+
+  // Consolidated Heatmap Density Points: Current inspection markers + Historical Database
+  const consolidatedHeatmapPoints: [number, number, number][] = useMemo(() => {
+    const points: [number, number, number][] = [];
+    const severityWeightMap: Record<string, number> = {
+      critical: 1.0,
+      high: 0.8,
+      medium: 0.5,
+      low: 0.3
+    };
+
+    // 1. Add current live/filtered markers
+    filteredMarkers.forEach((m) => {
+      const weight = (severityWeightMap[m.severity] || 0.6) * Math.max(0.4, m.confidence);
+      points.push([m.latitude, m.longitude, Math.min(1.0, Math.max(0.1, weight))]);
+    });
+
+    // 2. Add historical database detections if enabled
+    if (includeHistoricalDb && historicalHeatmapData.length > 0) {
+      historicalHeatmapData.forEach((h) => {
+        const matchesCat = categoryFilter === 'all' || h.category === categoryFilter;
+        const matchesSev = severityFilter === 'all' || h.severity === severityFilter;
+        if (matchesCat && matchesSev) {
+          const weight = h.intensity || (severityWeightMap[h.severity || 'high'] || 0.6);
+          points.push([h.latitude, h.longitude, Math.min(1.0, Math.max(0.1, weight))]);
+        }
+      });
+    }
+
+    return points;
+  }, [filteredMarkers, historicalHeatmapData, includeHistoricalDb, categoryFilter, severityFilter]);
 
   const getSeverityHexColor = (severity: SeverityLevel | string) => {
     switch (severity) {
@@ -372,17 +452,71 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     }
   }, [currentVehiclePosition?.lat, currentVehiclePosition?.lng]);
 
-  const handleCenterOnVehicle = () => {
-    if (currentVehiclePosition && mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([currentVehiclePosition.lat, currentVehiclePosition.lng], 16, { duration: 0.8 });
-    }
-  };
+  // 3. Render and Synchronize Heatmap Density Overlay Layer
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
 
-  // 3. Render and Update Pothole Markers when filteredMarkers changes
+    // Remove existing heatmap layer
+    if (heatLayerRef.current) {
+      map.removeLayer(heatLayerRef.current);
+      heatLayerRef.current = null;
+    }
+
+    // If heatmap layer is active and we have points
+    if (showHeatmap && consolidatedHeatmapPoints.length > 0) {
+      try {
+        const heatLayer = (L as any).heatLayer(consolidatedHeatmapPoints, {
+          radius: heatmapRadius,
+          blur: heatmapBlur,
+          maxZoom: 18,
+          max: 1.0,
+          minOpacity: 0.1,
+          gradient: {
+            0.15: '#10B981', // emerald green (low density)
+            0.35: '#06B6D4', // cyan / blue
+            0.55: '#FACC15', // vibrant yellow (medium density)
+            0.75: '#F97316', // orange (high density)
+            0.95: '#EF4444'  // red (critical hazard cluster)
+          }
+        });
+
+        heatLayer.addTo(map);
+
+        // Apply custom semi-transparent opacity to the canvas layer
+        if (heatLayer._canvas) {
+          heatLayer._canvas.style.opacity = String(heatmapOpacity);
+          heatLayer._canvas.style.transition = 'opacity 0.2s ease-in-out';
+        }
+
+        heatLayerRef.current = heatLayer;
+      } catch (err) {
+        console.error('Failed to create Leaflet HeatLayer:', err);
+      }
+    }
+
+    return () => {
+      if (heatLayerRef.current && mapInstanceRef.current) {
+        mapInstanceRef.current.removeLayer(heatLayerRef.current);
+        heatLayerRef.current = null;
+      }
+    };
+  }, [showHeatmap, consolidatedHeatmapPoints, heatmapOpacity, heatmapRadius, heatmapBlur]);
+
+  // Update canvas opacity dynamically when slider moves
+  useEffect(() => {
+    if (heatLayerRef.current?._canvas) {
+      heatLayerRef.current._canvas.style.opacity = String(heatmapOpacity);
+    }
+  }, [heatmapOpacity]);
+
+  // 4. Render and Update Pothole Markers when filteredMarkers or showMarkers changes
   useEffect(() => {
     if (!markersLayerRef.current || !mapInstanceRef.current) return;
 
     markersLayerRef.current.clearLayers();
+
+    if (!showMarkers) return;
 
     filteredMarkers.forEach((marker) => {
       const hexColor = getSeverityHexColor(marker.severity);
@@ -442,12 +576,24 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
 
       markersLayerRef.current?.addLayer(leafletMarker);
     });
-  }, [filteredMarkers, selectedMarker?.id]);
+  }, [filteredMarkers, selectedMarker?.id, showMarkers]);
+
+  const handleCenterOnVehicle = () => {
+    if (currentVehiclePosition && mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([currentVehiclePosition.lat, currentVehiclePosition.lng], 16, { duration: 0.8 });
+    }
+  };
 
   const handleCenterOnMarker = (marker: GPSDamageMarker) => {
     setSelectedMarker(marker);
     if (mapInstanceRef.current) {
       mapInstanceRef.current.flyTo([marker.latitude, marker.longitude], 17, { duration: 1.0 });
+    }
+  };
+
+  const handleCenterOnHotspot = (hotspot: HeatmapHotspot) => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo(hotspot.center, 16, { duration: 1.0 });
     }
   };
 
@@ -458,9 +604,23 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 text-indigo-400 font-bold uppercase tracking-wider">
             <Compass className="w-3.5 h-3.5" />
-            <span>Interactive GPS Pothole Map</span>
+            <span>Interactive GPS & Density Heatmap</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Compact Heatmap Layer Toggle */}
+            <button
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              className={`px-2 py-0.5 rounded text-[10px] flex items-center gap-1 font-bold transition-all border ${
+                showHeatmap 
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm' 
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title="Toggle Heatmap Density Layer"
+            >
+              <Flame className={`w-3 h-3 ${showHeatmap ? 'text-amber-400 fill-amber-400' : ''}`} />
+              <span>HEATMAP {showHeatmap ? 'ON' : 'OFF'}</span>
+            </button>
+
             {currentVehiclePosition && (
               <button
                 onClick={handleCenterOnVehicle}
@@ -472,7 +632,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
               </button>
             )}
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
-              {filteredMarkers.length} LIVE MARKERS
+              {consolidatedHeatmapPoints.length} HEATPOINTS
             </span>
           </div>
         </div>
@@ -522,86 +682,268 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
         <div>
           <div className="flex items-center space-x-2 text-[#2563EB] text-[10px] uppercase tracking-widest mb-0.5">
             <Globe className="w-3.5 h-3.5" />
-            <span>INTERACTIVE LEAFLET GIS ROAD DEFECT MAPPER</span>
+            <span>INTERACTIVE LEAFLET GIS ROAD DEFECT & HEATMAP MAPPER</span>
           </div>
-          <h2 className="text-base font-bold text-white uppercase">{video?.title || 'Active Corridor'} Spatial Map</h2>
+          <h2 className="text-base font-bold text-white uppercase">{video?.title || 'Active Corridor'} Spatial Heatmap</h2>
           <p className="text-[11px] text-[#888]">
-            Color-coded severity damage markers (Green, Yellow, Orange, Red) overlaid on Leaflet dark canvas with real-time GPS coordinate mapping.
+            Historical pothole density heatmap overlay with semi-transparent gradient blending, combined with geotagged discrete severity pins.
           </p>
         </div>
 
-        {/* Severity Legend Badges */}
-        <div className="flex flex-wrap items-center gap-2 text-[10px]">
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#34C759]/10 border border-[#34C759]/40 text-[#34C759]">
-            <span className="w-2 h-2 rounded-full bg-[#34C759]" />
-            <span className="font-bold">LOW</span>
+        {/* Heatmap & Severity Legend Badges */}
+        <div className="flex flex-wrap items-center gap-3 text-[10px]">
+          {/* Heatmap Density Legend Pill */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-[#333] rounded">
+            <Flame className="w-3.5 h-3.5 text-amber-400" />
+            <span className="text-[#AAA] font-bold">DENSITY:</span>
+            <div className="flex items-center gap-1">
+              <span className="w-2.5 h-2 bg-[#10B981] rounded-xs" title="Low Density" />
+              <span className="w-2.5 h-2 bg-[#06B6D4] rounded-xs" title="Moderate Density" />
+              <span className="w-2.5 h-2 bg-[#FACC15] rounded-xs" title="Medium Density" />
+              <span className="w-2.5 h-2 bg-[#F97316] rounded-xs" title="High Density" />
+              <span className="w-2.5 h-2 bg-[#EF4444] rounded-xs" title="Critical Cluster" />
+            </div>
+            <span className="text-[#888] text-[9px]">Low &rarr; Critical</span>
           </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#FFD60A]/10 border border-[#FFD60A]/40 text-[#FFD60A]">
-            <span className="w-2 h-2 rounded-full bg-[#FFD60A]" />
-            <span className="font-bold">MEDIUM</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#FF9500]/10 border border-[#FF9500]/40 text-[#FF9500]">
-            <span className="w-2 h-2 rounded-full bg-[#FF9500]" />
-            <span className="font-bold">HIGH</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#FF3B30]/10 border border-[#FF3B30]/40 text-[#FF3B30]">
-            <span className="w-2 h-2 rounded-full bg-[#FF3B30]" />
-            <span className="font-bold">CRITICAL</span>
+
+          {/* Severity Legend Badges */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 px-2 py-1 bg-[#34C759]/10 border border-[#34C759]/40 text-[#34C759]">
+              <span className="w-2 h-2 rounded-full bg-[#34C759]" />
+              <span className="font-bold">LOW</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1 bg-[#FFD60A]/10 border border-[#FFD60A]/40 text-[#FFD60A]">
+              <span className="w-2 h-2 rounded-full bg-[#FFD60A]" />
+              <span className="font-bold">MED</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1 bg-[#FF9500]/10 border border-[#FF9500]/40 text-[#FF9500]">
+              <span className="w-2 h-2 rounded-full bg-[#FF9500]" />
+              <span className="font-bold">HIGH</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-1 bg-[#FF3B30]/10 border border-[#FF3B30]/40 text-[#FF3B30]">
+              <span className="w-2 h-2 rounded-full bg-[#FF3B30]" />
+              <span className="font-bold">CRIT</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Map Control Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-[#111111] border border-[#2A2A2A] p-3 text-xs">
-        <div className="sm:col-span-5 flex items-center space-x-2">
-          <Filter className="w-4 h-4 text-[#2563EB]" />
-          <span className="text-[#888] uppercase font-bold">SEVERITY FILTER:</span>
-          <select
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
-            className="flex-1 bg-[#1A1A1A] border border-[#333] px-2.5 py-1.5 text-white focus:outline-none focus:border-[#2563EB]"
-          >
-            <option value="all">ALL SEVERITIES ({damageMarkers.length})</option>
-            <option value="critical">🔴 CRITICAL ONLY</option>
-            <option value="high">🟠 HIGH ONLY</option>
-            <option value="medium">🟡 MEDIUM ONLY</option>
-            <option value="low">🟢 LOW ONLY</option>
-          </select>
+      {/* Main Map Toolbar & Heatmap Layer Configuration Bar */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-[#111111] border border-[#2A2A2A] p-3 text-xs">
+          {/* Layer Toggles */}
+          <div className="sm:col-span-4 flex items-center space-x-2">
+            <button
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              className={`px-3 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+                showHeatmap
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm'
+                  : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
+              }`}
+            >
+              <Flame className={`w-3.5 h-3.5 ${showHeatmap ? 'fill-amber-400' : ''}`} />
+              <span>HEATMAP {showHeatmap ? 'ACTIVE' : 'OFF'}</span>
+            </button>
+
+            <button
+              onClick={() => setShowMarkers(!showMarkers)}
+              className={`px-3 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+                showMarkers
+                  ? 'bg-blue-500/20 text-blue-400 border-blue-500/50'
+                  : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>PINS {showMarkers ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button
+              onClick={() => setShowHeatmapSettings(!showHeatmapSettings)}
+              className={`p-1.5 border flex items-center justify-center transition-all ${
+                showHeatmapSettings
+                  ? 'bg-[#2563EB] text-white border-blue-400'
+                  : 'bg-[#1A1A1A] text-[#888] border-[#333] hover:text-white'
+              }`}
+              title="Heatmap visual tuning & opacity settings"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Severity & Category Filters */}
+          <div className="sm:col-span-3 flex items-center space-x-2">
+            <Filter className="w-4 h-4 text-[#2563EB]" />
+            <select
+              value={severityFilter}
+              onChange={(e) => setSeverityFilter(e.target.value)}
+              className="flex-1 bg-[#1A1A1A] border border-[#333] px-2.5 py-1.5 text-white focus:outline-none focus:border-[#2563EB]"
+            >
+              <option value="all">ALL SEVERITIES</option>
+              <option value="critical">🔴 CRITICAL ONLY</option>
+              <option value="high">🟠 HIGH ONLY</option>
+              <option value="medium">🟡 MEDIUM ONLY</option>
+              <option value="low">🟢 LOW ONLY</option>
+            </select>
+          </div>
+
+          <div className="sm:col-span-3 flex items-center space-x-2">
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="flex-1 bg-[#1A1A1A] border border-[#333] px-2.5 py-1.5 text-white focus:outline-none focus:border-[#2563EB]"
+            >
+              <option value="all">ALL CATEGORIES</option>
+              <option value="pothole">Potholes</option>
+              <option value="alligator_crack">Alligator Cracks</option>
+              <option value="longitudinal_crack">Longitudinal Cracks</option>
+              <option value="transverse_crack">Transverse Cracks</option>
+              <option value="broken_road">Broken Road</option>
+              <option value="missing_asphalt">Missing Asphalt</option>
+            </select>
+          </div>
+
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <button
+              onClick={() => {
+                if (mapInstanceRef.current) {
+                  const targetCoord: [number, number] = currentVehiclePosition 
+                    ? [currentVehiclePosition.lat, currentVehiclePosition.lng] 
+                    : (damageMarkers[0] ? [damageMarkers[0].latitude, damageMarkers[0].longitude] : [28.4635, 77.0305]);
+                  mapInstanceRef.current.flyTo(targetCoord, 15);
+                }
+              }}
+              className="w-full px-3 py-1.5 bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] text-white flex items-center justify-center space-x-1 font-bold"
+            >
+              <Crosshair className="w-3.5 h-3.5 text-[#2563EB]" />
+              <span>RECENTER</span>
+            </button>
+          </div>
         </div>
 
-        <div className="sm:col-span-5 flex items-center space-x-2">
-          <span className="text-[#888] uppercase font-bold">DAMAGE TYPE:</span>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="flex-1 bg-[#1A1A1A] border border-[#333] px-2.5 py-1.5 text-white focus:outline-none focus:border-[#2563EB]"
-          >
-            <option value="all">ALL CATEGORIES</option>
-            <option value="pothole">Potholes</option>
-            <option value="alligator_crack">Alligator Cracks</option>
-            <option value="longitudinal_crack">Longitudinal Cracks</option>
-            <option value="transverse_crack">Transverse Cracks</option>
-            <option value="broken_road">Broken Road</option>
-            <option value="missing_asphalt">Missing Asphalt</option>
-          </select>
-        </div>
+        {/* Collapsible Heatmap Visual Calibration Panel */}
+        {showHeatmapSettings && (
+          <div className="bg-[#141414] border border-[#333] p-4 text-xs space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between border-b border-[#2A2A2A] pb-2">
+              <div className="flex items-center gap-2 text-amber-400 font-bold uppercase tracking-wider">
+                <Flame className="w-4 h-4" />
+                <span>Heatmap Density & Semi-Transparent Layer Calibration</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadHistoricalHeatmap}
+                  disabled={isLoadingHeatmap}
+                  className="px-2.5 py-1 bg-[#222] hover:bg-[#333] border border-[#444] text-[#CCC] flex items-center gap-1.5 transition-all text-[11px]"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingHeatmap ? 'animate-spin text-amber-400' : ''}`} />
+                  <span>Sync DB</span>
+                </button>
+                <button
+                  onClick={() => setShowHeatmapSettings(false)}
+                  className="text-[#888] hover:text-white px-2 py-0.5 font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
 
-        <div className="sm:col-span-2 flex justify-end">
-          <button
-            onClick={() => {
-              if (mapInstanceRef.current) {
-                const targetCoord: [number, number] = currentVehiclePosition 
-                  ? [currentVehiclePosition.lat, currentVehiclePosition.lng] 
-                  : (damageMarkers[0] ? [damageMarkers[0].latitude, damageMarkers[0].longitude] : [28.4635, 77.0305]);
-                mapInstanceRef.current.flyTo(targetCoord, 15);
-              }
-            }}
-            className="w-full px-3 py-1.5 bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] text-white flex items-center justify-center space-x-1 font-bold"
-          >
-            <Crosshair className="w-3.5 h-3.5 text-[#2563EB]" />
-            <span>RESET VIEW</span>
-          </button>
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Semi-Transparent Layer Opacity Slider */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-[#888] uppercase font-bold">Layer Opacity:</span>
+                  <span className="text-amber-400 font-bold font-mono">{(heatmapOpacity * 100).toFixed(0)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.2"
+                  max="1.0"
+                  step="0.05"
+                  value={heatmapOpacity}
+                  onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-[#2A2A2A] rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+                <div className="flex justify-between text-[9px] text-[#666]">
+                  <span>20% (Subtle)</span>
+                  <span>65% (Balanced)</span>
+                  <span>100% (Solid)</span>
+                </div>
+              </div>
+
+              {/* Density Influence Radius Slider */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-[#888] uppercase font-bold">Density Radius:</span>
+                  <span className="text-amber-400 font-bold font-mono">{heatmapRadius}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="15"
+                  max="50"
+                  step="1"
+                  value={heatmapRadius}
+                  onChange={(e) => setHeatmapRadius(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-[#2A2A2A] rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+                <div className="flex justify-between text-[9px] text-[#666]">
+                  <span>15px (Pinpoint)</span>
+                  <span>28px (Corridor)</span>
+                  <span>50px (Macro)</span>
+                </div>
+              </div>
+
+              {/* Gaussian Blur Radius Slider */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-[#888] uppercase font-bold">Gradient Blur:</span>
+                  <span className="text-amber-400 font-bold font-mono">{heatmapBlur}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="35"
+                  step="1"
+                  value={heatmapBlur}
+                  onChange={(e) => setHeatmapBlur(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-[#2A2A2A] rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+                <div className="flex justify-between text-[9px] text-[#666]">
+                  <span>10px (Sharp)</span>
+                  <span>18px (Smooth)</span>
+                  <span>35px (Diffuse)</span>
+                </div>
+              </div>
+
+              {/* Historical Database Time Horizon */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-[#888] uppercase font-bold">Historical DB Horizon:</span>
+                  <span className="text-[#60A5FA] font-bold font-mono">{timeWindowDays} Days</span>
+                </div>
+                <select
+                  value={timeWindowDays}
+                  onChange={(e) => setTimeWindowDays(parseInt(e.target.value))}
+                  className="w-full bg-[#1A1A1A] border border-[#333] px-2 py-1 text-white focus:outline-none focus:border-[#2563EB]"
+                >
+                  <option value={7}>Last 7 Days (Recent Audits)</option>
+                  <option value={30}>Last 30 Days (Standard Month)</option>
+                  <option value={90}>Last 90 Days (Quarterly Density)</option>
+                  <option value={365}>Last 365 Days (Full Historical DB)</option>
+                </select>
+                <div className="flex items-center gap-2 mt-1">
+                  <label className="flex items-center gap-1.5 text-[10px] text-[#AAA] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeHistoricalDb}
+                      onChange={(e) => setIncludeHistoricalDb(e.target.checked)}
+                      className="rounded accent-blue-600"
+                    />
+                    <span>Include Global Database Records</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -612,9 +954,19 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
               <Compass className="w-4 h-4 text-[#2563EB]" />
               <span>Interactive Leaflet Map View</span>
             </h3>
-            <span className="text-[10px] text-[#34C759] bg-[#34C759]/10 border border-[#34C759]/30 px-2 py-0.5 font-bold">
-              {filteredMarkers.length} MARKERS RENDERED
-            </span>
+            <div className="flex items-center gap-2">
+              {showHeatmap && (
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 font-bold flex items-center gap-1">
+                  <Flame className="w-3 h-3 fill-amber-400" />
+                  <span>{consolidatedHeatmapPoints.length} HEATPOINTS ACTIVE</span>
+                </span>
+              )}
+              {showMarkers && (
+                <span className="text-[10px] text-[#34C759] bg-[#34C759]/10 border border-[#34C759]/30 px-2 py-0.5 font-bold">
+                  {filteredMarkers.length} PIN MARKERS
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Leaflet DOM Mounting Container */}
@@ -623,27 +975,70 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
             className="w-full h-96 bg-[#141414] border border-[#2A2A2A] relative z-0" 
           />
 
-          {/* Track telemetry bar */}
-          <div className="grid grid-cols-3 gap-2 text-[10px]">
+          {/* Track telemetry & Heatmap statistics bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px]">
             <div className="bg-[#141414] border border-[#222] p-2">
-              <span className="text-[#888]">GPS CENTER:</span>
-              <div className="text-white font-bold">
+              <span className="text-[#888] flex items-center gap-1">
+                <Navigation className="w-3 h-3 text-blue-400" />
+                <span>GPS CENTER:</span>
+              </span>
+              <div className="text-white font-bold truncate mt-0.5">
                 {currentVehiclePosition ? `${currentVehiclePosition.lat.toFixed(4)}° N, ${currentVehiclePosition.lng.toFixed(4)}° E` : '28.4635° N, 77.0305° E'}
               </div>
             </div>
             <div className="bg-[#141414] border border-[#222] p-2">
-              <span className="text-[#888]">ROAD CORRIDOR:</span>
-              <div className="text-[#FF9500] font-bold truncate">
-                {selectedMarker?.road_name || 'NH-48 Expressway'}
+              <span className="text-[#888] flex items-center gap-1">
+                <Flame className="w-3 h-3 text-amber-400" />
+                <span>DENSITY OVERLAY:</span>
+              </span>
+              <div className="text-[#FF9500] font-bold truncate mt-0.5">
+                {showHeatmap ? `${consolidatedHeatmapPoints.length} Heatpoints (${(heatmapOpacity * 100).toFixed(0)}% Opacity)` : 'Overlay Inactive'}
               </div>
             </div>
             <div className="bg-[#141414] border border-[#222] p-2">
-              <span className="text-[#888]">POTHOLES DETECTED:</span>
-              <div className="text-[#34C759] font-bold">
-                {filteredMarkers.length} GEOTAGGED
+              <span className="text-[#888] flex items-center gap-1">
+                <Database className="w-3 h-3 text-emerald-400" />
+                <span>HISTORICAL DATABASE:</span>
+              </span>
+              <div className="text-[#34C759] font-bold truncate mt-0.5">
+                {historicalHeatmapData.length} Records in Past {timeWindowDays}d
               </div>
             </div>
           </div>
+
+          {/* High-Density Hotspot Corridors Quick-Jump Bar */}
+          {hotspotsList.length > 0 && (
+            <div className="bg-[#111111] border border-[#2A2A2A] p-3 space-y-2 text-xs">
+              <div className="flex items-center justify-between text-[10px] text-[#888] uppercase font-bold">
+                <span className="flex items-center gap-1.5 text-amber-400">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>IDENTIFIED HIGH-DENSITY POTHOLE CORRIDORS & HOTSPOTS</span>
+                </span>
+                <span>Click corridor to jump</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {hotspotsList.map((spot, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleCenterOnHotspot(spot)}
+                    className="p-2.5 bg-[#161616] hover:bg-[#202020] border border-[#333] hover:border-amber-500/50 cursor-pointer transition-all flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="font-bold text-white text-[11px] truncate">{spot.corridor}</div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                        <span className="text-amber-400 font-bold">{spot.pothole_count} Potholes</span>
+                        <span>•</span>
+                        <span className="text-rose-400 font-bold">Hazard: {spot.hazard_index}</span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
+                      {spot.severity}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Selected Marker Details Inspector */}
@@ -775,4 +1170,5 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     </div>
   );
 };
+
 
