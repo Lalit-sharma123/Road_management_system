@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot } from '../types/inspection';
 import { heatmapService } from '../services/heatmapService';
-
+import { apiClient } from '../services/apiClient';
 
 export interface DynamicPotholeMarker {
   id?: string;
@@ -197,15 +197,64 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const [isLoadingHeatmap, setIsLoadingHeatmap] = useState<boolean>(false);
   const [historicalHeatmapData, setHistoricalHeatmapData] = useState<PotholeHeatmapPoint[]>([]);
   const [hotspotsList, setHotspotsList] = useState<HeatmapHotspot[]>([]);
+  const [dbPotholes, setDbPotholes] = useState<GPSDamageMarker[]>([]);
 
-  // Base road GPS track points
-  const gpsTracks: GPSPoint[] = video?.gps_tracks || [
-    { frame_number: 1, latitude: 28.4595, longitude: 77.0266, altitude_meters: 215.4, speed_kmh: 42.5, road_name: 'NH-48 Sector 14' },
-    { frame_number: 150, latitude: 28.4608, longitude: 77.0278, altitude_meters: 215.8, speed_kmh: 44.1, road_name: 'NH-48 Sector 14' },
-    { frame_number: 300, latitude: 28.4621, longitude: 77.0291, altitude_meters: 216.2, speed_kmh: 41.8, road_name: 'NH-48 Sector 14' },
-    { frame_number: 450, latitude: 28.4635, longitude: 77.0305, altitude_meters: 215.1, speed_kmh: 45.0, road_name: 'NH-48 Sector 14' },
-    { frame_number: 600, latitude: 28.4649, longitude: 77.0318, altitude_meters: 214.7, speed_kmh: 39.2, road_name: 'NH-48 Sector 14' }
-  ];
+  // Fetch real database recorded potholes from backend
+  const loadDatabasePotholes = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/driver/potholes?limit=100');
+      if (res.data?.potholes && Array.isArray(res.data.potholes) && res.data.potholes.length > 0) {
+        const loaded: GPSDamageMarker[] = res.data.potholes.map((p: any, idx: number) => ({
+          id: p.id || p.detection_id || `pot-db-${idx}`,
+          pothole_id: p.pothole_id || `POT-${idx + 100}`,
+          frame_number: p.frame_number || (idx * 30),
+          timestamp_sec: p.timestamp ? Math.round(new Date(p.timestamp).getTime() / 1000) % 3600 : idx * 2,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          category: (p.category as DamageCategory) || 'pothole',
+          severity: (p.severity as SeverityLevel) || 'high',
+          confidence: p.confidence ?? 0.90,
+          road_name: p.road_name || 'Active Road Corridor',
+          road_authority: p.road_authority || 'National Highway Authority',
+          image_url: p.image_url || p.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+          distance_meters: p.distance_meters,
+          lane_position: p.lane_position
+        }));
+        setDbPotholes(loaded);
+      }
+    } catch (err) {
+      console.debug('Database potholes load notice:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDatabasePotholes();
+  }, [loadDatabasePotholes]);
+
+  // Base road GPS track points derived from video or real database coordinates
+  const gpsTracks: GPSPoint[] = useMemo(() => {
+    if (video?.gps_tracks && video.gps_tracks.length > 0) {
+      return video.gps_tracks;
+    }
+    if (dbPotholes.length > 0) {
+      return dbPotholes.map((p, i) => ({
+        frame_number: p.frame_number,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        altitude_meters: 215.0 + (i * 0.2),
+        speed_kmh: 42.0,
+        road_name: p.road_name
+      }));
+    }
+    const centerLat = currentVehiclePosition?.lat || 28.4595;
+    const centerLng = currentVehiclePosition?.lng || 77.0266;
+    return [
+      { frame_number: 1, latitude: centerLat, longitude: centerLng, altitude_meters: 215.4, speed_kmh: 42.5, road_name: 'National Highway Corridor' },
+      { frame_number: 150, latitude: centerLat + 0.0013, longitude: centerLng + 0.0012, altitude_meters: 215.8, speed_kmh: 44.1, road_name: 'National Highway Corridor' },
+      { frame_number: 300, latitude: centerLat + 0.0026, longitude: centerLng + 0.0025, altitude_meters: 216.2, speed_kmh: 41.8, road_name: 'National Highway Corridor' },
+      { frame_number: 450, latitude: centerLat + 0.0040, longitude: centerLng + 0.0039, altitude_meters: 215.1, speed_kmh: 45.0, road_name: 'National Highway Corridor' }
+    ];
+  }, [video?.gps_tracks, dbPotholes, currentVehiclePosition]);
 
   // Fetch Historical Database Pothole Detections for Heatmap
   const loadHistoricalHeatmap = useCallback(async () => {
@@ -233,7 +282,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     loadHistoricalHeatmap();
   }, [loadHistoricalHeatmap]);
 
-  // Derive Geotagged Damage Markers dynamically from props or video frames
+  // Derive Geotagged Damage Markers dynamically from real props, video frames, or database
   const damageMarkers: GPSDamageMarker[] = useMemo(() => {
     if (potholeMarkers && potholeMarkers.length > 0) {
       return potholeMarkers.map((m, idx) => ({
@@ -265,12 +314,12 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
               pothole_id: `POT-${d.id.slice(-4)}`,
               frame_number: f.frame_number,
               timestamp_sec: f.timestamp_sec,
-              latitude: gpsPt ? gpsPt.latitude : 28.4635 + (Math.random() - 0.5) * 0.008,
-              longitude: gpsPt ? gpsPt.longitude : 77.0305 + (Math.random() - 0.5) * 0.008,
+              latitude: gpsPt ? gpsPt.latitude : (currentVehiclePosition?.lat || 28.4635),
+              longitude: gpsPt ? gpsPt.longitude : (currentVehiclePosition?.lng || 77.0305),
               category: d.category,
               severity: d.severity,
               confidence: d.confidence,
-              road_name: gpsPt?.road_name || 'NH-48 Corridor',
+              road_name: gpsPt?.road_name || 'Active Road Corridor',
               image_url: f.image_url
             });
           });
@@ -279,8 +328,12 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       if (extracted.length > 0) return extracted;
     }
 
+    if (dbPotholes.length > 0) {
+      return dbPotholes;
+    }
+
     return defaultStaticMarkers;
-  }, [potholeMarkers, video]);
+  }, [potholeMarkers, video, dbPotholes, currentVehiclePosition]);
 
   const [selectedMarker, setSelectedMarker] = useState<GPSDamageMarker>(damageMarkers[0] || defaultStaticMarkers[0]);
 

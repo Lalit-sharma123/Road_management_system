@@ -81,23 +81,22 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
     }).addTo(map);
 
     const gpsTracks = videoData.gps_tracks || [];
-    const routeCoords: [number, number][] = gpsTracks.length > 0 
-      ? gpsTracks.map(pt => [pt.latitude, pt.longitude])
-      : Array.from({ length: 15 }).map((_, i) => [28.4595 + (i * 0.00015), 77.0266 + (i * 0.00018)]);
+    const routeCoords: [number, number][] = gpsTracks.map(pt => [pt.latitude, pt.longitude]);
 
     if (routeCoords.length > 0) {
       L.polyline(routeCoords, { color: '#2563EB', weight: 4, opacity: 0.85 }).addTo(map);
       map.fitBounds(L.latLngBounds(routeCoords), { padding: [20, 20] });
     }
 
-    // Add defect markers
+    // Add defect markers using real GPS coordinates
     const frames = videoData.frames || [];
-    const detections = frames.flatMap(f => f.detections || []);
+    const detections = frames.flatMap(f => (f.detections || []).map(d => ({ ...d, frame_number: f.frame_number, timestamp_sec: f.timestamp_sec })));
 
-    detections.forEach((det, idx) => {
-      const lat = 28.4595 + (det.frame_number * 0.00012);
-      const lng = 77.0266 + (det.frame_number * 0.00014);
-      const color = det.category === 'pothole' ? '#FF3B30' : '#FF9500';
+    detections.forEach((det) => {
+      const matchingGps = gpsTracks.find(g => g.frame_number >= det.frame_number) || gpsTracks[0];
+      const lat = matchingGps ? matchingGps.latitude : (28.4595 + ((det.frame_number || 0) * 0.00005));
+      const lng = matchingGps ? matchingGps.longitude : (77.0266 + ((det.frame_number || 0) * 0.00005));
+      const color = det.category === 'pothole' ? '#FF3B30' : (det.severity === 'critical' ? '#FF3B30' : '#FF9500');
 
       const icon = L.divIcon({
         className: 'gps-marker',
@@ -127,20 +126,31 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
 
   const activeVideo = videoData || initialVideo;
   const analytics = activeVideo.analytics;
+  const allDetections = (activeVideo.frames || []).flatMap(f => f.detections || []);
 
-  // Chart Data preparation
+  // Chart Data preparation from real detection counts
+  const categoryCounts = allDetections.reduce((acc, d) => {
+    acc[d.category] = (acc[d.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const severityCounts = allDetections.reduce((acc, d) => {
+    acc[d.severity] = (acc[d.severity] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   const categoryData = [
-    { name: 'Potholes', count: analytics?.pothole_count ?? 4, color: '#FF3B30' },
-    { name: 'Cracks', count: analytics?.crack_count ?? 6, color: '#FF9500' },
-    { name: 'Broken Road', count: 2, color: '#FFD60A' },
-    { name: 'Missing Asphalt', count: 1, color: '#34C759' }
+    { name: 'Potholes', count: analytics?.pothole_count ?? categoryCounts.pothole ?? 0, color: '#FF3B30' },
+    { name: 'Cracks', count: analytics?.crack_count ?? ((categoryCounts.longitudinal_crack || 0) + (categoryCounts.transverse_crack || 0) + (categoryCounts.alligator_crack || 0)), color: '#FF9500' },
+    { name: 'Broken Road', count: categoryCounts.broken_road || 0, color: '#FFD60A' },
+    { name: 'Missing Asphalt', count: categoryCounts.missing_asphalt || 0, color: '#34C759' }
   ];
 
   const severityData = [
-    { name: 'Critical', value: analytics?.critical_count ?? 2, color: '#FF3B30' },
-    { name: 'High', value: 4, color: '#FF9500' },
-    { name: 'Medium', value: 5, color: '#FFD60A' },
-    { name: 'Low', value: 2, color: '#34C759' }
+    { name: 'Critical', value: analytics?.critical_count ?? severityCounts.critical ?? 0, color: '#FF3B30' },
+    { name: 'High', value: severityCounts.high || 0, color: '#FF9500' },
+    { name: 'Medium', value: severityCounts.medium || 0, color: '#FFD60A' },
+    { name: 'Low', value: severityCounts.low || 0, color: '#34C759' }
   ];
 
   return (
