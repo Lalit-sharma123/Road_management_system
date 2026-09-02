@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { InspectionVideo, UserRole } from '../types/inspection';
 import { videoService } from '../services/videoService';
+import { stolenVehicleService } from '../services/stolenVehicleService';
 import { stolenAlertAudio } from '../utils/stolenSoundAlert';
 
 interface VideoUploadAndProcessorProps {
@@ -63,6 +64,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
   const [wsLogs, setWsLogs] = useState<WebSocketMessage[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const alertedPlatesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return () => {
@@ -148,16 +150,19 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
           // Stolen vehicle alert during upload pipeline
           if ((wsData.type === 'stolen_alert' || wsData.type === 'stolen_vehicle_alert' || wsData.event === 'STOLEN_VEHICLE_DETECTED') && wsData.alert) {
             const alert = wsData.alert;
-            addLog('Running YOLO', 50, `🚨 CRITICAL ALERT: Stolen Vehicle Detected - Target Plate: ${alert.vehicle_number} (FIR: ${alert.fir_number || 'ACTIVE'})`);
-            try {
-              window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: alert }));
-              stolenAlertAudio.playAlarmSound();
-              stolenAlertAudio.triggerBrowserNotification(
-                alert.vehicle_number,
-                alert.camera_location || 'ANPR Camera',
-                alert.fir_number || 'Stolen Vehicle FIR'
-              );
-            } catch (e) {}
+            const normPlate = String(alert.vehicle_number || alert.ocr_text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const isFirstTime = normPlate && !alertedPlatesRef.current.has(normPlate);
+
+            // Record in persistent storage so Stolen Alerts center shows all details
+            stolenVehicleService.recordLiveAlert(alert).catch(() => {});
+
+            if (isFirstTime) {
+              alertedPlatesRef.current.add(normPlate);
+              addLog('Running YOLO', 50, `🚨 CRITICAL ALERT: Stolen Vehicle Detected - Target Plate: ${alert.vehicle_number} (FIR: ${alert.fir_number || 'ACTIVE'})`);
+              try {
+                window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: alert }));
+              } catch (e) {}
+            }
           }
         },
         () => {

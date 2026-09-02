@@ -536,6 +536,68 @@ export const stolenVehicleService = {
     return updatedAlert || alerts[0];
   },
 
+  async recordLiveAlert(alertData: Partial<StolenVehicleAlert> & { vehicle_number?: string }): Promise<StolenVehicleAlert> {
+    const rawPlate = alertData.vehicle_number || alertData.ocr_text || '';
+    const cleanPlate = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const alerts = getStoredAlerts();
+    const nowIso = new Date().toISOString();
+
+    const existingIdx = alerts.findIndex(a => {
+      const aPlate = (a.vehicle_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return (alertData.id && a.id === alertData.id) || (cleanPlate && aPlate === cleanPlate);
+    });
+
+    let updatedOrCreatedAlert: StolenVehicleAlert;
+
+    if (existingIdx >= 0) {
+      const prev = alerts[existingIdx];
+      const newCount = Math.max(prev.detection_count || 1, (alertData.detection_count || 1));
+      updatedOrCreatedAlert = {
+        ...prev,
+        ...alertData,
+        id: prev.id,
+        detection_count: newCount,
+        last_detected_at: alertData.last_detected_at || nowIso,
+        confidence: Math.max(prev.confidence || 0, alertData.confidence || 0),
+        remarks: alertData.remarks || prev.remarks,
+        updated_at: nowIso
+      };
+      alerts[existingIdx] = updatedOrCreatedAlert;
+    } else {
+      updatedOrCreatedAlert = {
+        id: alertData.id || `sta-${Date.now()}`,
+        stolen_vehicle_id: alertData.stolen_vehicle_id,
+        vehicle_number: alertData.vehicle_number || rawPlate || 'UNKNOWN',
+        owner_name: alertData.owner_name || 'Registered Owner on File',
+        fir_number: alertData.fir_number || 'POLICE-FIR-ACTIVE',
+        camera_id: alertData.camera_id || 'CAM-01',
+        camera_name: alertData.camera_name || 'Surveillance ANPR Camera',
+        camera_location: alertData.camera_location || 'City Surveillance Corridor',
+        latitude: alertData.latitude || 28.4595,
+        longitude: alertData.longitude || 77.0266,
+        timestamp: alertData.timestamp || nowIso,
+        first_detected_at: alertData.first_detected_at || alertData.timestamp || nowIso,
+        last_detected_at: alertData.last_detected_at || nowIso,
+        vehicle_snapshot_url: alertData.vehicle_snapshot_url || '/processed/violations/sample_vehicle.jpg',
+        plate_crop_url: alertData.plate_crop_url || '/processed/violations/sample_plate.jpg',
+        ocr_text: alertData.ocr_text || alertData.vehicle_number || rawPlate,
+        confidence: alertData.confidence || 0.95,
+        status: alertData.status || 'ACTIVE',
+        source: alertData.source || 'video',
+        video_id: alertData.video_id,
+        session_id: alertData.session_id,
+        detection_count: alertData.detection_count || 1,
+        remarks: alertData.remarks || `Stolen vehicle detected: ${alertData.vehicle_number || rawPlate}`,
+        created_at: alertData.created_at || nowIso,
+        updated_at: nowIso
+      };
+      alerts.unshift(updatedOrCreatedAlert);
+    }
+
+    saveStoredAlerts(alerts);
+    return updatedOrCreatedAlert;
+  },
+
   getExportCsvUrl(status?: string): string {
     return `/api/v1/stolen-alerts/export/csv${status ? `?status=${encodeURIComponent(status)}` : ''}`;
   },

@@ -47,6 +47,7 @@ export interface StolenVehicleAlert {
   plate_crop_path?: string | null;
   ocr_text: string;
   confidence: number;
+  source?: string | null;
   video_id?: string | null;
   session_id?: string | null;
   stream_id?: string | null;

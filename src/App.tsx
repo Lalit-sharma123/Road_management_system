@@ -169,52 +169,43 @@ export default function App() {
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: any = null;
-    const recentAlertsMap = new Map<string, number>();
+    const alertedPlatesSet = new Set<string>();
     const seenAlertIds = new Set<string>();
 
     const handleStolenAlertData = (alert: any) => {
       if (!alert) return;
+
+      // Always save or update alert details in local/live storage for Stolen Alerts view
+      stolenVehicleService.recordLiveAlert(alert).catch(() => {});
+
+      // If backend explicitly marked this as continuous update (not new event), skip popup/alarm
       if (alert.is_new_event === false) return;
 
-      // Event/Alert IDempotency check: if this specific encounter ID was already alarmed, skip
+      const rawPlate = alert.vehicle_number || alert.plate_number || alert.ocr_text || '';
+      const normPlate = String(rawPlate).toUpperCase().replace(/[^A-Z0-9]/g, '');
       const alertId = alert.id || alert.alert_id || alert.event_id;
+
+      // Deduplicate: ONLY alert ONE TIME for the same vehicle plate
+      if (normPlate && alertedPlatesSet.has(normPlate)) {
+        return;
+      }
       if (alertId && seenAlertIds.has(alertId)) {
         return;
       }
 
-      const alertKey = `${alert.vehicle_number || alert.plate_number || 'UNKNOWN'}_${alert.id || alert.session_id || ''}`;
-      const now = Date.now();
-      const lastTriggered = recentAlertsMap.get(alertKey);
-
-      // Secondary safety debouncing window per vehicle/session
-      if (lastTriggered && now - lastTriggered < 4000) {
-        return;
-      }
-      recentAlertsMap.set(alertKey, now);
-      if (alertId) {
-        seenAlertIds.add(alertId);
-      }
-
-      // Clean up maps periodically
-      for (const [k, ts] of recentAlertsMap.entries()) {
-        if (now - ts > 60000) {
-          recentAlertsMap.delete(k);
-        }
-      }
-      if (seenAlertIds.size > 500) {
-        seenAlertIds.clear();
-      }
+      if (normPlate) alertedPlatesSet.add(normPlate);
+      if (alertId) seenAlertIds.add(alertId);
 
       setActiveStolenAlert(alert);
       stolenAlertAudio.playAlarmSound();
       stolenAlertAudio.triggerBrowserNotification(
-        alert.vehicle_number,
+        alert.vehicle_number || rawPlate,
         alert.camera_location || 'City ANPR Camera',
         alert.fir_number || 'Stolen Vehicle FIR'
       );
       showToast(
         '🚨 STOLEN VEHICLE DETECTED',
-        `Target Plate: ${alert.vehicle_number} at ${alert.camera_location || 'ANPR Highway'} (FIR: ${alert.fir_number || 'ACTIVE'})`,
+        `Target Plate: ${alert.vehicle_number || rawPlate} at ${alert.camera_location || 'ANPR Highway'} (FIR: ${alert.fir_number || 'ACTIVE'})`,
         'warning'
       );
     };

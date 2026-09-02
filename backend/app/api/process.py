@@ -730,7 +730,7 @@ async def execute_video_processing_task(
                 "helmet_violations_count": helmet_violations_count,
                 "latest_violations": violations_list[-5:],
                 "violations": violations_list,
-                "stolen_vehicle_detected": len(frame_stolen_alerts) > 0,
+                "stolen_vehicle_detected": any(bool(st.get("is_new_event", False)) for st in frame_stolen_alerts),
                 "stolen_alerts": frame_stolen_alerts,
                 "stolen_count": stolen_vehicle_count,
                 "latest_stolen_alerts": stolen_alerts_list[-5:]

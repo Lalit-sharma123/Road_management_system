@@ -650,15 +650,20 @@ class StolenVehicleService:
                 except Exception as dbe:
                     logger.warning(f"Note on encounter re-hydration: {dbe}")
 
-            # Check if encounter is active (continuous detection during same pass)
-            if existing_encounter and (now_sec - existing_encounter["last_seen"]) < cooldown_sec:
-                # 🔄 CONTINUOUS ENCOUNTER: Increment counter and update timestamps
+            # Check if encounter is active or was already alerted in this session/scope
+            is_same_session_encounter = existing_encounter is not None
+            if not is_same_session_encounter and norm_plate in cls._cooldown_tracker:
+                if (now_sec - cls._cooldown_tracker[norm_plate]) < 3600:
+                    is_same_session_encounter = True
+
+            if is_same_session_encounter and existing_encounter:
+                # 🔄 CONTINUOUS ENCOUNTER: Increment counter and update timestamps without triggering new alarms/popups
                 existing_encounter["last_seen"] = now_sec
                 existing_encounter["detection_count"] += 1
                 existing_encounter["last_detected_at"] = now_dt
                 if frame_number is not None:
                     existing_encounter["last_frame"] = frame_number
-                if ocr_confidence > existing_encounter["highest_conf"]:
+                if ocr_confidence > existing_encounter.get("highest_conf", 0.0):
                     existing_encounter["highest_conf"] = float(ocr_confidence)
 
                 cur_alert_id = existing_encounter["alert_id"]
@@ -699,7 +704,7 @@ class StolenVehicleService:
                                         last_frame_number=frame_number,
                                         tracking_id=tracking_id,
                                         status="ACTIVE",
-                                        remarks=f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')})."
+                                        remarks=f"MATCH: Plate '{plate_str}' matches Stolen Vehicle Registry ({stolen_record.get('fir_number')}). (Detected across {updated_count} frames)"
                                     )
                                     u_session.add(alert_db)
                                     await u_session.commit()
@@ -724,7 +729,7 @@ class StolenVehicleService:
 
                 await _update_db_alert()
 
-                # Return updated event info without firing new alarms/popups
+                # Return updated event info with is_new_event=False so client does NOT fire alarm sounds/popups
                 disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
                 return {
                     "id": cur_alert_id,
@@ -879,6 +884,9 @@ class StolenVehicleService:
                 "persisted_in_db": persisted,
                 "alert_dict": alert_dict
             }
+            cls._cooldown_tracker[norm_plate] = now_sec
+            cls._cooldown_tracker[f"{scope_key}_{norm_plate}"] = now_sec
+            cls._active_encounters.setdefault("global", {})[norm_plate] = scope_encounters[norm_plate]
 
             # 3. Dispatch multi-channel notifications (WebSocket, Sound, Browser, SMS/WhatsApp)
             try:

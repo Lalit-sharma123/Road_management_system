@@ -38,6 +38,7 @@ import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
 import { videoService } from '../services/videoService';
 import { apiClient } from '../services/apiClient';
+import { stolenVehicleService } from '../services/stolenVehicleService';
 import { DetectionSvgOverlay, OverlayDetection } from './DetectionSvgOverlay';
 import { stolenAlertAudio } from '../utils/stolenSoundAlert';
 
@@ -115,6 +116,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [liveStolenAlerts, setLiveStolenAlerts] = useState<any[]>([]);
   const [latestStolenAlert, setLatestStolenAlert] = useState<any | null>(null);
   const [isAlertBannerDismissed, setIsAlertBannerDismissed] = useState<boolean>(false);
+  const alertedStolenPlatesRef = useRef<Set<string>>(new Set());
 
   const [activeSideTab, setActiveSideTab] = useState<'counters' | 'violations' | 'stolen' | 'map'>('counters');
 
@@ -196,6 +198,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     setActiveStage('Initializing Models');
     routePointsRef.current = [];
     frameTimesRef.current = [];
+    alertedStolenPlatesRef.current.clear();
 
     if (damageLayerGroupRef.current) {
       damageLayerGroupRef.current.clearLayers();
@@ -751,8 +754,20 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 is_new_event: isNew,
                 remarks: st.remarks || `Stolen vehicle detected: ${st.vehicle_number}`
               };
-              setLatestStolenAlert(stAlert);
-              setIsAlertBannerDismissed(false);
+              const normStolenPlate = String(stAlert.vehicle_number || stAlert.ocr_text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+              const isFirstTimePlate = normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate);
+
+              // Record in local persistent storage so Stolen Alerts center has all details
+              stolenVehicleService.recordLiveAlert(stAlert).catch(() => {});
+
+              if (isNew && isFirstTimePlate) {
+                alertedStolenPlatesRef.current.add(normStolenPlate);
+                setLatestStolenAlert(stAlert);
+                setIsAlertBannerDismissed(false);
+              } else if (!latestStolenAlert) {
+                setLatestStolenAlert(stAlert);
+              }
+
               setLiveStolenAlerts((prev) => {
                 const idx = prev.findIndex((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
                 if (idx >= 0) {
@@ -768,10 +783,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 }
                 return [stAlert, ...prev];
               });
-              if (isNew) {
+
+              if (isNew && isFirstTimePlate) {
                 try {
                   window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
-                  stolenAlertAudio.playAlarmSound();
                 } catch (e) {}
               }
             }
@@ -834,8 +849,20 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               remarks: rawAlert.remarks || rawAlert.message || `Stolen vehicle detected: ${rawAlert.vehicle_number}`
             };
 
-            setLatestStolenAlert(stAlert);
-            setIsAlertBannerDismissed(false);
+            const normStolenPlate = String(stAlert.vehicle_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const isFirstTimePlate = normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate);
+
+            // Record in local persistent storage so Stolen Alerts center has all details
+            stolenVehicleService.recordLiveAlert(stAlert).catch(() => {});
+
+            if (isNew && isFirstTimePlate) {
+              alertedStolenPlatesRef.current.add(normStolenPlate);
+              setLatestStolenAlert(stAlert);
+              setIsAlertBannerDismissed(false);
+            } else if (!latestStolenAlert) {
+              setLatestStolenAlert(stAlert);
+            }
+
             setLiveStolenAlerts((prev) => {
               const idx = prev.findIndex((item) => item.id === stAlert.id || item.vehicle_number === stAlert.vehicle_number);
               if (idx >= 0) {
@@ -852,15 +879,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               return [stAlert, ...prev];
             });
 
-            if (isNew) {
+            if (isNew && isFirstTimePlate) {
               try {
                 window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: stAlert }));
-                stolenAlertAudio.playAlarmSound();
-                stolenAlertAudio.triggerBrowserNotification(
-                  stAlert.vehicle_number,
-                  stAlert.camera_location || 'ANPR Camera',
-                  stAlert.fir_number || 'Stolen Vehicle FIR'
-                );
               } catch (e) {}
             }
           }
