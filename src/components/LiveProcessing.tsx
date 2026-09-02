@@ -1251,7 +1251,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               </button>
 
               <button
-                onClick={() => onNavigate('stolen')}
+                onClick={() => onNavigate('stolen_alerts')}
                 className="px-3 py-2 bg-black/40 hover:bg-black text-xs font-bold uppercase text-red-200 border border-red-500/30 flex items-center gap-1 transition"
               >
                 <span>Alerts Hub</span>
@@ -1810,7 +1810,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   <span>Stolen Intercept Stream ({liveStolenAlerts.length})</span>
                 </div>
                 <button
-                  onClick={() => onNavigate('stolen')}
+                  onClick={() => onNavigate('stolen_alerts')}
                   className="text-[10px] font-mono text-[#60A5FA] hover:underline"
                 >
                   Registry & Logs →
