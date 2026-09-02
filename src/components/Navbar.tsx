@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldAlert, 
   AlertOctagon,
@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { UserRole, DetectionModel } from '../types/inspection';
 import { authService, UserProfile } from '../services/authService';
+import { stolenVehicleService } from '../services/stolenVehicleService';
+import { violationService } from '../services/violationService';
 
 interface NavbarProps {
   activeTab: string;
@@ -58,6 +60,31 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isAdmin = currentRole === 'admin';
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  
+  // Real-time Badge Counts
+  const [stolenAlertCount, setStolenAlertCount] = useState<number>(3);
+  const [violationCount, setViolationCount] = useState<number>(4);
+
+  useEffect(() => {
+    const fetchBadgeCounts = async () => {
+      try {
+        const [stolenStats, violStats] = await Promise.allSettled([
+          stolenVehicleService.getStats(),
+          violationService.getViolationStats()
+        ]);
+        if (stolenStats.status === 'fulfilled' && stolenStats.value) {
+          setStolenAlertCount(stolenStats.value.active_alerts ?? 0);
+        }
+        if (violStats.status === 'fulfilled' && violStats.value) {
+          setViolationCount(violStats.value.total_violations ?? 0);
+        }
+      } catch (e) {}
+    };
+
+    fetchBadgeCounts();
+    const interval = setInterval(fetchBadgeCounts, 6000);
+    return () => clearInterval(interval);
+  }, []);
   
   // Auth Form State
   const [username, setUsername] = useState('');
@@ -286,6 +313,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#FF3B30]' : isForbidden ? 'text-[#444]' : 'text-[#666]'}`} />
                 <span>{item.label}</span>
+                {item.id === 'stolen_alerts' && stolenAlertCount > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.2 bg-red-600/90 text-white font-black rounded-full border border-red-400 animate-pulse">
+                    {stolenAlertCount}
+                  </span>
+                )}
+                {item.id === 'violations' && violationCount > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.2 bg-amber-600/90 text-white font-bold rounded-full border border-amber-400">
+                    {violationCount}
+                  </span>
+                )}
                 {item.adminOnly && (
                   <span className="text-[8px] bg-[#A855F7]/20 text-[#A855F7] border border-[#A855F7]/40 px-1 font-bold">
                     ADMIN
