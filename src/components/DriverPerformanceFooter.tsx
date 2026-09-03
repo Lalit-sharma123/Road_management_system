@@ -318,6 +318,11 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
           </div>
         </div>
 
+        {/* Real-time D3 Pothole Detection Frequency Graph (Last 10 Min) */}
+        <div className="mt-4 pt-3 border-t border-slate-800/80">
+          <DriverPotholeFrequencyGraph />
+        </div>
+
         {/* Expandable Deep Pipeline Stage Breakdown & Sparkline Diagnostics */}
         {isExpanded && (
           <div className="mt-4 pt-4 border-t border-slate-800/80 animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
