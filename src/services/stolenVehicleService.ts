@@ -300,13 +300,13 @@ export const stolenVehicleService = {
     let list = getStoredVehicles();
 
     if (params?.status && params.status !== 'ALL') {
-      list = list.filter(v => v.status.toUpperCase() === params.status?.toUpperCase());
+      list = list.filter(v => (v.status || '').toUpperCase() === (params.status || '').toUpperCase());
     }
     if (params?.priority && params.priority !== 'ALL') {
-      list = list.filter(v => v.priority.toUpperCase() === params.priority?.toUpperCase());
+      list = list.filter(v => (v.priority || '').toUpperCase() === (params.priority || '').toUpperCase());
     }
     if (params?.vehicle_type && params.vehicle_type !== 'ALL') {
-      list = list.filter(v => v.vehicle_type.toUpperCase() === params.vehicle_type?.toUpperCase());
+      list = list.filter(v => (v.vehicle_type || '').toUpperCase() === (params.vehicle_type || '').toUpperCase());
     }
     if (params?.search && params.search.trim()) {
       const q = params.search.trim().toLowerCase();
@@ -447,7 +447,7 @@ export const stolenVehicleService = {
       list = list.filter(a => a.session_id === params.session_id);
     }
     if (params?.status && params.status !== 'ALL') {
-      list = list.filter(a => a.status.toUpperCase() === params.status?.toUpperCase());
+      list = list.filter(a => (a.status || '').toUpperCase() === (params.status || '').toUpperCase());
     }
     if (params?.camera_id && params.camera_id !== 'ALL') {
       list = list.filter(a => a.camera_id === params.camera_id);
@@ -603,9 +603,9 @@ export const stolenVehicleService = {
   },
 
   async simulateDetection(plateNumber: string = 'HR26DQ5519'): Promise<{ status: string; alert?: StolenVehicleAlert; message: string }> {
-    const cleanPlate = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const cleanPlate = String(plateNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const vehicles = getStoredVehicles();
-    const matched = vehicles.find(v => v.vehicle_number.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanPlate);
+    const matched = vehicles.find(v => (v.vehicle_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanPlate);
     const nowIso = new Date().toISOString();
 
     const newAlert: StolenVehicleAlert = {

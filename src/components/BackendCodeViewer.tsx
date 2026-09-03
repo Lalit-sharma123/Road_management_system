@@ -99,8 +99,8 @@ export const BackendCodeViewer: React.FC = () => {
           </div>
 
           <div className="bg-[#141414] p-2.5 border-t border-[#2A2A2A] text-[10px] text-[#666] flex justify-between">
-            <span>FILE TYPE: {selectedFile.language.toUpperCase()}</span>
-            <span>TOTAL LINES: {selectedFile.content.split('\n').length}</span>
+            <span>FILE TYPE: {String(selectedFile?.language || 'TEXT').toUpperCase()}</span>
+            <span>TOTAL LINES: {selectedFile?.content ? selectedFile.content.split('\n').length : 0}</span>
           </div>
         </div>
       </div>

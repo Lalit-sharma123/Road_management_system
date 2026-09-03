@@ -137,7 +137,7 @@ STATISTICS:
 - Inspection Distance: 1.45 KM
 - Average YOLO Confidence: 88.4%
 
-AI SUMMARY (${selectedModel.toUpperCase()}):
+AI SUMMARY (${(selectedModel || 'llama3.1').toUpperCase()}):
 Inspection analysis completed by local GPU model. Road section exhibits critical structural distress with 4 potholes and 6 alligator cracks detected. Immediate asphalt patching recommended for critical frame zones within 48 hours to prevent highway sub-base deterioration.
 
 RECOMMENDATIONS:
@@ -361,13 +361,13 @@ Date Signed: ${inspectionDate}
               <span>6. Local Ollama AI Executive Structural Assessment</span>
             </h3>
             <span className="text-[10px] text-[#34C759] bg-[#34C759]/10 border border-[#34C759]/30 px-2 py-0.5 font-bold">
-              MODEL: {selectedModel.toUpperCase()} (GPU INFERENCE)
+              MODEL: {(selectedModel || 'llama3.1').toUpperCase()} (GPU INFERENCE)
             </span>
           </div>
 
           <div className="bg-[#141414] border border-[#2A2A2A] p-4 text-xs text-slate-200 font-mono leading-relaxed space-y-2">
             <p>
-              Automated computer vision analysis performed by {selectedModel.toUpperCase()} local neural model. The inspected highway section ({roadName}) exhibits localized structural distress characterized by 2 critical potholes, 3 high-severity alligator cracking patterns, and 1 longitudinal seam fracture.
+              Automated computer vision analysis performed by {(selectedModel || 'llama3.1').toUpperCase()} local neural model. The inspected highway section ({roadName}) exhibits localized structural distress characterized by 2 critical potholes, 3 high-severity alligator cracking patterns, and 1 longitudinal seam fracture.
             </p>
             <p className="text-[#FF9500]">
               <b>Primary Sub-base Risk:</b> Moisture penetration through unsealed longitudinal cracks at Frame 280 threatens asphalt binder adhesion, posing high risk of sub-grade erosion during heavy rain events.

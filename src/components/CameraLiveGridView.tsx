@@ -240,7 +240,7 @@ const CameraStreamCard: React.FC<{
             LIVE
           </span>
           <span className="px-2 py-1 rounded text-[11px] font-semibold bg-slate-900/80 text-slate-200 border border-slate-700/80 backdrop-blur-md">
-            {camera.camera_type.toUpperCase()}
+            {(camera.camera_type || 'ANPR').toUpperCase()}
           </span>
           {wsConnected ? (
             <span className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 backdrop-blur-md">
@@ -454,7 +454,7 @@ export const CameraLiveGridView: React.FC<CameraLiveGridViewProps> = ({
               <div className="flex items-center gap-3">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
                 <h3 className="font-bold text-white text-base">{fullscreenCamera.camera_name}</h3>
-                <span className="text-xs text-slate-400 font-mono">[{fullscreenCamera.camera_type.toUpperCase()}]</span>
+                <span className="text-xs text-slate-400 font-mono">[{(fullscreenCamera.camera_type || 'ANPR').toUpperCase()}]</span>
               </div>
               <button
                 onClick={() => setFullscreenCamera(null)}

@@ -152,7 +152,7 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status.toUpperCase()) {
+    switch (String(status || '').toUpperCase()) {
       case 'ACTIVE':
         return (
           <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-red-500/20 text-red-400 border border-red-500/40 flex items-center gap-1.5 w-fit">

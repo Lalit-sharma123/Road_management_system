@@ -18,50 +18,10 @@ import {
   BarChart2,
   SlidersHorizontal
 } from 'lucide-react';
+import { HardwareTelemetryData, AdaptiveFrameSkipTelemetry, StageBreakdownMs } from '../types/inspection';
+import { DriverPotholeFrequencyGraph } from './DriverPotholeFrequencyGraph';
 
-export interface AdaptiveFrameSkipTelemetry {
-  mode: string;
-  current_frame_skip: number;
-  base_frame_skip: number;
-  min_frame_skip: number;
-  max_frame_skip: number;
-  effective_inference_fps: number;
-  target_stream_fps: number;
-  pressure_score: number;
-  load_status: string;
-  adaptation_reason: string;
-  cpu_utilization_pct: number;
-  gpu_utilization_pct: number;
-  gpu_memory_allocated_mb: number;
-  avg_inference_latency_ms: number;
-  traffic_density_objects: number;
-  is_active: boolean;
-}
-
-export interface HardwareTelemetryData {
-  is_cuda: boolean;
-  device_name: string;
-  gpu_allocated_mb: number;
-  gpu_reserved_mb: number;
-  gpu_total_mb: number;
-  gpu_utilization_pct: number;
-  fps: number;
-  total_frames_processed: number;
-  avg_latency_ms: number;
-  min_latency_ms: number;
-  max_latency_ms: number;
-  dropped_frames: number;
-  latency_history: number[];
-  pipeline_status: 'optimal' | 'moderate' | 'degraded';
-  adaptive_frame_skip?: AdaptiveFrameSkipTelemetry;
-}
-
-export interface StageBreakdownMs {
-  yolo_inference: number;
-  distance_projection: number;
-  hazard_tracking: number;
-  hud_rendering: number;
-}
+export type { HardwareTelemetryData, AdaptiveFrameSkipTelemetry, StageBreakdownMs };
 
 interface DriverPerformanceFooterProps {
   currentFps?: number;
@@ -100,13 +60,44 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
 
   // Derived telemetry metrics
   const activeTelemetry: HardwareTelemetryData = useMemo(() => {
-    if (hardwareTelemetry) return hardwareTelemetry;
+    const defaultHistory = localHistory && localHistory.length > 0 ? localHistory : [11.2, 10.9, 11.5, 11.1, 10.8, 11.4, 11.0, 11.2];
+    
+    if (hardwareTelemetry) {
+      const history = Array.isArray(hardwareTelemetry.latency_history) && hardwareTelemetry.latency_history.length > 0
+        ? hardwareTelemetry.latency_history
+        : defaultHistory;
+      
+      const avg = Number(hardwareTelemetry.avg_latency_ms || (history.length > 0 ? +(history.reduce((a, b) => a + b, 0) / history.length).toFixed(1) : currentLatencyMs || 11.4));
+      const min = Number(hardwareTelemetry.min_latency_ms || (history.length > 0 ? Math.min(...history) : avg));
+      const max = Number(hardwareTelemetry.max_latency_ms || (history.length > 0 ? Math.max(...history) : avg));
+      const gpuAllocated = Number(hardwareTelemetry.gpu_allocated_mb || hardwareTelemetry.memory_used_mb || 1824.5);
+      const gpuTotal = Number(hardwareTelemetry.gpu_total_mb || hardwareTelemetry.memory_total_mb || 8192.0);
+      const gpuUtil = Number(hardwareTelemetry.gpu_utilization_pct ?? hardwareTelemetry.gpu_percent ?? 22.8);
 
-    const avg = localHistory.length > 0
-      ? +(localHistory.reduce((a, b) => a + b, 0) / localHistory.length).toFixed(1)
-      : currentLatencyMs;
-    const min = localHistory.length > 0 ? Math.min(...localHistory) : currentLatencyMs;
-    const max = localHistory.length > 0 ? Math.max(...localHistory) : currentLatencyMs;
+      return {
+        is_cuda: hardwareTelemetry.is_cuda ?? true,
+        device_name: hardwareTelemetry.device_name || 'NVIDIA TensorRT / CUDA 12.4 Acceleration',
+        gpu_allocated_mb: gpuAllocated,
+        gpu_reserved_mb: hardwareTelemetry.gpu_reserved_mb || 2450.0,
+        gpu_total_mb: gpuTotal,
+        gpu_utilization_pct: gpuUtil,
+        fps: Number(hardwareTelemetry.fps || currentFps || 30.0),
+        total_frames_processed: Number(hardwareTelemetry.total_frames_processed || localFrameCount),
+        avg_latency_ms: avg,
+        min_latency_ms: min,
+        max_latency_ms: max,
+        dropped_frames: hardwareTelemetry.dropped_frames || 0,
+        latency_history: history,
+        pipeline_status: hardwareTelemetry.pipeline_status || (avg < 20 ? 'optimal' : avg < 35 ? 'moderate' : 'degraded'),
+        adaptive_frame_skip: hardwareTelemetry.adaptive_frame_skip
+      };
+    }
+
+    const avg = defaultHistory.length > 0
+      ? +(defaultHistory.reduce((a, b) => a + b, 0) / defaultHistory.length).toFixed(1)
+      : (currentLatencyMs || 11.4);
+    const min = defaultHistory.length > 0 ? Math.min(...defaultHistory) : avg;
+    const max = defaultHistory.length > 0 ? Math.max(...defaultHistory) : avg;
 
     return {
       is_cuda: true,
@@ -115,27 +106,35 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
       gpu_reserved_mb: 2450.0,
       gpu_total_mb: 8192.0,
       gpu_utilization_pct: 22.8,
-      fps: currentFps || 87.7,
+      fps: currentFps || 30.0,
       total_frames_processed: localFrameCount,
       avg_latency_ms: avg,
       min_latency_ms: min,
       max_latency_ms: max,
       dropped_frames: 0,
-      latency_history: localHistory,
+      latency_history: defaultHistory,
       pipeline_status: avg < 20 ? 'optimal' : avg < 35 ? 'moderate' : 'degraded'
     };
   }, [hardwareTelemetry, localHistory, currentLatencyMs, currentFps, localFrameCount]);
 
-  const activeStages: StageBreakdownMs = useMemo(() => {
-    if (stageBreakdown) return stageBreakdown;
-    const total = currentLatencyMs || 11.4;
+  const activeStages: { yolo_inference: number; distance_projection: number; hazard_tracking: number; hud_rendering: number } = useMemo(() => {
+    const total = currentLatencyMs || activeTelemetry.avg_latency_ms || 11.4;
+    if (stageBreakdown) {
+      const anyStage = stageBreakdown as any;
+      return {
+        yolo_inference: Number(stageBreakdown.yolo_inference ?? anyStage.yolo_inference ?? (total * 0.54)),
+        distance_projection: Number(stageBreakdown.distance_projection ?? anyStage.distance_depth ?? (total * 0.18)),
+        hazard_tracking: Number(stageBreakdown.hazard_tracking ?? anyStage.preprocessing ?? (total * 0.12)),
+        hud_rendering: Number(stageBreakdown.hud_rendering ?? anyStage.postprocessing_tts ?? anyStage.capture ?? (total * 0.16))
+      };
+    }
     return {
       yolo_inference: +(total * 0.54).toFixed(1),
       distance_projection: +(total * 0.18).toFixed(1),
       hazard_tracking: +(total * 0.12).toFixed(1),
       hud_rendering: +(total * 0.16).toFixed(1)
     };
-  }, [stageBreakdown, currentLatencyMs]);
+  }, [stageBreakdown, currentLatencyMs, activeTelemetry.avg_latency_ms]);
 
   // Determine health state
   const isOptimal = activeTelemetry.avg_latency_ms < 20;
@@ -159,7 +158,9 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
 
   // Sparkline generator
   const sparklinePoints = useMemo(() => {
-    const history = activeTelemetry.latency_history.length > 0 ? activeTelemetry.latency_history : [10, 11, 10.5, 11.2];
+    const history = Array.isArray(activeTelemetry?.latency_history) && activeTelemetry.latency_history.length > 0 
+      ? activeTelemetry.latency_history 
+      : [10, 11, 10.5, 11.2];
     const minVal = Math.min(...history) * 0.85;
     const maxVal = Math.max(...history) * 1.15 || minVal + 1;
     const width = 160;
@@ -173,7 +174,7 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
     }).join(' ');
 
     return points;
-  }, [activeTelemetry.latency_history]);
+  }, [activeTelemetry?.latency_history]);
 
   return (
     <div id="driver-performance-tracking-module" className="w-full mt-4 transition-all duration-300">

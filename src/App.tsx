@@ -615,11 +615,11 @@ export default function App() {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 bg-[#34C759] rounded-full animate-pulse"></span>
           <span>
-            BACKEND: FastAPI 0.111 // DETECTOR: [{currentModel.display_name.toUpperCase()}] // OLLAMA [{selectedModel.toUpperCase()}] // PostgreSQL 16.2
+            BACKEND: FastAPI 0.111 // DETECTOR: [{(currentModel?.display_name || currentModel?.model_name || 'YOLO11').toUpperCase()}] // OLLAMA [{(selectedModel || 'llama3.1').toUpperCase()}] // PostgreSQL 16.2
           </span>
         </div>
         <div className="hidden md:block">
-          ACTIVE WEIGHTS: {currentModel.weight_path} // ROLE: [{currentRole.toUpperCase()}]
+          ACTIVE WEIGHTS: {currentModel?.weight_path || 'backend/weights/best.pt'} // ROLE: [{(currentRole || 'admin').toUpperCase()}]
         </div>
         <div>MEMORY_USAGE: 4.2GB / 16GB // DISK: 24% // CUDA_0: ONLINE</div>
       </footer>

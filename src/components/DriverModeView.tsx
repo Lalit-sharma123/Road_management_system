@@ -33,6 +33,7 @@ import {
   AlertOctagon
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
+import { driverService } from '../services/driverService';
 import { GpsMappingView } from './GpsMappingView';
 import { DriverPerformanceFooter, HardwareTelemetryData, StageBreakdownMs } from './DriverPerformanceFooter';
 
@@ -291,10 +292,10 @@ export const DriverModeView: React.FC = () => {
     }
 
     try {
-      // Fetch complaints
-      const complaintsRes = await apiClient.get('/driver/complaints?limit=20');
-      if (complaintsRes.data?.complaints) {
-        setComplaintsList(complaintsRes.data.complaints);
+      // Fetch complaints via driverService
+      const complaints = await driverService.getComplaints(30);
+      if (complaints && complaints.length > 0) {
+        setComplaintsList(complaints);
       }
     } catch (e) {
       console.debug('Complaints list fallback:', e);
@@ -302,9 +303,9 @@ export const DriverModeView: React.FC = () => {
 
     try {
       // Fetch past session potholes
-      const potholesRes = await apiClient.get('/driver/potholes?limit=30');
-      if (potholesRes.data?.potholes && potholesRes.data.potholes.length > 0) {
-        setSessionPotholes(potholesRes.data.potholes);
+      const potholes = await driverService.getPotholes(30);
+      if (potholes && potholes.length > 0) {
+        setSessionPotholes(potholes);
       }
     } catch (e) {
       console.debug('Potholes list fallback:', e);
@@ -495,7 +496,7 @@ export const DriverModeView: React.FC = () => {
 
               // 4. Trigger Voice Hazard Alert if Critical/High
               if (pot.severity === 'critical' || pot.severity === 'high') {
-                const voiceMsg = data.voice_message || `${pot.severity.toUpperCase()} danger. Pothole detected ahead.`;
+                const voiceMsg = data.voice_message || `${String(pot.severity || 'high').toUpperCase()} danger. Pothole detected ahead.`;
                 triggerVoiceWarning(voiceMsg, pot.severity);
               }
             } else if (data.type === 'live_camera_frame') {
@@ -771,10 +772,10 @@ export const DriverModeView: React.FC = () => {
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
     try {
-      await apiClient.put('/driver/settings', settings);
+      await driverService.saveSettings(settings);
       setShowSettingsDrawer(false);
     } catch (e) {
-      console.warn('Failed to persist driver settings to DB:', e);
+      console.warn('Failed to persist driver settings:', e);
       setShowSettingsDrawer(false);
     } finally {
       setIsSavingSettings(false);
@@ -801,22 +802,22 @@ export const DriverModeView: React.FC = () => {
     e.preventDefault();
     setIsSubmittingComplaint(true);
     try {
-      const res = await apiClient.post('/driver/complaints', {
+      const result = await driverService.submitComplaint({
         ...complaintForm,
         city: roadInfo.city,
         state: roadInfo.state
       });
 
-      if (res.data?.status === 'success') {
-        setComplaintSuccessMessage(`Complaint filed successfully! Ticket: ${res.data.complaint?.complaint_number || 'ACTIVE'}`);
+      if (result.complaint) {
+        setComplaintsList((prev) => [result.complaint, ...prev.filter(c => c.id !== result.complaint.id && c.complaint_number !== result.complaint.complaint_number)]);
+        setComplaintSuccessMessage(`Grievance registered successfully! Ticket: ${result.complaint.complaint_number}`);
         setTimeout(() => {
           setIsComplaintModalOpen(false);
           setRightPanelTab('complaints');
-        }, 1800);
+        }, 1500);
       }
     } catch (err: any) {
-      console.error('Failed to submit complaint:', err);
-      // Optimistic local add
+      console.warn('Complaint submission fallback:', err);
       const ticketNum = `CMP-${Date.now().toString().slice(-6)}`;
       const optimisticComplaint: PotholeComplaintItem = {
         id: `cmp_${Date.now()}`,
@@ -1018,7 +1019,7 @@ export const DriverModeView: React.FC = () => {
                         {activeWarning.title}
                       </span>
                       <span className="text-xs font-mono text-slate-300">
-                        {activeWarning.category_display.toUpperCase()}
+                        {String(activeWarning.category_display || 'POTHOLE').toUpperCase()}
                       </span>
                     </div>
                     <h2 className="text-xl font-extrabold tracking-tight text-white mt-1">

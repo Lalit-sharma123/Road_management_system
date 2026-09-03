@@ -180,16 +180,20 @@ export const modelService = {
     try {
       const response = await apiClient.get<any[]>('/models');
       if (Array.isArray(response.data) && response.data.length > 0) {
-        return response.data.map((m) => ({
-          id: m.id,
-          model_name: m.model_name || m.name,
-          display_name: m.model_name || m.display_name,
-          weight_path: m.file_path || m.weight_path || 'backend/weights/best.pt',
-          enabled: m.is_active !== undefined ? m.is_active : true,
-          version: m.version || 'v11.0.0',
-          description: m.description || 'YOLOv11 road defect and traffic inspection model',
-          is_default: m.is_default || m.status === 'active',
-        }));
+        return response.data.map((m) => {
+          const modelName = m.model_name || m.name || 'yolov11';
+          const displayName = m.display_name || m.name || m.model_name || 'YOLO11 Model';
+          return {
+            id: m.id || `m-${Math.random().toString(36).substring(2, 7)}`,
+            model_name: modelName,
+            display_name: displayName,
+            weight_path: m.file_path || m.weight_path || 'backend/weights/best.pt',
+            enabled: m.is_active !== undefined ? m.is_active : true,
+            version: m.version || 'v11.0.0',
+            description: m.description || 'YOLOv11 road defect and traffic inspection model',
+            is_default: m.is_default || m.status === 'active',
+          };
+        });
       }
     } catch {
       // Fallback
@@ -218,9 +222,9 @@ export const userService = {
       if (Array.isArray(response.data) && response.data.length > 0) {
         return response.data.map((u) => ({
           id: u.id,
-          username: u.username,
-          email: u.email,
-          role: u.role,
+          username: u.username || 'user',
+          email: u.email || 'user@example.com',
+          role: (u.role || 'viewer') as any,
           created_at: u.created_at ? u.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
         }));
       }

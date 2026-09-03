@@ -206,7 +206,7 @@ activeFilterTab === 'gaussian' ? `blurred = cv2.GaussianBlur(frame, (${gaussianK
                 }`} 
               />
               <div className="absolute top-2 left-2 bg-[#FF3B30] text-white px-2 py-0.5 text-[9px] font-bold uppercase">
-                FILTER: {activeFilterTab.toUpperCase()}
+                FILTER: {String(activeFilterTab || 'ORIGINAL').toUpperCase()}
               </div>
             </div>
             <div className="p-2.5 text-[10px] text-[#34C759] bg-[#0F0F0F] flex items-center justify-between">

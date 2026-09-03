@@ -217,4 +217,113 @@ export interface PotholeHeatmapResponse {
   hotspots?: HeatmapHotspot[];
 }
 
+export interface PotholeComplaintItem {
+  id: string;
+  complaint_number: string;
+  detection_id?: string;
+  driver_id?: string;
+  session_id?: string;
+  road_name?: string;
+  road_authority?: string;
+  city?: string;
+  state?: string;
+  severity: string;
+  description?: string;
+  evidence_image_url?: string;
+  status: 'Submitted' | 'Under Review' | 'In Progress' | 'Resolved' | string;
+  assigned_department?: string;
+  resolution_notes?: string;
+  latitude: number;
+  longitude: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DetectedPotholeItem {
+  id?: string;
+  pothole_id: string;
+  detection_id?: string;
+  track_id?: number;
+  latitude: number;
+  longitude: number;
+  severity: string;
+  confidence: number;
+  distance_meters?: number;
+  lane_position?: string;
+  road_name?: string;
+  road_authority?: string;
+  timestamp: string;
+  image_url?: string;
+}
+
+export interface DriverSettings {
+  alert_distance_meters: number;
+  voice_alerts_enabled: boolean;
+  min_confidence: number;
+  min_severity: string;
+  camera_source: string;
+  fps: number;
+  frame_skip: number;
+  camera_height_meters: number;
+  camera_pitch_degrees: number;
+  speed_kmh: number;
+}
+
+export interface AdaptiveFrameSkipTelemetry {
+  mode: string;
+  current_frame_skip: number;
+  base_frame_skip: number;
+  min_frame_skip: number;
+  max_frame_skip: number;
+  effective_inference_fps: number;
+  target_stream_fps: number;
+  pressure_score: number;
+  load_status: string;
+  adaptation_reason: string;
+  cpu_utilization_pct: number;
+  gpu_utilization_pct: number;
+  gpu_memory_allocated_mb: number;
+  avg_inference_latency_ms: number;
+  traffic_density_objects: number;
+  is_active: boolean;
+}
+
+export interface HardwareTelemetryData {
+  is_cuda?: boolean;
+  device_name?: string;
+  gpu_allocated_mb?: number;
+  gpu_reserved_mb?: number;
+  gpu_total_mb?: number;
+  gpu_utilization_pct?: number;
+  fps: number;
+  total_frames_processed?: number;
+  avg_latency_ms: number;
+  min_latency_ms?: number;
+  max_latency_ms?: number;
+  dropped_frames?: number;
+  latency_history?: number[];
+  pipeline_status?: 'optimal' | 'moderate' | 'degraded';
+  adaptive_frame_skip?: AdaptiveFrameSkipTelemetry;
+  p95_latency_ms?: number;
+  p99_latency_ms?: number;
+  cpu_percent?: number;
+  gpu_percent?: number;
+  memory_used_mb?: number;
+  memory_total_mb?: number;
+  active_streams?: number;
+  frame_skip_ratio?: number;
+}
+
+export interface StageBreakdownMs {
+  yolo_inference: number;
+  distance_projection?: number;
+  hazard_tracking?: number;
+  hud_rendering?: number;
+  capture?: number;
+  preprocessing?: number;
+  distance_depth?: number;
+  postprocessing_tts?: number;
+}
+
+
 

@@ -194,7 +194,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </div>
                 <div className="text-slate-300">{log.details}</div>
                 <div className="text-[#555] text-[9px]">
-                  EXECUTOR: <span className="text-purple-300">{log.user}</span> [{log.role.toUpperCase()}]
+                  EXECUTOR: <span className="text-purple-300">{log.user || 'system'}</span> [{(log.role || 'USER').toUpperCase()}]
                 </div>
               </div>
             ))}

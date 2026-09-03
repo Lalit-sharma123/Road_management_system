@@ -6,8 +6,14 @@ export interface RoadHealthTelemetry {
 
 export interface PotholeFrequencyInterval {
   interval: string;
+  timestamp?: number | string;
+  minutes_ago?: number;
   potholes: number;
   cracks: number;
+  critical_count?: number;
+  high_count?: number;
+  medium_count?: number;
+  low_count?: number;
   frequency_density: number;
   severity_index: number;
 }
@@ -17,6 +23,9 @@ export interface PotholeTelemetry {
   crack_count: number;
   total_defects: number;
   density_per_km: number;
+  current_frequency_per_min?: number;
+  peak_frequency_per_min?: number;
+  time_window_minutes?: number;
   categories: Record<string, number>;
   frequency_timeline: PotholeFrequencyInterval[];
 }

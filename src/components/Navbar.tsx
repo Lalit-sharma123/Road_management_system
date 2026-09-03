@@ -226,7 +226,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <span className="text-[9px] px-1.5 py-0.5 bg-[#2563EB]/20 text-[#2563EB] border border-[#2563EB]/40 font-mono font-bold uppercase ml-1">
-            {currentModel.model_name}
+            {currentModel?.model_name || 'yolov11'}
           </span>
         </div>
 
@@ -235,11 +235,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           {currentUser ? (
             <div className="flex items-center gap-3 border-r border-[#2A2A2A] pr-3">
               <div className="text-right">
-                <p className="text-[9px] font-mono opacity-50 uppercase leading-none">{currentUser.role.toUpperCase()}</p>
+                <p className="text-[9px] font-mono opacity-50 uppercase leading-none">{(currentUser.role || 'user').toUpperCase()}</p>
                 <p className="text-xs font-bold font-mono text-slate-200">{currentUser.full_name || currentUser.username}</p>
               </div>
               <div className="w-7 h-7 bg-[#2563EB] border border-blue-400 flex items-center justify-center font-mono text-xs font-bold text-white uppercase">
-                {currentUser.username.substring(0, 2)}
+                {(currentUser.username || 'US').substring(0, 2)}
               </div>
               <button
                 onClick={onLogout}

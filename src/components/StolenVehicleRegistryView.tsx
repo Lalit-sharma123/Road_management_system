@@ -178,7 +178,7 @@ export const StolenVehicleRegistryView: React.FC = () => {
   };
 
   const getVehicleIcon = (type: string) => {
-    switch (type.toUpperCase()) {
+    switch (String(type || '').toUpperCase()) {
       case 'MOTORCYCLE':
       case 'SCOOTER':
       case 'BIKE':
@@ -193,7 +193,7 @@ export const StolenVehicleRegistryView: React.FC = () => {
   };
 
   const getPriorityBadge = (priority: string) => {
-    switch (priority.toUpperCase()) {
+    switch (String(priority || '').toUpperCase()) {
       case 'CRITICAL':
         return (
           <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1 w-fit">

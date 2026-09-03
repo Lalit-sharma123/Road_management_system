@@ -278,27 +278,27 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
   };
 
   // Chart 1: Defect Distribution Pie
-  const defectDistributionData = Object.entries(potholeTel.categories).map(([cat, count]) => ({
-    name: cat.replace(/_/g, ' ').toUpperCase(),
+  const defectDistributionData = Object.entries(potholeTel.categories || {}).map(([cat, count]) => ({
+    name: String(cat || '').replace(/_/g, ' ').toUpperCase(),
     rawKey: cat,
     value: Number(count || 0),
-    color: CATEGORY_COLORS[cat.toLowerCase()] || '#FF3B30'
+    color: CATEGORY_COLORS[String(cat || '').toLowerCase()] || '#FF3B30'
   })).filter(d => d.value > 0);
 
   // Chart 2: Severity Bar Data
-  const severityChartData = Object.entries(severityTel.severities).map(([sev, count]) => ({
-    severity: sev.toUpperCase(),
+  const severityChartData = Object.entries(severityTel.severities || {}).map(([sev, count]) => ({
+    severity: String(sev || '').toUpperCase(),
     count: Number(count || 0),
-    fill: SEVERITY_COLORS[sev.toLowerCase()] || '#2563EB'
+    fill: SEVERITY_COLORS[String(sev || '').toLowerCase()] || '#2563EB'
   }));
 
   // Chart 3: Vehicle Mobility Data
-  const vehicleChartData = Object.entries(mobilityTel.vehicles_by_type)
+  const vehicleChartData = Object.entries(mobilityTel.vehicles_by_type || {})
     .filter(([k]) => k !== 'number_plate')
     .map(([vClass, count]) => ({
-      name: vClass.replace(/_/g, ' ').toUpperCase(),
+      name: String(vClass || '').replace(/_/g, ' ').toUpperCase(),
       value: Number(count || 0),
-      color: VEHICLE_COLORS[vClass.toLowerCase()] || '#2563EB'
+      color: VEHICLE_COLORS[String(vClass || '').toLowerCase()] || '#2563EB'
     })).filter(d => d.value > 0);
 
   // Chart 4: Historical 6-Month Trends Data

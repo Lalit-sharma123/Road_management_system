@@ -204,7 +204,7 @@ export const DetectionTimeline: React.FC<DetectionTimelineProps> = ({
     }
 
     setJumpNotice(
-      `SEEKED TO [${formatTimestamp(event.timestamp_sec)}] // Frame #${event.frame_number} // ${event.category.toUpperCase().replace('_', ' ')} (${(event.confidence * 100).toFixed(0)}%)`
+      `SEEKED TO [${formatTimestamp(event.timestamp_sec)}] // Frame #${event.frame_number} // ${(event.category || 'pothole').replace('_', ' ').toUpperCase()} (${((event.confidence || 0.85) * 100).toFixed(0)}%)`
     );
 
     setTimeout(() => setJumpNotice(null), 3000);
@@ -331,7 +331,7 @@ export const DetectionTimeline: React.FC<DetectionTimelineProps> = ({
               <button
                 key={`${ev.id}-${index}`}
                 onClick={() => handleItemClick(ev)}
-                title={`[${formatTimestamp(ev.timestamp_sec)}] Frame #${ev.frame_number}: ${ev.category.replace('_', ' ').toUpperCase()} (${ev.severity.toUpperCase()})`}
+                title={`[${formatTimestamp(ev.timestamp_sec)}] Frame #${ev.frame_number}: ${(ev.category || 'pothole').replace('_', ' ').toUpperCase()} (${(ev.severity || 'high').toUpperCase()})`}
                 className={`absolute w-3.5 h-6 -translate-x-1/2 transition-transform hover:scale-150 z-10 flex items-center justify-center ${
                   isSelected ? 'scale-150 z-30 ring-2 ring-white shadow-[0_0_10px_#2563EB]' : ''
                 }`}

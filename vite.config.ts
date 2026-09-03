@@ -2,10 +2,19 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
+import { devApiPlugin } from './src/server/devApiMiddleware';
 
 export default defineConfig(() => {
+  const backendUrl = process.env.VITE_BACKEND_URL;
+  const wsUrl = process.env.VITE_WS_URL;
+
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // Internal dev mock API layer when no external backend is running
+      devApiPlugin()
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -14,61 +23,29 @@ export default defineConfig(() => {
     server: {
       host: '0.0.0.0',
       port: 3000,
-      proxy: {
+      proxy: backendUrl ? {
         '/api': {
-          target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
+          target: backendUrl,
           changeOrigin: true,
           secure: false,
           ws: true,
-          configure: (proxy) => {
-            proxy.on('error', (err) => {
-              const code = (err as any)?.code;
-              if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
-                return; // Gracefully handle backend disconnects
-              }
-            });
-            proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
-              socket.on('error', (err: any) => {
-                const code = err?.code;
-                if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
-                  return; // Suppress socket disconnect errors
-                }
-              });
-            });
-          },
         },
         '/uploads': {
-          target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
+          target: backendUrl,
           changeOrigin: true,
           secure: false,
         },
         '/processed': {
-          target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
+          target: backendUrl,
           changeOrigin: true,
           secure: false,
         },
         '/ws': {
-          target: process.env.VITE_WS_URL || 'ws://127.0.0.1:8000',
+          target: wsUrl || backendUrl.replace(/^http/, 'ws'),
           ws: true,
           changeOrigin: true,
-          configure: (proxy) => {
-            proxy.on('error', (err) => {
-              const code = (err as any)?.code;
-              if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
-                return;
-              }
-            });
-            proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
-              socket.on('error', (err: any) => {
-                const code = err?.code;
-                if (code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE') {
-                  return;
-                }
-              });
-            });
-          },
         },
-      },
+      } : undefined,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify - file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

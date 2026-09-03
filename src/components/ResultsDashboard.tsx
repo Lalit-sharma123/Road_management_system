@@ -107,9 +107,9 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
 
       L.marker([lat, lng], { icon }).addTo(map).bindPopup(`
         <div style="font-family: monospace; font-size: 11px; color: #111;">
-          <strong>${det.category.toUpperCase()}</strong><br/>
-          Severity: ${det.severity.toUpperCase()}<br/>
-          Confidence: ${(det.confidence * 100).toFixed(0)}%
+          <strong>${(det.category || 'pothole').toUpperCase()}</strong><br/>
+          Severity: ${(det.severity || 'high').toUpperCase()}<br/>
+          Confidence: ${((det.confidence || 0.85) * 100).toFixed(0)}%
         </div>
       `);
     });

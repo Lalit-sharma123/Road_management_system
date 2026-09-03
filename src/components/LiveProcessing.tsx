@@ -414,7 +414,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
   // Helper for marker colors based on severity
   const getSeverityColor = (sev: string) => {
-    const s = sev.toUpperCase();
+    const s = String(sev || 'HIGH').toUpperCase();
     if (s.includes('CRITICAL')) return '#FF3B30'; // Red
     if (s.includes('HIGH')) return '#FF9500';     // Orange
     if (s.includes('MEDIUM')) return '#FFD60A';   // Yellow
@@ -678,7 +678,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   const m = L.marker([frameLat, frameLng], { icon: markerIcon });
                   m.bindPopup(`
                     <div style="font-family: monospace; font-size: 11px; color: #111;">
-                      <strong>${d.category.toUpperCase()}</strong><br/>
+                      <strong>${(d.category || 'POTHOLE').toUpperCase()}</strong><br/>
                       Severity: ${sev}<br/>
                       Conf: ${(d.confidence * 100).toFixed(0)}%<br/>
                       Frame #${msg.frame_number} @ ${msg.timestamp.toFixed(1)}s

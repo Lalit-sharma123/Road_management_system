@@ -83,12 +83,12 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
   };
 
   // 1. Damage Distribution Pie Chart Data
-  const damageDistributionData = Object.entries(categoryCounts)
-    .filter(([cat]) => !VEHICLE_KEYS.includes(cat.toLowerCase()))
+  const damageDistributionData = Object.entries(categoryCounts || {})
+    .filter(([cat]) => !VEHICLE_KEYS.includes(String(cat || '').toLowerCase()))
     .map(([cat, count]) => ({
-      name: cat.replace(/_/g, ' ').toUpperCase(),
+      name: String(cat || '').replace(/_/g, ' ').toUpperCase(),
       value: count,
-      color: CATEGORY_COLORS[cat.toLowerCase()] || '#2563EB'
+      color: CATEGORY_COLORS[String(cat || '').toLowerCase()] || '#2563EB'
     }));
 
   const displayDamageData = damageDistributionData.length > 0 ? damageDistributionData : [
@@ -107,24 +107,24 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
   };
 
   const severityBarData = ['low', 'medium', 'high', 'critical'].map((sev) => ({
-    severity: sev.toUpperCase(),
-    count: severityCounts[sev] || 0,
+    severity: String(sev || '').toUpperCase(),
+    count: (severityCounts && severityCounts[sev]) || 0,
     fill: SEVERITY_COLORS[sev] || '#2563EB'
   }));
 
   // 3. Vehicle Detection Distribution Data (Unified Model)
   const extractedVehicleCounts: Record<string, number> = { ...vehicleCountsProp };
-  Object.entries(categoryCounts).forEach(([cat, count]) => {
-    if (VEHICLE_KEYS.includes(cat.toLowerCase())) {
-      const current = extractedVehicleCounts[cat.toLowerCase()] || 0;
-      extractedVehicleCounts[cat.toLowerCase()] = current + Number(count || 0);
+  Object.entries(categoryCounts || {}).forEach(([cat, count]) => {
+    if (VEHICLE_KEYS.includes(String(cat || '').toLowerCase())) {
+      const current = extractedVehicleCounts[String(cat || '').toLowerCase()] || 0;
+      extractedVehicleCounts[String(cat || '').toLowerCase()] = current + Number(count || 0);
     }
   });
 
   const vehicleDistributionData = Object.entries(extractedVehicleCounts).map(([vClass, count]) => ({
-    name: vClass.replace(/_/g, ' ').toUpperCase(),
+    name: String(vClass || '').replace(/_/g, ' ').toUpperCase(),
     value: count,
-    color: VEHICLE_COLORS[vClass.toLowerCase()] || '#2563EB'
+    color: VEHICLE_COLORS[String(vClass || '').toLowerCase()] || '#2563EB'
   }));
 
   const displayVehicleData = vehicleDistributionData.length > 0 ? vehicleDistributionData : [

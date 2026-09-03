@@ -602,7 +602,7 @@ export const YOLOModelMonitor: React.FC = () => {
               {/* Card Footer Info */}
               <div className="mt-4 pt-3 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-400">
                 <span className="flex items-center gap-1 text-slate-400">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Status: {model.status.toUpperCase()}
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Status: {(model.status || 'active').toUpperCase()}
                 </span>
                 <span className="font-mono text-slate-500">
                   {model.detections} detections
