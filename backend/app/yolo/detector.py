@@ -114,7 +114,7 @@ class YOLODamageDetector:
             "numberplate": {
                 "key": "numberplate",
                 "name": "Number Plate Auditor",
-                "filename": getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate.pt"),
+                "filename": getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate-yolo-v26n.pt"),
                 "type": "Vehicle ANPR Localization",
                 "status": "active",
                 "last_latency_ms": 4.2,
@@ -249,8 +249,8 @@ class YOLODamageDetector:
                 print(f"[YOLO Engine] Helmet model weights not found in weights directory.")
                 self.helmet_model = None
 
-            # 4. Number Plate Model (numberplate.pt)
-            plate_path = settings.resolve_model_path(getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate.pt"))
+            # 4. Number Plate Model (numberplate-yolo-v26n.pt)
+            plate_path = settings.resolve_model_path(getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate-yolo-v26n.pt"))
             if not plate_path.is_file():
                 plate_path = settings.resolve_model_path("helmet_numberplate.pt")
 

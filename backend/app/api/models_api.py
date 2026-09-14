@@ -80,8 +80,8 @@ async def get_models_telemetry():
             },
             {
                 "key": "numberplate",
-                "name": "Number Plate Auditor (numberplate.pt)",
-                "filename": "numberplate.pt",
+                "name": "Number Plate Auditor (numberplate-yolo-v26n.pt)",
+                "filename": "numberplate-yolo-v26n.pt",
                 "type": "Vehicle ANPR Localization",
                 "status": "active",
                 "last_latency_ms": 4.2,
@@ -92,6 +92,21 @@ async def get_models_telemetry():
                 "color": "#10B981",
                 "classes": ["number_plate"],
                 "latency_history": [4.0, 4.5, 4.2, 4.4, 4.1, 4.3, 4.2]
+            },
+            {
+                "key": "helmet_plate",
+                "name": "Combined Safety & Plate Auditor (helmet_numberplate.pt)",
+                "filename": "helmet_numberplate.pt",
+                "type": "Joint Safety & Plate Localization",
+                "status": "active",
+                "last_latency_ms": 8.0,
+                "avg_latency_ms": 8.2,
+                "throughput_fps": 122.0,
+                "inferences": 810,
+                "detections": 112,
+                "color": "#8B5CF6",
+                "classes": ["helmet", "no_helmet", "number_plate"],
+                "latency_history": [7.8, 8.4, 8.1, 8.3, 7.9, 8.2, 8.1]
             },
             {
                 "key": "ocr",
@@ -125,25 +140,81 @@ async def list_ai_models(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AIModel).order_by(AIModel.created_at.desc()))
     models = result.scalars().all()
     
-    # Return default weights if DB is empty
+    # Return default dedicated specialized weights if DB is empty
     if not models:
-        default_model = AIModel(
-            id="m-yolov11x",
-            model_name="YOLOv11 Extra Large (Unified)",
-            version="v11.4.2",
-            model_type="YOLOv11",
-            classes_json={"0": "pothole", "1": "crack", "2": "car", "3": "truck", "4": "bus"},
-            accuracy=0.968,
-            map_score=0.924,
-            status="active",
-            is_active=True,
-            file_path="backend/weights/yolov11x-road-unified.pt",
-            created_at=datetime.now(timezone.utc)
-        )
-        db.add(default_model)
+        default_models = [
+            AIModel(
+                id="m-damage",
+                model_name="best.pt",
+                version="v1.0.0",
+                model_type="YOLOv8-Damage",
+                classes_json={"0": "pothole", "1": "longitudinal_crack", "2": "transverse_crack", "3": "alligator_crack", "4": "missing_asphalt", "5": "broken_road"},
+                accuracy=0.965,
+                map_score=0.932,
+                status="active",
+                is_active=True,
+                file_path="backend/weights/best.pt",
+                created_at=datetime.now(timezone.utc)
+            ),
+            AIModel(
+                id="m-vehicle",
+                model_name="yolov8n.pt",
+                version="v8.2.0",
+                model_type="YOLOv8-Vehicle",
+                classes_json={"0": "car", "1": "truck", "2": "bus", "3": "motorcycle", "4": "bicycle", "5": "person"},
+                accuracy=0.972,
+                map_score=0.941,
+                status="active",
+                is_active=False,
+                file_path="backend/weights/yolov8n.pt",
+                created_at=datetime.now(timezone.utc)
+            ),
+            AIModel(
+                id="m-helmet",
+                model_name="helmet.pt",
+                version="v1.2.0",
+                model_type="YOLOv8-Helmet",
+                classes_json={"0": "helmet", "1": "no_helmet"},
+                accuracy=0.954,
+                map_score=0.918,
+                status="active",
+                is_active=False,
+                file_path="backend/weights/helmet.pt",
+                created_at=datetime.now(timezone.utc)
+            ),
+            AIModel(
+                id="m-plate",
+                model_name="numberplate-yolo-v26n.pt",
+                version="v2.6.0",
+                model_type="YOLOv8-ANPR",
+                classes_json={"0": "number_plate"},
+                accuracy=0.961,
+                map_score=0.925,
+                status="active",
+                is_active=False,
+                file_path="backend/weights/numberplate-yolo-v26n.pt",
+                created_at=datetime.now(timezone.utc)
+            ),
+            AIModel(
+                id="m-helmet-plate",
+                model_name="helmet_numberplate.pt",
+                version="v1.0.0",
+                model_type="YOLOv8-Unified",
+                classes_json={"0": "helmet", "1": "no_helmet", "2": "number_plate"},
+                accuracy=0.951,
+                map_score=0.912,
+                status="active",
+                is_active=False,
+                file_path="backend/weights/helmet_numberplate.pt",
+                created_at=datetime.now(timezone.utc)
+            )
+        ]
+        for m in default_models:
+            db.add(m)
         await db.commit()
-        await db.refresh(default_model)
-        return [default_model]
+        for m in default_models:
+            await db.refresh(m)
+        return default_models
 
     return models
 

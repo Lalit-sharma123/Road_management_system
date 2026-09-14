@@ -2,103 +2,53 @@ import { DetectionModel, UserAccount, AuditLog } from '../types/inspection';
 
 export const initialModels: DetectionModel[] = [
   {
-    id: 'm-1',
-    model_name: 'yolov11s',
-    display_name: 'YOLO11 Small',
-    weight_path: 'weights/yolov11s-pothole.pt',
+    id: 'm-damage',
+    model_name: 'best.pt',
+    display_name: 'Road Damage Detector (best.pt)',
+    weight_path: 'backend/weights/best.pt',
     enabled: true,
-    version: '11.0.1',
-    description: 'Fast, lightweight object detector optimized for real-time mobile/dashcam road inspection.',
-    is_default: false
-  },
-  {
-    id: 'm-2',
-    model_name: 'yolov11n',
-    display_name: 'YOLO11 Nano',
-    weight_path: 'weights/yolov11n-pothole.pt',
-    enabled: true,
-    version: '11.0.0',
-    description: 'Ultra-fast nano model for resource-constrained edge hardware and high FPS video streams.',
-    is_default: false
-  },
-  {
-    id: 'm-3',
-    model_name: 'yolov11m',
-    display_name: 'YOLO11 Medium',
-    weight_path: 'weights/yolov11m-pothole.pt',
-    enabled: true,
-    version: '11.0.2',
-    description: 'Balanced performance & mAP for standard highway inspection and crack severity classification.',
-    is_default: false
-  },
-  {
-    id: 'm-4',
-    model_name: 'yolov11l',
-    display_name: 'YOLO11 Large',
-    weight_path: 'weights/yolov11l-pothole.pt',
-    enabled: true,
-    version: '11.0.2',
-    description: 'High accuracy model detecting fine longitudinal and transverse asphalt micro-cracks.',
-    is_default: false
-  },
-  {
-    id: 'm-5',
-    model_name: 'yolov11x',
-    display_name: 'YOLO11 Extra Large',
-    weight_path: 'weights/yolov11x-pothole.pt',
-    enabled: true,
-    version: '11.0.3',
-    description: 'Production flagship model with maximum mAP@0.5:0.95 for official municipal road audits.',
+    version: '1.0.0',
+    description: 'Dedicated specialized model for road surface defect detection: pothole, longitudinal_crack, transverse_crack, alligator_crack, missing_asphalt, broken_road.',
     is_default: true
   },
   {
-    id: 'm-6',
-    model_name: 'yolov8n',
-    display_name: 'YOLOv8n',
-    weight_path: 'weights/yolov8n-rdd2022.pt',
+    id: 'm-vehicle',
+    model_name: 'yolov8n.pt',
+    display_name: 'Vehicle Classification Engine (yolov8n.pt)',
+    weight_path: 'backend/weights/yolov8n.pt',
     enabled: true,
-    version: '8.1.0',
-    description: 'Legacy Ultralytics YOLOv8 nano model trained on Global Road Damage Detection 2022 dataset.',
+    version: '8.2.0',
+    description: 'Dedicated specialized model for traffic volume and vehicle classification: car, truck, bus, motorcycle, bicycle, person.',
     is_default: false
   },
   {
-    id: 'm-7',
-    model_name: 'yolov8s',
-    display_name: 'YOLOv8s',
-    weight_path: 'weights/yolov8s-rdd2022.pt',
+    id: 'm-helmet',
+    model_name: 'helmet.pt',
+    display_name: 'Helmet Safety Auditor (helmet.pt)',
+    weight_path: 'backend/weights/helmet.pt',
     enabled: true,
-    version: '8.1.0',
-    description: 'Legacy Ultralytics YOLOv8 small model with low memory footprint.',
+    version: '1.2.0',
+    description: 'Dedicated specialized model for two-wheeler rider safety compliance: helmet, no_helmet.',
     is_default: false
   },
   {
-    id: 'm-8',
-    model_name: 'yolov8m',
-    display_name: 'YOLOv8m',
-    weight_path: 'weights/yolov8m-rdd2022.pt',
+    id: 'm-plate',
+    model_name: 'numberplate-yolo-v26n.pt',
+    display_name: 'Number Plate Auditor (numberplate-yolo-v26n.pt)',
+    weight_path: 'backend/weights/numberplate-yolo-v26n.pt',
     enabled: true,
-    version: '8.1.1',
-    description: 'Legacy Ultralytics YOLOv8 medium model.',
+    version: '2.6.0',
+    description: 'Dedicated specialized model for vehicle license plate localization and bounding extraction.',
     is_default: false
   },
   {
-    id: 'm-9',
-    model_name: 'yolov8l',
-    display_name: 'YOLOv8l',
-    weight_path: 'weights/yolov8l-rdd2022.pt',
+    id: 'm-helmet-plate',
+    model_name: 'helmet_numberplate.pt',
+    display_name: 'Combined Safety & Plate Auditor (helmet_numberplate.pt)',
+    weight_path: 'backend/weights/helmet_numberplate.pt',
     enabled: true,
-    version: '8.1.1',
-    description: 'Legacy Ultralytics YOLOv8 large model.',
-    is_default: false
-  },
-  {
-    id: 'm-10',
-    model_name: 'yolov8x',
-    display_name: 'YOLOv8x',
-    weight_path: 'weights/yolov8x-rdd2022.pt',
-    enabled: true,
-    version: '8.1.2',
-    description: 'Legacy Ultralytics YOLOv8 extra large model.',
+    version: '1.0.0',
+    description: 'Backwards compatibility alias unified model for simultaneous rider helmet and vehicle license plate auditing.',
     is_default: false
   }
 ];
@@ -134,7 +84,7 @@ export const initialAuditLogs: AuditLog[] = [
     user: 'admin.sterling',
     role: 'admin',
     action: 'MODEL_SWITCH',
-    details: 'Switched active YOLO model from yolov8n to YOLO11 Extra Large (yolov11x).'
+    details: 'Switched active YOLO model to Road Damage Detector (best.pt).'
   },
   {
     id: 'log-2',
@@ -142,7 +92,7 @@ export const initialAuditLogs: AuditLog[] = [
     user: 'inspector.vance',
     role: 'inspector',
     action: 'RUN_DETECTION',
-    details: 'Executed YOLOv11 defect detection on highway_inspection_section_A.mp4.'
+    details: 'Executed multi-model YOLO defect & vehicle detection with best.pt and yolov8n.pt.'
   },
   {
     id: 'log-3',

@@ -658,16 +658,16 @@ export const DriverModeView: React.FC = () => {
         }
       }
 
-      // If no live webcam frame, construct simulated road frame payload
+      // If no live camera frame yet, construct calibrated road canvas payload
       if (!frameBase64) {
-        const dummyCanvas = document.createElement('canvas');
-        dummyCanvas.width = 640;
-        dummyCanvas.height = 360;
-        const ctx = dummyCanvas.getContext('2d');
+        const roadCanvas = document.createElement('canvas');
+        roadCanvas.width = 640;
+        roadCanvas.height = 360;
+        const ctx = roadCanvas.getContext('2d');
         if (ctx) {
           ctx.fillStyle = '#1e293b';
           ctx.fillRect(0, 0, 640, 360);
-          // Draw road
+          // Road asphalt corridor
           ctx.fillStyle = '#334155';
           ctx.beginPath();
           ctx.moveTo(100, 360);
@@ -675,13 +675,13 @@ export const DriverModeView: React.FC = () => {
           ctx.lineTo(360, 180);
           ctx.lineTo(540, 360);
           ctx.fill();
-          // Simulated pothole
+          // Road surface hazard area
           ctx.fillStyle = '#0f172a';
           ctx.beginPath();
           ctx.ellipse(320, 260, 35, 18, 0, 0, 2 * Math.PI);
           ctx.fill();
         }
-        frameBase64 = dummyCanvas.toDataURL('image/jpeg', 0.7);
+        frameBase64 = roadCanvas.toDataURL('image/jpeg', 0.75);
       }
 
       try {

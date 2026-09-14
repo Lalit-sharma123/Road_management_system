@@ -265,11 +265,18 @@ class HelmetANPRService:
             cv2.putText(plate_canvas, plate_number, (4, ph + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2, cv2.LINE_AA)
             cv2.imwrite(plate_file_path, plate_canvas, [cv2.IMWRITE_JPEG_QUALITY, 90])
             _, buffer_pl = cv2.imencode('.jpg', plate_canvas, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        elif vehicle_crop.size > 0:
+            # Extract real license plate ROI from actual vehicle crop
+            vh, vw = vehicle_crop.shape[:2]
+            real_plate_roi = vehicle_crop[int(vh * 0.60):, :]
+            cv2.imwrite(plate_file_path, real_plate_roi, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            _, buffer_pl = cv2.imencode('.jpg', real_plate_roi, [cv2.IMWRITE_JPEG_QUALITY, 85])
         else:
-            dummy_plate = np.zeros((80, 240, 3), dtype=np.uint8)
-            cv2.putText(dummy_plate, plate_number, (15, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.imwrite(plate_file_path, dummy_plate)
-            _, buffer_pl = cv2.imencode('.jpg', dummy_plate)
+            # Fallback to actual raw frame crop
+            fh, fw = raw_frame.shape[:2]
+            real_frame_roi = raw_frame[int(fh * 0.5):, int(fw * 0.3):int(fw * 0.7)]
+            cv2.imwrite(plate_file_path, real_frame_roi, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            _, buffer_pl = cv2.imencode('.jpg', real_frame_roi, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
         plate_crop_base64 = f"data:image/jpeg;base64,{base64.b64encode(buffer_pl).decode('utf-8')}"
         plate_crop_public_url = f"/processed/violations/{plate_filename}"

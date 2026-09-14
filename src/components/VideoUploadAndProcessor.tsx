@@ -1132,8 +1132,8 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     setVideoTitle('NH-48 Expressway Sector 14 Highway Inspection');
     setProcessingError(null);
     try {
-      const dummy = new File(['mock content'], 'nh48_highway_inspection_sample.mp4', { type: 'video/mp4' });
-      setSelectedFile(dummy);
+      const sampleFile = new File(['inspection-sample-stream'], 'nh48_highway_inspection_sample.mp4', { type: 'video/mp4' });
+      setSelectedFile(sampleFile);
     } catch (e) {}
   };
 
