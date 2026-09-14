@@ -93,7 +93,7 @@ export const DriverPotholeFrequencyGraph: React.FC<DriverPotholeFrequencyGraphPr
             current.high_count = (current.high_count || 0) + 1;
           }
         }
-        current.frequency_density = +(current.potholes / 1.0).toFixed(2);
+        current.frequency_density = +((Number(current.potholes) || 0) / 1.0).toFixed(2);
         timeline[latestIdx] = current;
 
         const totalP = timeline.reduce((sum, item) => sum + (item.potholes || 0), 0);
@@ -104,7 +104,7 @@ export const DriverPotholeFrequencyGraph: React.FC<DriverPotholeFrequencyGraphPr
           pothole_count: totalP,
           crack_count: totalC,
           total_defects: totalP + totalC,
-          current_frequency_per_min: +(current.potholes).toFixed(1),
+          current_frequency_per_min: +(Number(current.potholes) || 0).toFixed(1),
           peak_frequency_per_min: Math.max(...timeline.map(t => t.potholes)),
           frequency_timeline: timeline
         };
@@ -141,7 +141,7 @@ export const DriverPotholeFrequencyGraph: React.FC<DriverPotholeFrequencyGraphPr
     const currentPoint = timeline[timeline.length - 1];
     const currentRate = +(currentPoint.potholes || 0);
     const peakRate = Math.max(...timeline.map(t => t.potholes || 0), 1);
-    const averageRate = +(totalPotholes / (timeline.length || 10)).toFixed(1);
+    const averageRate = +((Number(totalPotholes) || 0) / (timeline.length || 10)).toFixed(1);
     const criticalCount = timeline.reduce((sum, t) => sum + (t.critical_count || 0), 0);
 
     const hazardLevel = currentRate >= 4 ? 'CRITICAL' : currentRate >= 2 ? 'HIGH' : currentRate >= 1 ? 'MODERATE' : 'LOW';

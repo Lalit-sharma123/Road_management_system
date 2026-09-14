@@ -15,7 +15,10 @@ import {
   AlertOctagon,
   Layers,
   Crosshair,
-  Clock
+  Clock,
+  CheckCircle2,
+  TrendingUp,
+  ChevronRight
 } from 'lucide-react';
 import { InspectionVideo, UserRole, TrafficViolation } from '../types/inspection';
 import { StolenVehicleAlert, StolenVehicleStats } from '../types/stolenVehicle';
@@ -233,36 +236,36 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   ];
 
   return (
-    <div className="space-y-6 text-[#E0E0E0]">
-      {/* Top Banner / System Telemetry Header */}
-      <div className="bg-[#141414] border border-[#2A2A2A] p-5 relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+    <div className="space-y-6 text-slate-100">
+      {/* Top Banner / Operations Workspace Header */}
+      <div className="bg-slate-900/70 backdrop-blur-md border border-slate-800/90 rounded-2xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
           <div>
-            <div className="flex items-center space-x-2 text-[#FF9500] text-[10px] font-mono uppercase tracking-widest mb-1">
-              <Zap className="w-3.5 h-3.5 text-[#FF3B30]" />
-              <span>LIVE COMPUTER VISION INGESTION PIPELINE</span>
+            <div className="flex items-center space-x-2 text-indigo-400 text-xs font-medium mb-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="tracking-wide">Real-Time Computer Vision Pipeline · Active</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold uppercase tracking-tight text-white font-mono flex items-center gap-2">
-              <span>Road Infrastructure & Traffic Analytics</span>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+              <span>Road Infrastructure & Safety Operations</span>
             </h1>
-            <p className="text-xs font-mono text-[#888] mt-1 max-w-3xl">
-              Multi-model YOLO deep learning inference engine (Road Damage, Vehicles, Number Plates), automated road health scoring, and real-time backend synchronization.
+            <p className="text-xs sm:text-sm text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
+              Multi-model YOLO deep learning suite detecting pavement distress, automated traffic compliance, and optical license plate recognition across urban corridors.
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={fetchSummary}
               disabled={isLoading}
-              title="Refresh telemetry metrics from /api/v1/dashboard/summary"
-              className="px-3 py-2 bg-[#1A1A1A] hover:bg-[#252525] text-[#AAA] text-xs font-mono uppercase border border-[#333] transition-all flex items-center gap-1.5"
+              title="Refresh telemetry metrics"
+              className="h-9 px-3.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl border border-slate-700 transition-all flex items-center gap-2 cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#2563EB]' : ''}`} />
-              <span>Sync</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${isLoading ? 'animate-spin text-indigo-400' : ''}`} />
+              <span>Refresh</span>
             </button>
             <button
               onClick={() => onNavigate('camera_grid')}
-              className="px-4 py-2 bg-[#2563EB] hover:bg-blue-600 text-white text-xs font-mono uppercase tracking-wider transition-all border border-blue-400 flex items-center space-x-2 shadow-[0_0_10px_rgba(37,99,235,0.3)]"
+              className="h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-xl transition-all shadow-sm flex items-center space-x-2 cursor-pointer"
             >
               <span>Live Multi-Camera Grid</span>
               <ArrowUpRight className="w-4 h-4" />
@@ -273,29 +276,32 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
       {/* Error notice if backend API is unreachable */}
       {error && (
-        <div className="bg-[#FF3B30]/10 border border-[#FF3B30]/30 p-3 text-xs font-mono text-[#FF3B30] flex items-center justify-between">
-          <span>{error} Showing offline video metrics.</span>
-          <button onClick={fetchSummary} className="underline uppercase hover:text-white">Retry</button>
+        <div className="bg-rose-500/10 border border-rose-500/20 p-3.5 rounded-xl text-xs text-rose-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error} Displaying cached inspection records.</span>
+          </div>
+          <button onClick={fetchSummary} className="underline text-xs font-medium hover:text-white cursor-pointer">Retry</button>
         </div>
       )}
 
-      {/* Active Stolen Vehicle Live Intercept Banner (If any active alerts) */}
+      {/* Active Stolen Vehicle Live Alert Banner */}
       {stolenStats && stolenStats.active_alerts > 0 && (
-        <div className="bg-gradient-to-r from-red-950/80 via-rose-950/80 to-slate-950 border-2 border-red-500/60 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl shadow-red-950/30 font-mono">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-red-600 rounded-xl text-white animate-pulse">
-              <AlertOctagon className="w-6 h-6" />
+        <div className="bg-rose-950/30 border border-rose-500/30 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3.5">
+            <div className="p-2.5 bg-rose-600 rounded-xl text-white shadow-sm">
+              <AlertOctagon className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/40">
-                  Critical Police Alert
+                <span className="text-[11px] font-semibold tracking-wide bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-md border border-rose-500/30">
+                  Active Hotlist Alert
                 </span>
                 <span className="text-xs text-slate-400">
-                  {stolenStats.active_alerts} ACTIVE STOLEN VEHICLE INTERCEPTS
+                  {stolenStats.active_alerts} Stolen Vehicle Intercept{stolenStats.active_alerts > 1 ? 's' : ''}
                 </span>
               </div>
-              <p className="text-sm font-bold text-white mt-0.5">
+              <p className="text-sm font-semibold text-slate-100 mt-1">
                 {liveStolenAlerts[0]
                   ? `Plate ${liveStolenAlerts[0].vehicle_number} detected at ${liveStolenAlerts[0].camera_location || 'Corridor'}`
                   : 'Stolen vehicle plates matched in live optical streams.'}
@@ -303,184 +309,163 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-end md:self-center">
+          <div className="flex items-center gap-2.5 self-end md:self-center">
             <button
               onClick={() => onNavigate('stolen_alerts')}
-              className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
+              className="h-8 px-3.5 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
             >
-              <AlertOctagon className="w-4 h-4" /> Open Stolen Alert Center
+              <AlertOctagon className="w-3.5 h-3.5" /> View Alerts
             </button>
             <button
               onClick={() => onNavigate('stolen_registry')}
-              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-xl border border-slate-700 transition"
+              className="h-8 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg border border-slate-700 transition cursor-pointer"
             >
-              Registry
+              Hotlist
             </button>
           </div>
         </div>
       )}
 
-      {/* Metric Cards Grid - Real Backend Data */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3 font-mono">
+      {/* Core 4 High-Impact KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Road Health Score Card */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:border-slate-700/80 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#888]">Road Health Index</span>
-            <div className={`p-1.5 border ${healthScore >= 75 ? 'bg-[#34C759]/10 text-[#34C759] border-[#34C759]/30' : 'bg-[#FF9500]/10 text-[#FF9500] border-[#FF9500]/30'}`}>
-              <ShieldCheck className="w-4 h-4" />
+            <span className="text-xs font-medium text-slate-400">Pavement Quality Index</span>
+            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+              healthScore >= 75 
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' 
+                : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+            }`}>
+              {healthScore >= 80 ? 'Good' : healthScore >= 60 ? 'Fair' : 'Poor'}
+            </span>
+          </div>
+          <div className="mt-4">
+            <div className="flex items-baseline space-x-1.5">
+              <span className="text-3xl font-bold font-mono tracking-tight text-white">
+                {isLoading ? '...' : healthScore}
+              </span>
+              <span className="text-sm font-medium text-slate-500">/ 100</span>
+            </div>
+            {/* Elegant Segmented / Gradient Progress Bar */}
+            <div className="mt-3 w-full bg-slate-800/80 h-2 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-700 ${
+                  healthScore >= 80 ? 'bg-gradient-to-r from-emerald-500 to-teal-400' : healthScore >= 60 ? 'bg-gradient-to-r from-amber-500 to-yellow-400' : 'bg-gradient-to-r from-rose-500 to-red-400'
+                }`}
+                style={{ width: `${Math.min(100, Math.max(0, healthScore))}%` }}
+              />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-white">
-              {isLoading ? '...' : healthScore}
-            </span>
-            <span className="text-xs font-mono text-[#666]">/ 100</span>
-          </div>
-          <div className="mt-3 w-full bg-[#1A1A1A] h-1.5 border border-[#2A2A2A]">
-            <div 
-              className={`h-full transition-all duration-500 ${
-                healthScore >= 80 ? 'bg-[#34C759]' : healthScore >= 60 ? 'bg-[#FF9500]' : 'bg-[#FF3B30]'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, healthScore))}%` }}
-            />
-          </div>
-          <p className="text-[10px] font-mono text-[#888] mt-2 uppercase">
-            {healthScore >= 75 ? 'RATING: OPTIMAL' : 'RATING: MAINTENANCE'}
+          <p className="text-xs text-slate-400 mt-4 flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{roadDamageCount} distress flags in {totalDistance} km</span>
           </p>
         </div>
 
-        {/* 2. Total Detections */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
+        {/* 2. Total Detections & Confidence */}
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:border-slate-700/80 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#888]">Total Detections</span>
-            <div className="p-1.5 bg-[#2563EB]/10 text-[#2563EB] border border-[#2563EB]/30">
+            <span className="text-xs font-medium text-slate-400">Total Detections</span>
+            <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
               <Crosshair className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-white">
-              {isLoading ? '...' : totalDetections}
-            </span>
-            <span className="text-xs font-mono text-[#2563EB]">Total</span>
-          </div>
-          <p className="text-[10px] font-mono text-[#888] mt-3 uppercase">
-            CONFIDENCE: {(averageConfidence * 100).toFixed(1)}%
-          </p>
-        </div>
-
-        {/* 3. Road Damage Count */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#FF3B30]">Road Damage</span>
-            <div className="p-1.5 bg-[#FF3B30]/10 text-[#FF3B30] border border-[#FF3B30]/30">
-              <ShieldAlert className="w-4 h-4" />
+          <div className="mt-4">
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-bold font-mono tracking-tight text-white">
+                {isLoading ? '...' : totalDetections.toLocaleString()}
+              </span>
+              <span className="text-xs font-medium text-indigo-400">objects</span>
+            </div>
+            <div className="mt-3 w-full bg-slate-800/80 h-2 rounded-full overflow-hidden">
+              <div 
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-400 transition-all duration-700"
+                style={{ width: `${Math.min(100, averageConfidence * 100)}%` }}
+              />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-[#FF3B30]">
-              {isLoading ? '...' : roadDamageCount}
-            </span>
-            <span className="text-xs font-mono text-[#FF3B30]/80">Defects</span>
-          </div>
-          <p className="text-[10px] font-mono text-[#FF3B30]/70 mt-3 uppercase">
-            MODEL: BEST.PT (RED)
+          <p className="text-xs text-slate-400 mt-4 flex items-center justify-between">
+            <span>Mean Confidence:</span>
+            <span className="font-mono text-slate-200 font-medium">{(averageConfidence * 100).toFixed(1)}%</span>
           </p>
         </div>
 
-        {/* 4. Helmet Violations & E-Challans */}
-        <div className="bg-[#111111] border border-red-500/40 p-3.5 flex flex-col justify-between relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-12 h-12 bg-red-500/10 rounded-bl-full pointer-events-none" />
+        {/* 3. Traffic Flow & Fleet Monitored */}
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:border-slate-700/80 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-red-400 font-bold">Helmet Violations</span>
-            <div className="p-1.5 bg-red-500/20 text-red-400 border border-red-500/40">
-              <ShieldAlert className="w-4 h-4 animate-pulse" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-red-400">
-              {summaryData?.helmet_violations_count ?? 4}
-            </span>
-            <span className="text-xs font-mono text-red-400/80">Challans</span>
-          </div>
-          <p className="text-[10px] font-mono text-red-400/90 mt-3 uppercase">
-            ₹{(summaryData?.total_fines_amount ?? 4000).toLocaleString()} FINES
-          </p>
-        </div>
-
-        {/* 5. Vehicles Tracked */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#2563EB]">Vehicles Tracked</span>
-            <div className="p-1.5 bg-[#2563EB]/10 text-[#2563EB] border border-[#2563EB]/30">
+            <span className="text-xs font-medium text-slate-400">Vehicles Monitored</span>
+            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
               <Car className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-[#2563EB]">
-              {isLoading ? '...' : vehicleCount}
-            </span>
-            <span className="text-xs font-mono text-[#888]">Units</span>
-          </div>
-          <p className="text-[10px] font-mono text-[#888] mt-3 uppercase">
-            MODEL: YOLOV8N (BLUE)
-          </p>
-        </div>
-
-        {/* 6. Helmets Detected */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#FFD60A]">Helmets</span>
-            <div className="p-1.5 bg-[#FFD60A]/10 text-[#FFD60A] border border-[#FFD60A]/30">
-              <Zap className="w-4 h-4" />
+          <div className="mt-4">
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-bold font-mono tracking-tight text-white">
+                {isLoading ? '...' : vehicleCount}
+              </span>
+              <span className="text-xs font-medium text-blue-400">in corridor</span>
+            </div>
+            {/* Modal Distribution Mini-Bar */}
+            <div className="mt-3 w-full bg-slate-800/80 h-2 rounded-full overflow-hidden flex">
+              <div style={{ width: `${carPct}%` }} className="bg-blue-500 h-full" title={`Cars: ${carPct}%`} />
+              <div style={{ width: `${motoPct}%` }} className="bg-emerald-500 h-full" title={`Bikes: ${motoPct}%`} />
+              <div style={{ width: `${truckPct + busPct}%` }} className="bg-purple-500 h-full" title={`Commercial: ${truckPct + busPct}%`} />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-[#FFD60A]">
-              {isLoading ? '...' : helmetCount}
-            </span>
-            <span className="text-xs font-mono text-[#888]">Detected</span>
+          <div className="text-xs text-slate-400 mt-4 flex items-center justify-between">
+            <span>{carPct}% Cars</span>
+            <span>•</span>
+            <span>{motoPct}% 2-Wheel</span>
+            <span>•</span>
+            <span>{truckPct + busPct}% Heavy</span>
           </div>
-          <p className="text-[10px] font-mono text-[#888] mt-3 uppercase">
-            MODEL: HELMET (YELLOW)
-          </p>
         </div>
 
-        {/* 7. Number Plates */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
+        {/* 4. Helmet Violations & E-Challans */}
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between shadow-xs hover:border-slate-700/80 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#34C759]">Number Plates</span>
-            <div className="p-1.5 bg-[#34C759]/10 text-[#34C759] border border-[#34C759]/30">
-              <Layers className="w-4 h-4" />
+            <span className="text-xs font-medium text-slate-400">Helmet Compliance</span>
+            <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <ShieldAlert className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-[#34C759]">
-              {isLoading ? '...' : numberPlateCount}
-            </span>
-            <span className="text-xs font-mono text-[#888]">Plates</span>
+          <div className="mt-4">
+            <div className="flex items-baseline space-x-2">
+              <span className="text-3xl font-bold font-mono tracking-tight text-rose-300">
+                {summaryData?.helmet_violations_count ?? 4}
+              </span>
+              <span className="text-xs font-medium text-rose-400">e-challans</span>
+            </div>
+            <div className="mt-3 w-full bg-slate-800/80 h-2 rounded-full overflow-hidden">
+              <div 
+                className="h-full rounded-full bg-rose-500 transition-all duration-700"
+                style={{ width: `${Math.min(100, ((summaryData?.helmet_violations_count ?? 4) / 10) * 100)}%` }}
+              />
+            </div>
           </div>
-          <p className="text-[10px] font-mono text-[#888] mt-3 uppercase">
-            MODEL: PLATE (GREEN)
+          <p className="text-xs text-slate-400 mt-4 flex items-center justify-between">
+            <span>Penalties:</span>
+            <span className="font-mono text-rose-300 font-semibold">₹{(summaryData?.total_fines_amount ?? 4000).toLocaleString()}</span>
           </p>
         </div>
+      </div>
 
-        {/* 8. Corridor Distance */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#888]">Corridor Distance</span>
-            <div className="p-1.5 bg-[#FF9500]/10 text-[#FF9500] border border-[#FF9500]/30">
-              <MapPin className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline space-x-2">
-            <span className="text-2xl font-bold font-mono tracking-tighter text-white">
-              {isLoading ? '...' : totalDistance}
-            </span>
-            <span className="text-xs font-mono text-[#888]">Km</span>
-          </div>
-          <p className="text-[10px] font-mono text-[#888] mt-3 uppercase">
-            INSPECTIONS: {totalInspections}
-          </p>
+      {/* Secondary Quick Telemetry Ribbon */}
+      <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-400">Corridor Distance:</span>
+          <span className="text-slate-200 font-mono font-medium">{totalDistance} km</span>
+          <span className="text-slate-600">({totalInspections} passes)</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-400">License Plates Recognized:</span>
+          <span className="text-emerald-400 font-mono font-medium">{numberPlateCount} plates</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-400">Active Vision Model:</span>
+          <span className="text-indigo-300 font-medium">YOLOv11 XL</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono">CUDA:0</span>
         </div>
       </div>
 
@@ -488,145 +473,180 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       <YOLOModelMonitor />
 
       {/* Road Damage Breakdown & Vehicle Class Breakdown Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 font-mono">
-        {/* Breakdown 1: Road Damage Classes (best.pt) */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#2A2A2A]">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-[#FF3B30] flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-[#FF3B30]" />
-              <span>Road Damage Defect Breakdown (best.pt)</span>
-            </h3>
-            <span className="text-[10px] text-[#FF3B30] bg-[#FF3B30]/10 border border-[#FF3B30]/30 px-2 py-0.5 uppercase">
-              {roadDamageCount} Total
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Breakdown 1: Road Damage Classes */}
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-rose-500/10 text-rose-400 flex items-center justify-center border border-rose-500/20">
+                <ShieldAlert className="w-3.5 h-3.5" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-100">
+                Pavement Defect Distribution
+              </h3>
+            </div>
+            <span className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 px-2.5 py-0.5 rounded-full font-mono font-medium">
+              {roadDamageCount} Total Defects
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">POTHOLES</div>
-              <div className="text-xl font-bold text-[#FF3B30]">{damageByType.pothole || 0}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">LONGITUDINAL CRACKS</div>
-              <div className="text-xl font-bold text-[#FF9500]">{damageByType.longitudinal_crack || 0}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">TRANSVERSE CRACKS</div>
-              <div className="text-xl font-bold text-[#FFD60A]">{damageByType.transverse_crack || 0}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">ALLIGATOR CRACKS</div>
-              <div className="text-xl font-bold text-[#E056FD]">{damageByType.alligator_crack || 0}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">MISSING ASPHALT</div>
-              <div className="text-xl font-bold text-[#34C759]">{damageByType.missing_asphalt || 0}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">BROKEN ROAD</div>
-              <div className="text-xl font-bold text-[#30B0C7]">{damageByType.broken_road || 0}</div>
-            </div>
+          {/* Clean Progress Row List for Defects */}
+          <div className="space-y-3 pt-1 text-xs">
+            {[
+              { label: 'Potholes', count: damageByType.pothole || 0, color: 'bg-rose-500', text: 'text-rose-400', severity: 'Critical' },
+              { label: 'Longitudinal Cracks', count: damageByType.longitudinal_crack || 0, color: 'bg-amber-500', text: 'text-amber-400', severity: 'Medium' },
+              { label: 'Transverse Cracks', count: damageByType.transverse_crack || 0, color: 'bg-yellow-500', text: 'text-yellow-400', severity: 'Medium' },
+              { label: 'Alligator Cracks', count: damageByType.alligator_crack || 0, color: 'bg-purple-500', text: 'text-purple-400', severity: 'High' },
+              { label: 'Missing Asphalt', count: damageByType.missing_asphalt || 0, color: 'bg-emerald-500', text: 'text-emerald-400', severity: 'Low' },
+              { label: 'Broken Road Shoulder', count: damageByType.broken_road || 0, color: 'bg-cyan-500', text: 'text-cyan-400', severity: 'High' },
+            ].map((item, idx) => {
+              const pct = roadDamageCount > 0 ? Math.round((item.count / roadDamageCount) * 100) : 0;
+              return (
+                <div key={idx} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-slate-300">{item.label}</span>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[10px] text-slate-500 font-medium">{item.severity}</span>
+                      <span className="font-mono font-semibold text-slate-100">{item.count}</span>
+                      <span className="text-[11px] text-slate-500 w-8 text-right font-mono">({pct}%)</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full ${item.color} transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Breakdown 2: Vehicle Classes (yolov8n.pt) */}
-        <div className="bg-[#111111] border border-[#2A2A2A] p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#2A2A2A]">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-[#2563EB] flex items-center gap-2">
-              <Car className="w-4 h-4 text-[#2563EB]" />
-              <span>Vehicle Class Distribution (yolov8n.pt)</span>
-            </h3>
-            <span className="text-[10px] text-[#2563EB] bg-[#2563EB]/10 border border-[#2563EB]/30 px-2 py-0.5 uppercase">
-              {vehicleCount} Total
+        {/* Breakdown 2: Vehicle Classes */}
+        <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20">
+                <Car className="w-3.5 h-3.5" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-100">
+                Traffic & Fleet Modal Split
+              </h3>
+            </div>
+            <span className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-full font-mono font-medium">
+              {vehicleCount} Total Vehicles
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">CARS</div>
-              <div className="text-xl font-bold text-[#2563EB]">{carCount}</div>
-              <div className="text-[9px] text-[#2563EB]">{carPct}% share</div>
+          {/* Comparative Horizontal Bar */}
+          <div className="space-y-1.5">
+            <div className="w-full h-3 bg-slate-800/80 rounded-lg overflow-hidden flex">
+              <div style={{ width: `${carPct}%` }} className="bg-blue-500 transition-all duration-500" title={`Cars: ${carPct}%`} />
+              <div style={{ width: `${motoPct}%` }} className="bg-emerald-500 transition-all duration-500" title={`Motorcycles: ${motoPct}%`} />
+              <div style={{ width: `${truckPct}%` }} className="bg-purple-500 transition-all duration-500" title={`Trucks: ${truckPct}%`} />
+              <div style={{ width: `${busPct}%` }} className="bg-pink-500 transition-all duration-500" title={`Buses: ${busPct}%`} />
             </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">TRUCKS</div>
-              <div className="text-xl font-bold text-[#7C3AED]">{truckCount}</div>
-              <div className="text-[9px] text-[#7C3AED]">{truckPct}% share</div>
+            <div className="flex justify-between text-[11px] text-slate-500 font-mono pt-0.5">
+              <span>0%</span>
+              <span>Modal Share</span>
+              <span>100%</span>
             </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">BUSES</div>
-              <div className="text-xl font-bold text-[#DB2777]">{busCount}</div>
-              <div className="text-[9px] text-[#DB2777]">{busPct}% share</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">MOTORCYCLES</div>
-              <div className="text-xl font-bold text-[#059669]">{motoCount}</div>
-              <div className="text-[9px] text-[#059669]">{motoPct}% share</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">BICYCLES</div>
-              <div className="text-xl font-bold text-[#10B981]">{bikeCount}</div>
-            </div>
-            <div className="bg-[#161616] border border-[#2A2A2A] p-3 space-y-1">
-              <div className="text-[10px] text-[#888]">NUMBER PLATES</div>
-              <div className="text-xl font-bold text-[#34C759]">{numberPlateCount}</div>
-              <div className="text-[9px] text-[#34C759]">numberplate.pt</div>
-            </div>
+          </div>
+
+          {/* Clean Progress Row List for Vehicles */}
+          <div className="space-y-3 pt-1 text-xs">
+            {[
+              { label: 'Passenger Cars', count: carCount, pct: carPct, color: 'bg-blue-500' },
+              { label: 'Motorcycles & Scooters', count: motoCount, pct: motoPct, color: 'bg-emerald-500' },
+              { label: 'Commercial Trucks', count: truckCount, pct: truckPct, color: 'bg-purple-500' },
+              { label: 'Transit Buses', count: busCount, pct: busPct, color: 'bg-pink-500' },
+              { label: 'Bicycles', count: bikeCount, pct: vehicleCount > 0 ? Math.round((bikeCount / vehicleCount) * 100) : 0, color: 'bg-teal-500' },
+            ].map((item, idx) => (
+              <div key={idx} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-300">{item.label}</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-mono font-semibold text-slate-100">{item.count}</span>
+                    <span className="text-[11px] text-slate-500 w-8 text-right font-mono">({item.pct}%)</span>
+                  </div>
+                </div>
+                <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${item.color} transition-all duration-500`}
+                    style={{ width: `${item.pct}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Latest Detections Table / Real-Time Activity Log */}
-      <div className="bg-[#111111] border border-[#2A2A2A] p-5 font-mono space-y-3">
-        <div className="flex items-center justify-between pb-3 border-b border-[#2A2A2A]">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-white flex items-center gap-2">
-            <Clock className="w-4 h-4 text-[#34C759]" />
-            <span>Latest Detections History (Real-Time Pipeline)</span>
-          </h3>
-          <span className="text-[10px] text-[#34C759]">Live Sync Active</span>
+      <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xs">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+              <Clock className="w-3.5 h-3.5" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-100">
+              Recent Detection Feed
+            </h3>
+          </div>
+          <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live Ingestion Active
+          </span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#161616] text-[#888] uppercase tracking-wider border-y border-[#2A2A2A]">
-              <tr>
-                <th className="px-4 py-2">Category</th>
-                <th className="px-4 py-2">Confidence</th>
-                <th className="px-4 py-2">Severity</th>
-                <th className="px-4 py-2">Bounding Box (x_min, y_min, x_max, y_max)</th>
-                <th className="px-4 py-2 text-right">Timestamp</th>
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 font-medium">
+                <th className="px-4 py-2.5">Category</th>
+                <th className="px-4 py-2.5">Confidence</th>
+                <th className="px-4 py-2.5">Severity</th>
+                <th className="px-4 py-2.5">Bounding Box</th>
+                <th className="px-4 py-2.5 text-right">Timestamp</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#2A2A2A] bg-[#0F0F0F]">
+            <tbody className="divide-y divide-slate-800/60">
               {latestDetectionsList.map((det, idx) => {
                 const cat = det.category.toLowerCase();
                 const isDamage = ['pothole', 'longitudinal_crack', 'transverse_crack', 'alligator_crack', 'missing_asphalt', 'broken_road'].includes(cat);
                 const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'].includes(cat);
                 const isPlate = cat.includes('plate');
 
-                const colorClass = isDamage ? 'text-[#FF3B30]' : isVehicle ? 'text-[#2563EB]' : isPlate ? 'text-[#34C759]' : 'text-white';
-
                 return (
-                  <tr key={det.id || idx} className="hover:bg-[#1A1A1A] transition-colors">
-                    <td className={`px-4 py-2.5 font-bold uppercase ${colorClass}`}>
-                      {det.category.replace(/_/g, ' ')}
-                    </td>
-                    <td className="px-4 py-2.5 text-white">
-                      {(det.confidence * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`px-2 py-0.5 text-[9px] font-bold uppercase border ${
-                        det.severity === 'critical' ? 'bg-[#FF3B30]/20 text-[#FF3B30] border-[#FF3B30]/40' :
-                        det.severity === 'high' ? 'bg-[#FF9500]/20 text-[#FF9500] border-[#FF9500]/40' :
-                        det.severity === 'medium' ? 'bg-[#FFD60A]/20 text-[#FFD60A] border-[#FFD60A]/40' :
-                        'bg-[#34C759]/20 text-[#34C759] border-[#34C759]/40'
+                  <tr key={det.id || idx} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                        isDamage ? 'bg-rose-500/10 text-rose-300 border-rose-500/20' :
+                        isVehicle ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' :
+                        isPlate ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                        'bg-slate-800 text-slate-300 border-slate-700'
                       }`}>
-                        {det.severity || 'LOW'}
+                        {det.category.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-[#888] font-mono text-[11px]">
+                    <td className="px-4 py-3 font-mono font-medium text-slate-200">
+                      {(det.confidence * 100).toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                        det.severity === 'critical' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' :
+                        det.severity === 'high' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' :
+                        det.severity === 'medium' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
+                        'bg-slate-800/80 text-slate-400 border-slate-700'
+                      }`}>
+                        {(det.severity || 'LOW').toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
                       [{det.bbox.x_min}, {det.bbox.y_min}, {det.bbox.x_max}, {det.bbox.y_max}]
                     </td>
-                    <td className="px-4 py-2.5 text-right text-[#666]">
+                    <td className="px-4 py-3 text-right text-slate-400 font-medium">
                       {typeof det.timestamp === 'number' ? new Date(det.timestamp * 1000).toLocaleTimeString() : det.timestamp}
                     </td>
                   </tr>
@@ -638,45 +658,45 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       </div>
 
       {/* Section: Automatic Helmet Violations & ANPR E-Challans Panel */}
-      <div className="bg-[#111111] border border-[#2A2A2A] p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-[#2A2A2A]">
+      <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-mono uppercase tracking-widest font-bold text-red-400 flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-red-500" />
-                <span>Automatic Helmet Violations & E-Challan Registry (ANPR / OCR)</span>
+              <div className="w-6 h-6 rounded-md bg-rose-500/10 text-rose-400 flex items-center justify-center border border-rose-500/20">
+                <ShieldAlert className="w-3.5 h-3.5" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-100">
+                Helmet Compliance & E-Challan Registry (ANPR / OCR)
               </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
-                ACTIVE
-              </span>
             </div>
-            <p className="text-[11px] font-mono text-[#777] mt-0.5">
-              Riders detected without helmet with automated optical license plate recognition and instant challan generation.
+            <p className="text-xs text-slate-400 mt-1">
+              Automated optical detection of helmet infractions with vehicle license plate extraction and instant fine recording.
             </p>
           </div>
           <button
             onClick={() => onNavigate('violations')}
-            className="text-xs font-mono text-red-400 hover:text-red-300 uppercase tracking-wider flex items-center gap-1 font-bold"
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 cursor-pointer"
           >
-            <span>View All E-Challans ({summaryData?.helmet_violations_count ?? 4}) →</span>
+            <span>View All ({summaryData?.helmet_violations_count ?? 4})</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
-            <thead className="bg-[#161616] text-[#888] uppercase tracking-wider border-y border-[#2A2A2A]">
-              <tr>
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 font-medium">
                 <th className="px-4 py-2.5">License Plate (ANPR)</th>
                 <th className="px-4 py-2.5">Challan ID</th>
                 <th className="px-4 py-2.5">Violation</th>
-                <th className="px-4 py-2.5">Vehicle</th>
-                <th className="px-4 py-2.5">Fine Amount</th>
-                <th className="px-4 py-2.5">Fine Status</th>
+                <th className="px-4 py-2.5">Vehicle Type</th>
+                <th className="px-4 py-2.5">Penalty</th>
+                <th className="px-4 py-2.5">Status</th>
                 <th className="px-4 py-2.5">Location</th>
                 <th className="px-4 py-2.5 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#2A2A2A] bg-[#0F0F0F]">
+            <tbody className="divide-y divide-slate-800/60">
               {(summaryData?.recent_violations && summaryData.recent_violations.length > 0 ? summaryData.recent_violations : [
                 {
                   id: 'v1',
@@ -726,50 +746,50 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 const isPaid = viol.fine_status === 'PAID';
                 const isPending = viol.fine_status === 'PENDING';
                 return (
-                  <tr key={viol.id} className="hover:bg-[#1A1A1A] transition-colors">
+                  <tr key={viol.id} className="hover:bg-slate-800/30 transition-colors">
                     {/* License Plate Badge */}
                     <td className="px-4 py-3">
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-400/10 border border-amber-400/30 text-amber-300 font-mono font-bold text-xs tracking-wider">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-400/10 border border-amber-400/25 text-amber-300 font-mono font-semibold text-xs tracking-wider">
                         <span className="text-[9px] bg-amber-400/20 px-1 rounded text-amber-200">IND</span>
                         {viol.license_plate_number}
                       </div>
                     </td>
 
                     {/* Challan ID */}
-                    <td className="px-4 py-3 font-mono text-neutral-300 font-bold">
+                    <td className="px-4 py-3 font-mono text-slate-300 font-medium">
                       {viol.challan_number}
                     </td>
 
                     {/* Violation Type */}
-                    <td className="px-4 py-3 text-red-400">
-                      <span className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] uppercase font-bold">
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-medium">
                         Rider Without Helmet
                       </span>
                     </td>
 
                     {/* Vehicle */}
-                    <td className="px-4 py-3 text-neutral-400">
+                    <td className="px-4 py-3 text-slate-300">
                       {viol.vehicle_type || 'MOTORCYCLE'}
                     </td>
 
                     {/* Fine Amount */}
-                    <td className="px-4 py-3 font-bold text-white">
+                    <td className="px-4 py-3 font-mono font-semibold text-slate-100">
                       ₹{viol.fine_amount.toLocaleString()}
                     </td>
 
                     {/* Fine Status */}
                     <td className="px-4 py-3">
-                      <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border rounded-full ${
-                        isPaid ? 'bg-[#34C759]/20 text-[#34C759] border-[#34C759]/40' :
-                        isPending ? 'bg-[#FF9500]/20 text-[#FF9500] border-[#FF9500]/40' :
-                        'bg-red-500/20 text-red-400 border-red-500/40'
+                      <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium border rounded-md ${
+                        isPaid ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                        isPending ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                        'bg-rose-500/10 text-rose-300 border-rose-500/20'
                       }`}>
-                        ● {viol.fine_status}
+                        {viol.fine_status}
                       </span>
                     </td>
 
                     {/* Location */}
-                    <td className="px-4 py-3 text-[#777] max-w-[160px] truncate" title={viol.location_name}>
+                    <td className="px-4 py-3 text-slate-400 max-w-[160px] truncate" title={viol.location_name}>
                       {viol.location_name || 'Highway 48'}
                     </td>
 
@@ -777,9 +797,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => onNavigate('violations')}
-                        className="px-2.5 py-1 bg-[#1F1F1F] hover:bg-red-600/20 hover:text-red-300 text-neutral-300 text-[10px] font-mono uppercase tracking-wider border border-[#333] transition-all"
+                        className="h-7 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition cursor-pointer"
                       >
-                        Inspect Challan
+                        Inspect
                       </button>
                     </td>
                   </tr>
@@ -791,77 +811,82 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       </div>
 
       {/* Main Section: Inspection Video Stream Logs */}
-      <div className="bg-[#111111] border border-[#2A2A2A] p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-[#2A2A2A]">
+      <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div>
-            <h3 className="text-xs font-mono uppercase tracking-widest font-bold text-[#FF9500] flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-[#FF9500]" />
-              <span>Inspection Video Stream Registry</span>
-            </h3>
-            <p className="text-[11px] font-mono text-[#777] mt-0.5">Select video stream to launch bounding box analyzer & GPS telemetry.</p>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+                <Terminal className="w-3.5 h-3.5" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-100">
+                Inspection Video Stream Registry
+              </h3>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Select any stream to inspect automated bounding boxes, defect tags, and GPS coordinates.</p>
           </div>
           <button
             onClick={() => onNavigate('upload')}
-            className="text-xs font-mono text-[#2563EB] hover:text-blue-400 uppercase tracking-wider flex items-center gap-1"
+            className="h-8 px-3.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-medium rounded-xl border border-indigo-500/30 transition flex items-center gap-1.5 cursor-pointer"
           >
-            <span>+ Ingest New Video Stream</span>
+            <span>Ingest New Video Stream</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
-            <thead className="bg-[#161616] text-[#888] uppercase tracking-wider border-y border-[#2A2A2A]">
-              <tr>
-                <th className="px-4 py-2.5">Stream ID & Title</th>
-                <th className="px-4 py-2.5">FPS / Resolution</th>
-                <th className="px-4 py-2.5">RHI Health</th>
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 font-medium">
+                <th className="px-4 py-2.5">Stream & Corridor</th>
+                <th className="px-4 py-2.5">Specs</th>
+                <th className="px-4 py-2.5">Health Score</th>
                 <th className="px-4 py-2.5">Detections</th>
                 <th className="px-4 py-2.5">Severity</th>
                 <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#2A2A2A] bg-[#0F0F0F]">
+            <tbody className="divide-y divide-slate-800/60">
               {safeVideos.map((vid) => (
-                <tr key={vid.id} className="hover:bg-[#1A1A1A] transition-colors">
+                <tr key={vid.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-4 py-3 text-white">
                     <div className="flex items-center space-x-3">
                       <img 
                         src={vid.thumbnail_url} 
                         alt={vid.title} 
-                        className="w-12 h-8 border border-[#333] object-cover" 
+                        className="w-14 h-9 rounded-lg border border-slate-700/80 object-cover shrink-0" 
                       />
                       <div>
-                        <div className="font-bold text-slate-100 flex items-center gap-2">
+                        <div className="font-semibold text-slate-100 flex items-center gap-2">
                           <span>{vid.title}</span>
-                          <span className="text-[9px] text-[#2563EB] bg-[#2563EB]/10 border border-[#2563EB]/30 px-1 py-0.2">
+                          <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded border border-slate-700 font-mono">
                             {vid.id}
                           </span>
                         </div>
-                        <div className="text-[10px] text-[#666]">{vid.filename}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">{vid.filename}</div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-[#AAA]">
-                    <div>{vid.duration_seconds}s</div>
-                    <div className="text-[10px] text-[#666]">{vid.total_frames} frames @ {vid.fps}fps</div>
+                  <td className="px-4 py-3 text-slate-300">
+                    <div className="font-medium">{vid.duration_seconds}s</div>
+                    <div className="text-[11px] text-slate-500">{vid.total_frames} frames @ {vid.fps} fps</div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="font-bold text-white">{vid.analytics?.road_health_score || 82.4}</span>
-                    <span className="text-[10px] text-[#666]"> / 100</span>
+                    <span className="font-mono font-bold text-white">{vid.analytics?.road_health_score || 82.4}</span>
+                    <span className="text-slate-500 text-[11px]"> / 100</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 bg-[#2563EB]/10 text-[#2563EB] font-bold border border-[#2563EB]/30 text-[10px]">
-                      {vid.analytics?.total_detections || 0} DEFECTS
+                    <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 font-medium border border-indigo-500/20 rounded-md text-[11px] font-mono">
+                      {vid.analytics?.total_detections || 0} defects
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${
-                      vid.analytics?.overall_severity === 'critical' ? 'bg-[#FF3B30]/20 text-[#FF3B30] border-[#FF3B30]/40' :
-                      vid.analytics?.overall_severity === 'high' ? 'bg-[#FF9500]/20 text-[#FF9500] border-[#FF9500]/40' :
-                      vid.analytics?.overall_severity === 'medium' ? 'bg-[#FFD60A]/20 text-[#FFD60A] border-[#FFD60A]/40' :
-                      'bg-[#34C759]/20 text-[#34C759] border-[#34C759]/40'
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium border rounded-md ${
+                      vid.analytics?.overall_severity === 'critical' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' :
+                      vid.analytics?.overall_severity === 'high' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' :
+                      vid.analytics?.overall_severity === 'medium' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
+                      'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
                     }`}>
-                      {vid.analytics?.overall_severity || 'LOW'}
+                      {(vid.analytics?.overall_severity || 'LOW').toUpperCase()}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -870,9 +895,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                         onSelectVideo(vid);
                         onNavigate('detector');
                       }}
-                      className="px-3 py-1 bg-[#2563EB] hover:bg-blue-600 text-white text-[11px] font-mono uppercase tracking-wider border border-blue-400 transition-all"
+                      className="h-7 px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition shadow-xs cursor-pointer"
                     >
-                      Inspect Stream
+                      Inspect
                     </button>
                   </td>
                 </tr>

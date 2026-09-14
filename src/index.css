@@ -1,11 +1,141 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
-html, body {
-  overflow-x: hidden;
+:root {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: dark;
+
+  /* Sophisticated Glassmorphism Design System Tokens */
+  --glass-canvas-bg: #070B12;
+  --glass-surface-base: rgba(15, 23, 42, 0.65);
+  --glass-surface-subtle: rgba(255, 255, 255, 0.035);
+  --glass-surface-hover: rgba(255, 255, 255, 0.07);
+  --glass-surface-active: rgba(99, 102, 241, 0.16);
+  --glass-surface-elevated: rgba(15, 23, 42, 0.85);
+  
+  --glass-border-subtle: rgba(255, 255, 255, 0.08);
+  --glass-border-medium: rgba(255, 255, 255, 0.13);
+  --glass-border-strong: rgba(255, 255, 255, 0.22);
+  --glass-border-accent: rgba(99, 102, 241, 0.35);
+
+  --glass-highlight-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  --glass-highlight-strong: inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+
+  --glass-shadow-sm: 0 4px 16px -2px rgba(0, 0, 0, 0.28), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  --glass-shadow-md: 0 12px 36px -4px rgba(0, 0, 0, 0.42), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  --glass-shadow-lg: 0 24px 64px -8px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  --glass-shadow-glow: 0 0 24px -2px rgba(99, 102, 241, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+
+  --glass-blur-sm: 8px;
+  --glass-blur-md: 16px;
+  --glass-blur-lg: 24px;
+  --glass-blur-xl: 32px;
+}
+
+html, body, #root {
+  height: 100%;
   width: 100%;
-  background-color: #0F0F0F;
-  color: #E0E0E0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--glass-canvas-bg);
+  color: #E2E8F0;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glassmorphism Ambient Canvas */
+.glass-ambient-canvas {
+  background-color: #070B12;
+  background-image: 
+    radial-gradient(ellipse 70% 50% at 50% -15%, rgba(99, 102, 241, 0.18), transparent 75%),
+    radial-gradient(circle 600px at 0% 100%, rgba(56, 189, 248, 0.08), transparent 70%),
+    radial-gradient(circle 500px at 100% 90%, rgba(168, 85, 247, 0.07), transparent 70%);
+}
+
+/* Glass Panels & Components */
+.glass-panel {
+  background: var(--glass-surface-base);
+  backdrop-filter: blur(var(--glass-blur-md));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md));
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-shadow-sm);
+}
+
+.glass-panel-elevated {
+  background: var(--glass-surface-elevated);
+  backdrop-filter: blur(var(--glass-blur-xl));
+  -webkit-backdrop-filter: blur(var(--glass-blur-xl));
+  border: 1px solid var(--glass-border-medium);
+  box-shadow: var(--glass-shadow-lg);
+}
+
+.glass-topbar {
+  background: rgba(13, 19, 33, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--glass-border-subtle);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.glass-sidebar {
+  background: rgba(11, 16, 28, 0.78);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-right: 1px solid var(--glass-border-subtle);
+  box-shadow: 4px 0 24px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-statusbar {
+  background: rgba(9, 14, 24, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--glass-border-subtle);
+  box-shadow: 0 -4px 16px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+  transition: all 0.15s ease-in-out;
+}
+
+.glass-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border-medium);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15), 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.glass-pill-active {
+  background: rgba(99, 102, 241, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 0 16px -2px rgba(99, 102, 241, 0.3);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.15s ease-in-out;
+}
+
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(129, 140, 248, 0.5);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 0 12px -2px rgba(99, 102, 241, 0.35);
+}
+
+/* Monospace font assignment */
+code, pre, kbd, samp, .font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
 }
 
 /* Hide scrollbars completely for containers with .no-scrollbar */
@@ -26,23 +156,23 @@ html, body {
   scrollbar-width: none !important;  /* Firefox */
 }
 
-/* Custom dark scrollbars for all scrollable dashboard elements */
+/* Subtle modern scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #141414;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2A2A2A;
-  border-radius: 2px;
+  background: #1E293B;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #FF3B30;
+  background: #334155;
 }
 
 ::-webkit-scrollbar-button {

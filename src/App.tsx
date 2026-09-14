@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Navbar } from './components/Navbar';
+import { AppTopBar } from './components/shell/AppTopBar';
+import { AppSidebar } from './components/shell/AppSidebar';
+import { AppStatusBar } from './components/shell/AppStatusBar';
+import { MobileBottomNav } from './components/shell/MobileBottomNav';
+import { CommandPalette } from './components/shell/CommandPalette';
+import { AuthModal } from './components/shell/AuthModal';
 import { DashboardOverview } from './components/DashboardOverview';
 import { VideoUploadAndProcessor } from './components/VideoUploadAndProcessor';
 import { LiveProcessing } from './components/LiveProcessing';
@@ -21,6 +26,7 @@ import { StolenVehicleAlertModal } from './components/StolenVehicleAlertModal';
 import { StolenVehicleAlert } from './types/stolenVehicle';
 import { stolenAlertAudio } from './utils/stolenSoundAlert';
 import { stolenVehicleService } from './services/stolenVehicleService';
+import { violationService } from './services/violationService';
 import { BackendCodeViewer } from './components/BackendCodeViewer';
 import { SettingsView } from './components/SettingsView';
 import { sampleVideos } from './data/mockData';
@@ -38,6 +44,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [videos, setVideos] = useState<InspectionVideo[]>(sampleVideos);
   const [selectedVideo, setSelectedVideo] = useState<InspectionVideo>(sampleVideos[0]);
+
+  // App Shell Navigation State
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [stolenAlertCount, setStolenAlertCount] = useState<number>(3);
+  const [violationCount, setViolationCount] = useState<number>(4);
 
   // Model Switcher & Registry State
   const [models, setModels] = useState<DetectionModel[]>(initialModels);
@@ -114,6 +128,28 @@ export default function App() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  // Poll for live alert & violation badges
+  useEffect(() => {
+    const fetchBadgeCounts = async () => {
+      try {
+        const [stolenStats, violStats] = await Promise.allSettled([
+          stolenVehicleService.getStats(),
+          violationService.getViolationStats()
+        ]);
+        if (stolenStats.status === 'fulfilled' && stolenStats.value) {
+          setStolenAlertCount(stolenStats.value.active_alerts ?? 0);
+        }
+        if (violStats.status === 'fulfilled' && violStats.value) {
+          setViolationCount(violStats.value.total_violations ?? 0);
+        }
+      } catch (e) {}
+    };
+
+    fetchBadgeCounts();
+    const interval = setInterval(fetchBadgeCounts, 8000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = () => {
@@ -403,27 +439,32 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0F0F0F] text-[#E0E0E0] font-sans flex flex-col justify-between border-[6px] sm:border-[12px] border-[#1A1A1A] selection:bg-[#FF3B30] selection:text-white relative">
+    <div className="h-screen w-screen overflow-hidden glass-ambient-canvas text-slate-100 font-sans flex flex-col selection:bg-indigo-600 selection:text-white relative">
+      {/* Ambient glass luminous orbs */}
+      <div className="pointer-events-none absolute -top-40 left-1/3 w-[600px] h-[350px] bg-indigo-500/10 rounded-full blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 right-10 w-[500px] h-[350px] bg-sky-500/8 rounded-full blur-3xl" />
+      <div className="pointer-events-none absolute top-1/2 -left-20 w-[400px] h-[300px] bg-purple-500/6 rounded-full blur-3xl" />
+
       {/* Dynamic Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 max-w-sm bg-[#141414] border border-[#2A2A2A] p-3 shadow-2xl flex items-start gap-3 font-mono animate-bounce-short">
+        <div className="fixed top-15 right-4 z-50 max-w-sm glass-panel-elevated p-3.5 shadow-2xl flex items-start gap-3 rounded-xl animate-in fade-in slide-in-from-top-2 border border-white/12">
           {toastMessage.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 text-[#34C759] shrink-0 mt-0.5" />
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="w-5 h-5 text-[#FF9500] shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
           )}
           <div className="flex-1">
-            <h4 className="text-xs font-bold text-white uppercase">{toastMessage.title}</h4>
-            <p className="text-[10px] text-[#AAA] mt-0.5">{toastMessage.desc}</p>
+            <h4 className="text-xs font-semibold text-white tracking-wide">{toastMessage.title}</h4>
+            <p className="text-[11px] text-slate-300 mt-0.5">{toastMessage.desc}</p>
           </div>
-          <button onClick={() => setToastMessage(null)} className="text-[#666] hover:text-white">
+          <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white p-0.5 transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Header & Navigation */}
-      <Navbar 
+      {/* Modern Desktop/Tablet App Top Bar */}
+      <AppTopBar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab}
         currentRole={currentRole}
@@ -434,19 +475,45 @@ export default function App() {
         isSwitchingModel={isSwitchingModel}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onLoginSuccess={handleLoginSuccess}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onToggleSidebar={() => {
+          if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+            setIsSidebarCollapsed(prev => !prev);
+          } else {
+            setIsMobileSidebarOpen(prev => !prev);
+          }
+        }}
+        stolenAlertCount={stolenAlertCount}
+        violationCount={violationCount}
       />
 
-      {/* Main View Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {activeTab === 'dashboard' && (
-          <DashboardOverview 
-            videos={videos}
-            onSelectVideo={setSelectedVideo}
-            onNavigate={setActiveTab}
-            currentRole={currentRole}
-          />
-        )}
+      {/* Main Workspace: Collapsible Sidebar + Canvas */}
+      <div className="flex-1 flex overflow-hidden relative">
+        <AppSidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          currentRole={currentRole}
+          isCollapsed={isSidebarCollapsed}
+          setIsCollapsed={setIsSidebarCollapsed}
+          isOpenMobile={isMobileSidebarOpen}
+          setIsOpenMobile={setIsMobileSidebarOpen}
+          stolenAlertCount={stolenAlertCount}
+          violationCount={violationCount}
+          queueCount={videos.length}
+        />
+
+        {/* Scrollable Workstation Content Canvas with subtle glass backdrop */}
+        <main className="flex-1 overflow-y-auto bg-slate-950/30 backdrop-blur-[2px] p-3 sm:p-5 lg:p-6 space-y-6">
+          <div className="max-w-[1680px] mx-auto w-full pb-8">
+            {activeTab === 'dashboard' && (
+              <DashboardOverview 
+                videos={videos}
+                onSelectVideo={setSelectedVideo}
+                onNavigate={setActiveTab}
+                currentRole={currentRole}
+              />
+            )}
 
         {activeTab === 'stolen_registry' && (
           <StolenVehicleRegistryView />
@@ -608,21 +675,48 @@ export default function App() {
             setFrameSkip={setFrameSkip}
           />
         )}
-      </main>
+          </div>
+        </main>
+      </div>
 
-      {/* Technical Dashboard System Footer */}
-      <footer className="h-auto py-2 bg-[#1A1A1A] border-t border-[#2A2A2A] px-4 sm:px-6 text-[9px] font-mono text-[#888] flex flex-col sm:flex-row items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 bg-[#34C759] rounded-full animate-pulse"></span>
-          <span>
-            BACKEND: FastAPI 0.111 // DETECTOR: [{(currentModel?.display_name || currentModel?.model_name || 'YOLO11').toUpperCase()}] // OLLAMA [{(selectedModel || 'llama3.1').toUpperCase()}] // PostgreSQL 16.2
-          </span>
-        </div>
-        <div className="hidden md:block">
-          ACTIVE WEIGHTS: {currentModel?.weight_path || 'backend/weights/best.pt'} // ROLE: [{(currentRole || 'admin').toUpperCase()}]
-        </div>
-        <div>MEMORY_USAGE: 4.2GB / 16GB // DISK: 24% // CUDA_0: ONLINE</div>
-      </footer>
+      {/* Mobile Bottom Navigation (screens < lg) */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenMenu={() => setIsMobileSidebarOpen(true)}
+        stolenAlertCount={stolenAlertCount}
+        queueCount={videos.length}
+      />
+
+      {/* Modern Desktop/Tablet App Status Bar */}
+      <AppStatusBar
+        currentModel={currentModel}
+        currentRole={currentRole}
+        selectedModel={selectedModel}
+        totalVideosCount={videos.length}
+      />
+
+      {/* Command Palette (⌘K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelectTab={(tab) => {
+          setActiveTab(tab);
+          setIsMobileSidebarOpen(false);
+        }}
+        currentRole={currentRole}
+        models={models}
+        onSelectModel={handleSelectModel}
+      />
+
+      {/* JWT Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+        setCurrentRole={setCurrentRole}
+      />
+
       {/* Global Stolen Vehicle Real-Time Alert Intercept Modal */}
       <StolenVehicleAlertModal
         alert={activeStolenAlert}

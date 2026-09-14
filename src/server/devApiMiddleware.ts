@@ -108,6 +108,52 @@ export function devApiPlugin(): Plugin {
         const [cleanPath] = url.split('?');
         const normalized = cleanPath.replace(/^\/api\/v1/, '').replace(/^\/api/, '');
 
+        // 0. Videos & Processing Endpoints
+        if (normalized === '/videos/upload' && method === 'POST') {
+          const id = `vid-${Date.now().toString(36)}`;
+          return sendJson(res, 200, {
+            id,
+            title: `Road Inspection Segment ${id.slice(-4).toUpperCase()}`,
+            filename: `inspection_${id}.mp4`,
+            file_size_bytes: 38500000,
+            duration_seconds: 45.0,
+            total_frames: 1350,
+            fps: 30.0,
+            resolution: '1920x1080',
+            status: 'completed',
+            thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+            created_at: new Date().toISOString(),
+            analytics: {
+              road_health_score: 74.2,
+              total_detections: 12,
+              pothole_count: 5,
+              crack_count: 7,
+              critical_count: 2,
+              damage_density_per_km: 9.1,
+              overall_severity: 'high'
+            }
+          });
+        }
+
+        if (normalized === '/process/run' && method === 'POST') {
+          const body = await parseJsonBody(req).catch(() => ({}));
+          return sendJson(res, 200, {
+            video_id: body.video_id || 'vid-mock',
+            status: 'processing',
+            message: 'OpenCV frame extraction & YOLO tensor inference initiated',
+            total_frames_processed: 1350,
+            total_detections_found: 12,
+            road_health_score: 74.2
+          });
+        }
+
+        if ((normalized === '/process/stop' || normalized === '/process/pause' || normalized === '/process/resume' || normalized === '/process/cancel') && method === 'POST') {
+          return sendJson(res, 200, {
+            status: 'success',
+            message: 'Pipeline state updated successfully'
+          });
+        }
+
         // 1. Driver Complaints Endpoints
         if ((normalized === '/driver/complaints' || cleanPath.endsWith('/driver/complaints')) && method === 'POST') {
           const body = await parseJsonBody(req);
@@ -391,12 +437,124 @@ export function devApiPlugin(): Plugin {
           });
         }
 
-        if (normalized === '/driver/settings' && (method === 'POST' || method === 'PUT')) {
+        if (normalized === '/driver/settings') {
+          if (method === 'GET') {
+            return sendJson(res, 200, {
+              alert_distance_meters: 25,
+              voice_alerts_enabled: true,
+              min_confidence: 0.75,
+              min_severity: 'medium',
+              camera_source: 'windshield_front',
+              fps: 30,
+              frame_skip: 1,
+              camera_height_meters: 1.35,
+              camera_pitch_degrees: -4.5,
+              speed_kmh: 45
+            });
+          }
           const body = await parseJsonBody(req);
           return sendJson(res, 200, {
             status: 'success',
             message: 'Driver assistance parameters updated successfully',
             settings: body
+          });
+        }
+
+        if (normalized === '/driver/road-info') {
+          return sendJson(res, 200, {
+            road_name: 'National Highway 48 (Delhi-Jaipur Expressway)',
+            road_authority: 'National Highways Authority of India (NHAI)',
+            city: 'Gurugram',
+            state: 'Haryana',
+            is_resolved: true,
+            potholes_this_session: 0,
+            potholes_today: 14,
+            potholes_this_road: 6
+          });
+        }
+
+        if (normalized === '/driver/start') {
+          return sendJson(res, 200, {
+            status: 'active',
+            session_id: 'DRV-SESSION-2026',
+            message: 'Driver assistance mode started'
+          });
+        }
+
+        if (normalized === '/driver/stop') {
+          return sendJson(res, 200, {
+            status: 'stopped',
+            message: 'Driver assistance mode stopped'
+          });
+        }
+
+        if (normalized === '/driver/process-frame' && method === 'POST') {
+          const body = await parseJsonBody(req).catch(() => ({}));
+          const speed = body.speed_kmh || 45;
+          const simDist = Math.max(7.5, +(28.5 - ((Date.now() / 1000) % 15) * 1.5).toFixed(1));
+          const isClose = simDist < 12;
+
+          return sendJson(res, 200, {
+            fps: 29.4,
+            latency_ms: 16.8,
+            primary_warning: {
+              level: isClose ? 'critical' : simDist < 18 ? 'high' : 'medium',
+              title: isClose ? 'CRITICAL POTHOLE AHEAD' : 'HIGH RISK POTHOLE',
+              voice_message: isClose ? 'Emergency. Deep pothole 9 meters ahead. Slow down now.' : 'Caution. Pothole detected ahead.',
+              color: isClose ? '#EF4444' : '#F97316',
+              badge_bg: isClose ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' : 'bg-orange-500/20 text-orange-400 border-orange-500/40',
+              priority: isClose ? 4 : 3,
+              category: 'pothole',
+              category_display: 'Pothole',
+              distance_meters: simDist,
+              lane_position: 'Center lane',
+              is_center_lane: true,
+              confidence: 0.94
+            },
+            overlay_image_base64: '',
+            tracked_hazards: [
+              {
+                track_id: 101,
+                category: 'pothole',
+                distance_meters: simDist,
+                lane_position: 'Center lane',
+                confidence: 0.94,
+                bbox: { x_min: 0.42, y_min: 0.65, x_max: 0.58, y_max: 0.82 }
+              }
+            ],
+            road_info: {
+              road_name: 'National Highway 48 (Delhi-Jaipur Expressway)',
+              road_authority: 'National Highways Authority of India (NHAI)',
+              city: 'Gurugram',
+              state: 'Haryana',
+              is_resolved: true
+            },
+            potholes_this_session: 3,
+            potholes_today: 14,
+            potholes_this_road: 6,
+            hardware_telemetry: {
+              is_cuda: true,
+              device_name: 'NVIDIA TensorRT / CUDA 12.4 Acceleration',
+              gpu_allocated_mb: 1824.5,
+              gpu_reserved_mb: 2450.0,
+              gpu_total_mb: 8192.0,
+              gpu_utilization_pct: 24.5,
+              fps: 29.4,
+              total_frames_processed: 1530,
+              avg_latency_ms: 16.8,
+              min_latency_ms: 14.1,
+              max_latency_ms: 21.3,
+              dropped_frames: 0,
+              latency_history: [16.8, 16.2, 17.1, 16.5, 16.3, 16.9],
+              pipeline_status: 'optimal'
+            },
+            stage_breakdown_ms: {
+              capture: 4.1,
+              preprocessing: 5.8,
+              yolo_inference: 14.2,
+              distance_depth: 3.2,
+              postprocessing_tts: 4.5
+            }
           });
         }
 

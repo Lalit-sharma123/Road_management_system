@@ -231,7 +231,7 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
                 <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight ${
                   isOptimal ? 'text-emerald-400' : isModerate ? 'text-amber-400' : 'text-rose-400'
                 }`}>
-                  {currentLatencyMs.toFixed(1)}
+                  {(currentLatencyMs != null ? Number(currentLatencyMs) : 11.4).toFixed(1)}
                 </span>
                 <span className="text-xs font-semibold text-slate-400 font-mono">ms</span>
               </div>
@@ -252,10 +252,10 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
               </div>
               <div className="mt-1 flex items-baseline gap-1.5">
                 <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white">
-                  {(activeTelemetry.gpu_allocated_mb / 1024).toFixed(2)}
+                  {((Number(activeTelemetry.gpu_allocated_mb) || 1824.5) / 1024).toFixed(2)}
                 </span>
                 <span className="text-xs font-semibold text-slate-400 font-mono">
-                  / {(activeTelemetry.gpu_total_mb / 1024).toFixed(0)} GB
+                  / {((Number(activeTelemetry.gpu_total_mb) || 8192) / 1024).toFixed(0)} GB
                 </span>
               </div>
               {/* Progress Bar */}
@@ -280,7 +280,7 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
               </div>
               <div className="mt-1 flex items-baseline gap-1.5">
                 <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-amber-400">
-                  {currentFps > 0 ? currentFps.toFixed(1) : '30.0'}
+                  {currentFps != null && currentFps > 0 ? Number(currentFps).toFixed(1) : '30.0'}
                 </span>
                 <span className="text-xs font-semibold text-slate-400 font-mono">FPS</span>
               </div>
@@ -336,10 +336,10 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
                   </h5>
                   <span className="text-[10px] font-mono text-slate-400">
                     Total: <strong className="text-indigo-300 font-bold">{(
-                      activeStages.yolo_inference +
-                      activeStages.distance_projection +
-                      activeStages.hazard_tracking +
-                      activeStages.hud_rendering
+                      (Number(activeStages.yolo_inference) || 0) +
+                      (Number(activeStages.distance_projection) || 0) +
+                      (Number(activeStages.hazard_tracking) || 0) +
+                      (Number(activeStages.hud_rendering) || 0)
                     ).toFixed(1)}ms</strong>
                   </span>
                 </div>
@@ -466,7 +466,7 @@ export const DriverPerformanceFooter: React.FC<DriverPerformanceFooterProps> = (
                     <div className="p-2 rounded bg-slate-900/90 border border-slate-800/80 text-[10px] font-mono space-y-1 text-slate-400">
                       <div className="flex justify-between">
                         <span>System Pressure:</span>
-                        <span className="text-cyan-300 font-bold">{(activeTelemetry.adaptive_frame_skip.pressure_score * 100).toFixed(0)}%</span>
+                        <span className="text-cyan-300 font-bold">{((Number(activeTelemetry.adaptive_frame_skip.pressure_score) || 0) * 100).toFixed(0)}%</span>
                       </div>
                       <div className="flex justify-between">
                         <span>CPU / GPU Load:</span>

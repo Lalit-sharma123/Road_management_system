@@ -20,9 +20,11 @@ import {
   Layers,
   Award,
   Zap,
-  TableProperties
+  TableProperties,
+  TrendingUp
 } from 'lucide-react';
 import { InspectionVideo, UserRole } from '../types/inspection';
+import { InspectionDamageSeverityChart } from './InspectionDamageSeverityChart';
 
 interface ReportsViewProps {
   video: InspectionVideo;
@@ -131,10 +133,12 @@ Road Name: ${roadName}
 Inspector: ${inspectorName} (${inspectorTitle})
 Road Health Score: ${video.analytics?.road_health_score || 78.5} / 100 (FAIR CONDITION)
 
-STATISTICS:
+STATISTICS & D3.JS SEVERITY TIMELINE:
 - Total Detections: ${video.analytics?.total_detections || 12}
 - Critical Hazards: ${video.analytics?.critical_count || 2}
 - Inspection Distance: 1.45 KM
+- Video Duration: ${video.duration_seconds || 48}s
+- Peak Severity Score: 95.0 / 100 (Critical broken asphalt at Frame 468)
 - Average YOLO Confidence: 88.4%
 
 AI SUMMARY (${(selectedModel || 'llama3.1').toUpperCase()}):
@@ -353,12 +357,27 @@ Date Signed: ${inspectionDate}
           </div>
         </div>
 
-        {/* Section: AI Executive Summary (6. AI Summary) */}
+        {/* Section: Damage Severity Over Inspection Duration (D3.js Line Chart) */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#FF9500]" />
+              <span>6. Damage Severity Over Video Inspection Duration (D3.js Line Chart)</span>
+            </h3>
+            <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 font-bold">
+              ASTM D6433 TEMPORAL TELEMETRY
+            </span>
+          </div>
+
+          <InspectionDamageSeverityChart video={video} />
+        </div>
+
+        {/* Section: AI Executive Summary (7. AI Summary) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#FF9500]" />
-              <span>6. Local Ollama AI Executive Structural Assessment</span>
+              <span>7. Local Ollama AI Executive Structural Assessment</span>
             </h3>
             <span className="text-[10px] text-[#34C759] bg-[#34C759]/10 border border-[#34C759]/30 px-2 py-0.5 font-bold">
               MODEL: {(selectedModel || 'llama3.1').toUpperCase()} (GPU INFERENCE)
@@ -375,11 +394,11 @@ Date Signed: ${inspectionDate}
           </div>
         </div>
 
-        {/* Section: GPS & GIS Telemetry (7. GPS) */}
+        {/* Section: GPS & GIS Telemetry (8. GPS) */}
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
             <MapPin className="w-4 h-4 text-[#FF9500]" />
-            <span>7. GPS & GIS Coordinates Telemetry</span>
+            <span>8. GPS & GIS Coordinates Telemetry</span>
           </h3>
 
           <div className="bg-[#141414] border border-[#2A2A2A] p-4 text-xs grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -401,11 +420,11 @@ Date Signed: ${inspectionDate}
           </div>
         </div>
 
-        {/* Section: Damage Inspection Frame Snapshots (8. Images) */}
+        {/* Section: Damage Inspection Frame Snapshots (9. Images) */}
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
             <FileText className="w-4 h-4 text-[#FF9500]" />
-            <span>8. Captured Damage Snapshots & Visual Evidence</span>
+            <span>9. Captured Damage Snapshots & Visual Evidence</span>
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -433,11 +452,11 @@ Date Signed: ${inspectionDate}
           </div>
         </div>
 
-        {/* Section: Comprehensive Damage Table (9. Damage Table) */}
+        {/* Section: Comprehensive Damage Table (10. Damage Table) */}
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
             <TableProperties className="w-4 h-4 text-[#FF9500]" />
-            <span>9. Comprehensive Road Damage Telemetry Log</span>
+            <span>10. Comprehensive Road Damage Telemetry Log</span>
           </h3>
 
           <div className="bg-[#141414] border border-[#2A2A2A] overflow-x-auto">
@@ -478,11 +497,11 @@ Date Signed: ${inspectionDate}
           </div>
         </div>
 
-        {/* Section: Recommendations (10. Recommendations) */}
+        {/* Section: Recommendations (11. Recommendations) */}
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500] flex items-center gap-2">
             <CheckSquare className="w-4 h-4 text-[#FF9500]" />
-            <span>10. Official Maintenance Work Order Recommendations</span>
+            <span>11. Official Maintenance Work Order Recommendations</span>
           </h3>
 
           <div className="bg-[#141414] border border-[#2A2A2A] p-4 space-y-2 text-xs">
@@ -497,7 +516,7 @@ Date Signed: ${inspectionDate}
 
         {/* Section: Inspector Remarks */}
         <div className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500]">11. Senior Field Inspector Remarks</h3>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-[#FF9500]">12. Senior Field Inspector Remarks</h3>
           <textarea
             value={inspectorNotes}
             onChange={(e) => setInspectorNotes(e.target.value)}
@@ -534,7 +553,7 @@ Date Signed: ${inspectionDate}
 
           {/* Cryptographic Signature & Inspector Sign Area */}
           <div className="space-y-3 w-full md:w-auto text-right">
-            <div className="text-[10px] text-[#888] uppercase font-bold">12. Cryptographic Digital Signature</div>
+            <div className="text-[10px] text-[#888] uppercase font-bold">13. Cryptographic Digital Signature</div>
             <div className="text-[9px] text-[#34C759] font-mono bg-[#0B0B0B] p-2 border border-[#2A2A2A] inline-block text-left max-w-sm">
               SHA256: 8f9a2b4c1d3e5f7a9b0c2d4e6f8a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f
             </div>

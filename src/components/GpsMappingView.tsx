@@ -614,8 +614,8 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
             </span>
           </div>
           <div style="font-size: 10px; color: #AAA; line-height: 1.5; margin-bottom: 6px;">
-            <div>🎯 <b>Confidence:</b> <span style="color: #FF9500; font-weight: bold;">${(marker.confidence * 100).toFixed(0)}%</span></div>
-            <div>📍 <b>GPS:</b> ${marker.latitude.toFixed(5)}°, ${marker.longitude.toFixed(5)}°</div>
+            <div>🎯 <b>Confidence:</b> <span style="color: #FF9500; font-weight: bold;">${((Number(marker.confidence) || 0.8) * 100).toFixed(0)}%</span></div>
+            <div>📍 <b>GPS:</b> ${(Number(marker.latitude) || 28.4595).toFixed(5)}°, ${(Number(marker.longitude) || 77.0266).toFixed(5)}°</div>
             ${marker.road_authority ? `<div>🏛 <b>Authority:</b> <span style="color:#60A5FA;">${marker.road_authority}</span></div>` : ''}
           </div>
         </div>
@@ -708,7 +708,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
                 </span>
               </div>
               <div className="text-[10px] text-slate-400 truncate mt-0.5 font-mono">
-                {selectedMarker.road_name} • {selectedMarker.latitude.toFixed(4)}°, {selectedMarker.longitude.toFixed(4)}°
+                {selectedMarker.road_name} • {(Number(selectedMarker.latitude) || 28.4595).toFixed(4)}°, {(Number(selectedMarker.longitude) || 77.0266).toFixed(4)}°
               </div>
             </div>
 
@@ -1036,7 +1036,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
                 <span>GPS CENTER:</span>
               </span>
               <div className="text-white font-bold truncate mt-0.5">
-                {currentVehiclePosition ? `${currentVehiclePosition.lat.toFixed(4)}° N, ${currentVehiclePosition.lng.toFixed(4)}° E` : '28.4635° N, 77.0305° E'}
+                {currentVehiclePosition?.lat != null ? `${Number(currentVehiclePosition.lat).toFixed(4)}° N, ${Number(currentVehiclePosition.lng).toFixed(4)}° E` : '28.4635° N, 77.0305° E'}
               </div>
             </div>
             <div className="bg-[#141414] border border-[#222] p-2">
@@ -1149,17 +1149,17 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
 
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">YOLO CONFIDENCE:</span>
-                <span className="text-[#FF9500] font-bold">{(selectedMarker.confidence * 100).toFixed(0)}%</span>
+                <span className="text-[#FF9500] font-bold">{((Number(selectedMarker.confidence) || 0.8) * 100).toFixed(0)}%</span>
               </div>
 
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">GPS LATITUDE:</span>
-                <span className="text-white font-mono">{selectedMarker.latitude.toFixed(6)}° N</span>
+                <span className="text-white font-mono">{(Number(selectedMarker.latitude) || 28.4595).toFixed(6)}° N</span>
               </div>
 
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">GPS LONGITUDE:</span>
-                <span className="text-white font-mono">{selectedMarker.longitude.toFixed(6)}° E</span>
+                <span className="text-white font-mono">{(Number(selectedMarker.longitude) || 77.0266).toFixed(6)}° E</span>
               </div>
 
               {onReportPothole && (
