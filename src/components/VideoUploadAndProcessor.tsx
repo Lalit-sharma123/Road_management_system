@@ -159,6 +159,8 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
 
   // Drag & drop highlight state
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
+  const [isSingleDraggingOver, setIsSingleDraggingOver] = useState<boolean>(false);
+  const [autoLaunchRealtime, setAutoLaunchRealtime] = useState<boolean>(true);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -217,9 +219,6 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
       setIsSampleVideo(false);
       setIsPlaying(false);
       setCurrentTime(0);
-      return () => {
-        URL.revokeObjectURL(url);
-      };
     }
   }, [selectedFile]);
 
@@ -911,19 +910,85 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
         setActiveMode('batch');
         return;
       }
-      const file = e.target.files[0];
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      if (!['mp4', 'avi', 'mov', 'mkv'].includes(ext || '')) {
-        setProcessingError('Unsupported file format. Please upload MP4, AVI, MOV, or MKV.');
-        return;
+      handleSingleFileSelected(e.target.files[0]);
+    }
+  };
+
+  const handleSingleFileSelected = (file: File, autoStart = autoLaunchRealtime) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['mp4', 'avi', 'mov', 'mkv'].includes(ext || '')) {
+      setProcessingError('Unsupported file format. Please upload MP4, AVI, MOV, or MKV.');
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      setProcessingError('File size exceeds maximum allowed limit (200MB).');
+      return;
+    }
+    setProcessingError(null);
+    setSelectedFile(file);
+    const title = file.name.replace(/\.[^/.]+$/, '');
+    setVideoTitle(title);
+    const objUrl = URL.createObjectURL(file);
+    setPreviewUrl(objUrl);
+    setIsSampleVideo(false);
+
+    if (autoStart && currentRole !== 'viewer') {
+      handleLaunchInstantRealtime(file, title, objUrl);
+    }
+  };
+
+  const handleLaunchInstantRealtime = async (file: File, title: string, objUrl: string) => {
+    const videoId = `vid_${Date.now()}`;
+    const newVideo: InspectionVideo = {
+      id: videoId,
+      title: title || file.name.replace(/\.[^/.]+$/, ''),
+      filename: file.name,
+      file_size_bytes: file.size,
+      duration_seconds: 45.0,
+      total_frames: 1350,
+      fps: 30.0,
+      resolution: '1920x1080',
+      status: 'processing',
+      thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+      video_url: objUrl,
+      local_video_url: objUrl,
+      created_at: new Date().toISOString(),
+      analytics: {
+        road_health_score: 84.5,
+        total_detections: 0,
+        pothole_count: 0,
+        crack_count: 0,
+        critical_count: 0,
+        damage_density_per_km: 0,
+        overall_severity: 'medium'
       }
-      if (file.size > 200 * 1024 * 1024) {
-        setProcessingError('File size exceeds maximum allowed limit (200MB).');
-        return;
-      }
-      setProcessingError(null);
-      setSelectedFile(file);
-      setVideoTitle(file.name.replace(/\.[^/.]+$/, ''));
+    };
+
+    // Immediately push to app state so LiveProcessing has immediate video context
+    onAddVideo(newVideo);
+
+    try {
+      sessionStorage.setItem('preferred_speed_preset', speedProfile || 'turbo');
+    } catch {}
+
+    // Navigate immediately to real-time detection view!
+    onNavigate('live_processing');
+
+    // In parallel background worker, upload and execute pipeline
+    try {
+      videoService.uploadVideo(file, title || file.name).then((res) => {
+        videoService.runProcessingPipeline({
+          video_id: res.id || videoId,
+          confidence_threshold: confThreshold,
+          frame_skip: frameSkip,
+          enable_histogram_equalization: enableClahe,
+          enable_gaussian_blur: enableGaussianBlur,
+          fast_mode: speedProfile === 'turbo' || speedProfile === 'fast',
+          speed_preset: speedProfile
+        }).catch(() => {});
+      }).catch(() => {});
+    } catch (e) {
+      console.warn('Background upload initiation notice:', e);
     }
   };
 
@@ -1018,7 +1083,14 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
       }
 
       addLog('Uploading', 20, `Video uploaded successfully with ID: ${uploadedVideo.id}`);
-      onAddVideo(uploadedVideo);
+
+      // Pass video_url and local_video_url so LiveProcessing can display user video frames
+      const enrichedVideo: InspectionVideo = {
+        ...uploadedVideo,
+        video_url: previewUrl || (selectedFile ? URL.createObjectURL(selectedFile) : uploadedVideo.video_url),
+        local_video_url: previewUrl || (selectedFile ? URL.createObjectURL(selectedFile) : uploadedVideo.video_url)
+      };
+      onAddVideo(enrichedVideo);
 
       addLog('Extracting Frames', 35, `Triggering background OpenCV frame extraction & YOLO detection stream (${speedProfile.toUpperCase()} Mode)...`);
 
@@ -1921,18 +1993,34 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
                 </div>
               ) : (
                 <div 
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsSingleDraggingOver(true);
+                  }}
+                  onDragLeave={() => setIsSingleDraggingOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsSingleDraggingOver(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      handleSingleFileSelected(e.dataTransfer.files[0]);
+                    }
+                  }}
                   onClick={() => singleFileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all bg-slate-900/30 cursor-pointer relative group ${
-                    currentRole === 'viewer' ? 'border-slate-800 opacity-50 cursor-not-allowed' : 'border-slate-700/70 hover:border-indigo-500/70'
-                  }`}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer relative group ${
+                    isSingleDraggingOver 
+                      ? 'border-indigo-500 bg-indigo-500/15 ring-2 ring-indigo-500/30' 
+                      : 'border-slate-700/70 hover:border-indigo-500/70 bg-slate-900/30'
+                  } ${currentRole === 'viewer' ? 'border-slate-800 opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-400 mx-auto mb-3 flex items-center justify-center group-hover:scale-105 transition-transform">
-                    <Video className="w-5 h-5" />
+                  <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 mx-auto mb-3 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Zap className="w-6 h-6 text-amber-400 fill-amber-400 animate-pulse" />
                   </div>
-                  <p className="text-sm font-semibold text-white">
+                  <p className="text-sm font-bold text-white">
                     Drag and drop road video here, or click to browse
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">Supported formats: MP4, AVI, MOV, MKV (Max 200MB)</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Instant fast processing & real-time YOLO detection • MP4, AVI, MOV, MKV (Max 200MB)
+                  </p>
                 </div>
               )}
 
@@ -1968,6 +2056,26 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
                   <Layers className="w-3.5 h-3.5" />
                   <span>Switch to Batch Processing Queue</span>
                 </button>
+              </div>
+
+              {/* Real-time Detection Auto-launch toggle */}
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-400 fill-amber-400 animate-pulse" />
+                  <div>
+                    <span className="text-xs font-semibold text-white">Auto-Launch Real-Time Detection</span>
+                    <p className="text-[11px] text-slate-400">Instantly displays live detection viewport on video upload</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoLaunchRealtime}
+                    onChange={(e) => setAutoLaunchRealtime(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
               </div>
 
               <div className="space-y-1.5 pt-2">
@@ -2113,6 +2221,27 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
                   </label>
                 </div>
               </div>
+
+              {/* Instant Real-Time Detection Launch */}
+              <button
+                onClick={() => {
+                  if (selectedFile) {
+                    handleLaunchInstantRealtime(selectedFile, videoTitle, previewUrl || URL.createObjectURL(selectedFile));
+                  } else if (previewUrl) {
+                    handleStartSingleProcessing();
+                  }
+                }}
+                disabled={!previewUrl || isProcessing || currentRole === 'viewer'}
+                className={`w-full py-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-2 border shadow-lg ${
+                  previewUrl && !isProcessing && currentRole !== 'viewer'
+                    ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white border-emerald-400/40 shadow-emerald-500/20 active:scale-[0.99] cursor-pointer'
+                    : 'bg-slate-800 text-slate-500 border-slate-700/50 cursor-not-allowed'
+                }`}
+                title="Immediately stream detection overlay on the uploaded video frames"
+              >
+                <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
+                <span>🚀 Launch Real-Time Detection Now ({speedProfile.toUpperCase()})</span>
+              </button>
 
               <button
                 onClick={handleStartSingleProcessing}

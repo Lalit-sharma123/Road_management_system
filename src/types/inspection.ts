@@ -95,6 +95,7 @@ export interface InspectionVideo {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   thumbnail_url: string;
   video_url?: string;
+  local_video_url?: string;
   processed_video_url?: string;
   file_path?: string;
   processed_file_path?: string;
