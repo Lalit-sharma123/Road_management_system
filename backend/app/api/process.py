@@ -320,9 +320,11 @@ async def execute_video_processing_task(
     cancel_event: asyncio.Event,
     video_id: str,
     confidence_threshold: float = 0.35,
-    frame_skip: int = 2,
-    enable_histogram_equalization: bool = True,
-    enable_gaussian_blur: bool = True
+    frame_skip: int = 5,
+    enable_histogram_equalization: bool = False,
+    enable_gaussian_blur: bool = False,
+    fast_mode: bool = True,
+    speed_preset: str = "turbo"
 ):
     """
     Asynchronous Background Task:
@@ -802,8 +804,8 @@ async def execute_video_processing_task(
                 print(f"⚠️ [DB Non-blocking Persistence Notice for Frame #{frame_num}]: {db_err}")
 
             del annotated_img, raw_frame, preprocessed_frame, buffer
-            # High-throughput real-time streaming pacing
-            frame_delay = max(0.005, min(0.02, 0.35 / max(processor.fps or 30.0, 1.0)))
+            # High-throughput real-time streaming pacing (Turbo: minimal 1ms yield for high FPS)
+            frame_delay = 0.001 if fast_mode else max(0.005, min(0.02, 0.35 / max(processor.fps or 30.0, 1.0)))
             await asyncio.sleep(frame_delay)
 
         # Check if processing was cancelled before writing final report
@@ -970,15 +972,18 @@ async def process_video_pipeline(
     session_id, cancel_event = await global_session_manager.start_new_session(video.id)
 
     # 2. Launch background task with session isolation
+    is_turbo_mode = bool(req.fast_mode if req.fast_mode is not None else True)
     task = asyncio.create_task(
         execute_video_processing_task(
             session_id=session_id,
             cancel_event=cancel_event,
             video_id=video.id,
             confidence_threshold=float(req.confidence_threshold if req.confidence_threshold is not None else 0.35),
-            frame_skip=int(req.frame_skip if req.frame_skip is not None else 2),
-            enable_histogram_equalization=bool(req.enable_histogram_equalization if req.enable_histogram_equalization is not None else True),
-            enable_gaussian_blur=bool(req.enable_gaussian_blur if req.enable_gaussian_blur is not None else True)
+            frame_skip=int(req.frame_skip if req.frame_skip is not None else (5 if is_turbo_mode else 2)),
+            enable_histogram_equalization=bool(req.enable_histogram_equalization if req.enable_histogram_equalization is not None else False),
+            enable_gaussian_blur=bool(req.enable_gaussian_blur if req.enable_gaussian_blur is not None else False),
+            fast_mode=is_turbo_mode,
+            speed_preset=str(req.speed_preset or ("turbo" if is_turbo_mode else "precision"))
         )
     )
     global_session_manager.active_task = task

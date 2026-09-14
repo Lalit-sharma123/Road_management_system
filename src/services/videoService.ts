@@ -7,6 +7,8 @@ export interface ProcessVideoParams {
   frame_skip?: number;
   enable_histogram_equalization?: boolean;
   enable_gaussian_blur?: boolean;
+  fast_mode?: boolean;
+  speed_preset?: 'turbo' | 'fast' | 'precision';
 }
 
 export interface ProcessVideoResponse {
@@ -16,6 +18,9 @@ export interface ProcessVideoResponse {
   total_frames_processed: number;
   total_detections_found: number;
   road_health_score: number;
+  fast_mode?: boolean;
+  target_fps?: number;
+  speed_preset?: string;
 }
 
 export const videoService = {
@@ -45,12 +50,15 @@ export const videoService = {
   },
 
   async runProcessingPipeline(params: ProcessVideoParams): Promise<ProcessVideoResponse> {
+    const isTurbo = params.speed_preset === 'turbo' || params.fast_mode === true || params.fast_mode === undefined;
     const response = await apiClient.post<ProcessVideoResponse>('/process/run', {
       video_id: params.video_id,
       confidence_threshold: params.confidence_threshold ?? 0.35,
-      frame_skip: params.frame_skip ?? 2,
-      enable_histogram_equalization: params.enable_histogram_equalization ?? true,
-      enable_gaussian_blur: params.enable_gaussian_blur ?? true,
+      frame_skip: params.frame_skip ?? (isTurbo ? 5 : 2),
+      enable_histogram_equalization: isTurbo ? false : (params.enable_histogram_equalization ?? true),
+      enable_gaussian_blur: isTurbo ? false : (params.enable_gaussian_blur ?? true),
+      fast_mode: isTurbo,
+      speed_preset: params.speed_preset ?? (isTurbo ? 'turbo' : 'precision'),
     }, {
       timeout: 60000,
     });

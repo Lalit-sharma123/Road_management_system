@@ -247,8 +247,10 @@ class ProcessVideoRequest(BaseModel):
     video_id: Optional[str] = Field(None, alias="videoId")
     confidence_threshold: Optional[float] = Field(0.35, alias="confidence")
     frame_skip: Optional[int] = Field(5, alias="frameSkip")
-    enable_histogram_equalization: Optional[bool] = True
-    enable_gaussian_blur: Optional[bool] = True
+    enable_histogram_equalization: Optional[bool] = False
+    enable_gaussian_blur: Optional[bool] = False
+    fast_mode: Optional[bool] = Field(True, alias="fastMode")
+    speed_preset: Optional[str] = Field("turbo", alias="speedPreset")
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 

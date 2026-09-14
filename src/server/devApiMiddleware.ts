@@ -137,13 +137,21 @@ export function devApiPlugin(): Plugin {
 
         if (normalized === '/process/run' && method === 'POST') {
           const body = await parseJsonBody(req).catch(() => ({}));
+          const isTurbo = body.fast_mode !== false && (body.speed_preset === 'turbo' || body.frame_skip >= 4 || !body.speed_preset);
           return sendJson(res, 200, {
             video_id: body.video_id || 'vid-mock',
             status: 'processing',
-            message: 'OpenCV frame extraction & YOLO tensor inference initiated',
-            total_frames_processed: 1350,
+            message: isTurbo 
+              ? '⚡ Ultra-Fast OpenCV frame extraction & Tensor Core INT8 YOLO inference initiated (Target: 60+ FPS)' 
+              : 'OpenCV frame extraction & YOLO tensor inference initiated',
+            total_frames_processed: isTurbo ? 270 : 1350,
             total_detections_found: 12,
-            road_health_score: 74.2
+            road_health_score: 74.2,
+            fast_mode: isTurbo,
+            speed_preset: body.speed_preset || (isTurbo ? 'turbo' : 'precision'),
+            target_fps: isTurbo ? 60 : 30,
+            latency_ms: isTurbo ? 14.2 : 32.5,
+            hardware_acceleration: isTurbo ? 'NVIDIA TensorRT FP16 / Turbo Accelerated' : 'Standard CUDA'
           });
         }
 
