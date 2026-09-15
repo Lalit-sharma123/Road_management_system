@@ -1,5 +1,10 @@
 import type { Plugin, Connect } from 'vite';
 import { IncomingMessage, ServerResponse } from 'http';
+import { sampleVideos } from '../data/mockData';
+import { sampleCameras } from '../data/mockCameras';
+
+let memoryVideos = [...sampleVideos];
+let memoryCameras = [...sampleCameras];
 
 interface StoredComplaint {
   id: string;
@@ -82,6 +87,15 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
   res.end(JSON.stringify(data));
 }
 
+function sendSvg(res: ServerResponse, statusCode: number, svgContent: string) {
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.end(svgContent);
+}
+
 export function devApiPlugin(): Plugin {
   return {
     name: 'dev-api-middleware',
@@ -90,9 +104,62 @@ export function devApiPlugin(): Plugin {
         const url = req.url || '';
         const method = req.method || 'GET';
 
-        // Only intercept /api/ routes if no external backend URL is set
-        if (!url.startsWith('/api/') && !url.startsWith('/driver/') && !url.startsWith('/violations') && !url.startsWith('/stolen-vehicles')) {
+        // Intercept API routes and processed assets
+        if (
+          !url.startsWith('/api/') && 
+          !url.startsWith('/driver/') && 
+          !url.startsWith('/violations') && 
+          !url.startsWith('/stolen-vehicles') &&
+          !url.startsWith('/videos') &&
+          !url.startsWith('/cameras') &&
+          !url.startsWith('/processed/')
+        ) {
           return next();
+        }
+
+        // Handle Image / Snapshot Assets
+        if (url.startsWith('/processed/')) {
+          if (url.includes('sample_plate')) {
+            const plateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="95" viewBox="0 0 320 95">
+              <defs>
+                <linearGradient id="metal" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#FFFFFF"/>
+                  <stop offset="100%" stop-color="#E2E8F0"/>
+                </linearGradient>
+              </defs>
+              <rect width="320" height="95" rx="8" fill="url(#metal)" stroke="#0F172A" stroke-width="4"/>
+              <rect x="0" width="45" height="95" rx="6" fill="#1E3A8A"/>
+              <circle cx="22" cy="32" r="9" fill="#38BDF8"/>
+              <circle cx="22" cy="32" r="5" fill="#1E3A8A"/>
+              <text x="22" y="75" font-family="'Courier New', monospace" font-weight="900" font-size="15" fill="#FFFFFF" text-anchor="middle">IND</text>
+              <text x="180" y="62" font-family="'Courier New', monospace" font-weight="900" font-size="36" letter-spacing="4" fill="#0F172A" text-anchor="middle">HR26DQ5519</text>
+            </svg>`;
+            return sendSvg(res, 200, plateSvg);
+          }
+
+          // General Vehicle / Violation Snapshot SVG
+          const vehicleSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+            <defs>
+              <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#0F172A"/>
+                <stop offset="50%" stop-color="#1E293B"/>
+                <stop offset="100%" stop-color="#090D16"/>
+              </linearGradient>
+            </defs>
+            <rect width="640" height="360" fill="url(#bg)"/>
+            <!-- Road surface -->
+            <polygon points="40,360 220,150 420,150 600,360" fill="#334155" opacity="0.85"/>
+            <line x1="320" y1="150" x2="320" y2="360" stroke="#FACC15" stroke-width="4" stroke-dasharray="16,14"/>
+            <!-- Motorcycle detection box (helmet.pt) -->
+            <rect x="230" y="110" width="180" height="200" fill="none" stroke="#EF4444" stroke-width="2.5" stroke-dasharray="6,4"/>
+            <rect x="230" y="90" width="220" height="22" fill="#EF4444" rx="4"/>
+            <text x="238" y="105" font-family="monospace" font-size="11" font-weight="bold" fill="#FFFFFF">NO_HELMET [helmet.pt: 0.94]</text>
+            <!-- Plate crop box (numberplate-yolo-v26n.pt) -->
+            <rect x="280" y="255" width="90" height="40" fill="none" stroke="#10B981" stroke-width="2"/>
+            <rect x="280" y="238" width="150" height="18" fill="#10B981" rx="3"/>
+            <text x="285" y="251" font-family="monospace" font-size="10" font-weight="bold" fill="#FFFFFF">HR26DQ5519 [ANPR]</text>
+          </svg>`;
+          return sendSvg(res, 200, vehicleSvg);
         }
 
         // Handle CORS preflight
@@ -108,7 +175,343 @@ export function devApiPlugin(): Plugin {
         const [cleanPath] = url.split('?');
         const normalized = cleanPath.replace(/^\/api\/v1/, '').replace(/^\/api/, '');
 
-        // 0. Videos & Processing Endpoints
+        // 0. Videos Endpoints
+        if (normalized === '/videos' && method === 'GET') {
+          return sendJson(res, 200, memoryVideos);
+        }
+
+        const videoDetailMatch = normalized.match(/^\/videos\/([^\/]+)$/);
+        if (videoDetailMatch && method === 'GET') {
+          const videoId = videoDetailMatch[1];
+          const found = memoryVideos.find(v => v.id === videoId) || memoryVideos[0];
+          return sendJson(res, 200, found);
+        }
+
+        const videoDashboardMatch = normalized.match(/^\/videos\/([^\/]+)\/dashboard$/);
+        if (videoDashboardMatch && method === 'GET') {
+          const videoId = videoDashboardMatch[1];
+          const found = memoryVideos.find(v => v.id === videoId) || memoryVideos[0];
+          return sendJson(res, 200, {
+            video: found,
+            analytics: found.analytics,
+            severity_breakdown: {
+              critical: 3,
+              high: 4,
+              medium: 5,
+              low: 2
+            },
+            category_breakdown: {
+              pothole: 5,
+              alligator_crack: 2,
+              longitudinal_crack: 2,
+              transverse_crack: 2,
+              broken_road: 2,
+              missing_asphalt: 1
+            },
+            models_used: [
+              { name: 'best.pt', type: 'Road Damage Specialist', detections: 14 },
+              { name: 'yolov8n.pt', type: 'Vehicle Class & Telemetry', detections: 48 },
+              { name: 'helmet.pt', type: 'Helmet Safety Compliance', detections: 8 },
+              { name: 'numberplate-yolo-v26n.pt', type: 'ANPR License Plate Localization', detections: 12 },
+              { name: 'helmet_numberplate.pt', type: 'Combined Safety & Plate Specialist', detections: 6 }
+            ],
+            gps_tracks: found.gps_tracks,
+            frames: found.frames
+          });
+        }
+
+        // Cameras Endpoints
+        if (normalized === '/cameras' && method === 'GET') {
+          return sendJson(res, 200, memoryCameras);
+        }
+
+        const cameraDetailMatch = normalized.match(/^\/cameras\/([^\/]+)$/);
+        if (cameraDetailMatch && method === 'GET') {
+          const camId = cameraDetailMatch[1];
+          const found = memoryCameras.find(c => c.id === camId) || memoryCameras[0];
+          return sendJson(res, 200, found);
+        }
+
+        if (normalized === '/cameras' && method === 'POST') {
+          const body = await parseJsonBody(req);
+          const newCam = {
+            id: `cam-${Date.now().toString(36)}`,
+            camera_name: body.camera_name || 'New Highway Cam',
+            camera_type: body.camera_type || 'rtsp',
+            stream_url: body.stream_url || 'rtsp://nhai-traffic.in/live',
+            latitude: Number(body.latitude) || 28.4600,
+            longitude: Number(body.longitude) || 77.0270,
+            location_name: body.location_name || 'NH-48 Corridor Segment',
+            description: body.description || 'Highway surveillance camera',
+            fps: Number(body.fps) || 30,
+            resolution: body.resolution || '1920x1080',
+            status: 'online',
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            last_connected: new Date().toISOString(),
+            detection_count: 0,
+            road_health: 85.0,
+            vehicle_count: 0
+          };
+          memoryCameras.push(newCam as any);
+          return sendJson(res, 201, newCam);
+        }
+
+        if (cameraDetailMatch && (method === 'PUT' || method === 'PATCH')) {
+          const camId = cameraDetailMatch[1];
+          const body = await parseJsonBody(req);
+          const idx = memoryCameras.findIndex(c => c.id === camId);
+          if (idx !== -1) {
+            memoryCameras[idx] = { ...memoryCameras[idx], ...body, updated_at: new Date().toISOString() };
+            return sendJson(res, 200, memoryCameras[idx]);
+          }
+          return sendJson(res, 404, { error: 'Camera not found' });
+        }
+
+        // Traffic Violations Endpoints
+        if (normalized === '/violations' && method === 'GET') {
+          const urlParams = new URL(url, 'http://localhost').searchParams;
+          const status = urlParams.get('status');
+          const search = (urlParams.get('search') || '').toLowerCase();
+          const vtype = urlParams.get('violation_type');
+
+          let items = [
+            {
+              id: 'v1',
+              challan_number: 'ECH-2026-892401',
+              violation_type: 'NO_HELMET',
+              license_plate_number: 'HR26DQ5519',
+              confidence: 0.96,
+              rider_confidence: 0.94,
+              fine_amount: 1000.0,
+              fine_status: 'ISSUED',
+              frame_number: 42,
+              timestamp_seconds: 2.8,
+              vehicle_type: 'MOTORCYCLE',
+              latitude: 28.4595,
+              longitude: 77.0266,
+              location_name: 'NH-48 Sector 14 Link A',
+              notes: 'Rider detected without helmet on Honda CB Shine. ANPR verified via numberplate-yolo-v26n.pt.',
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              created_at: new Date(Date.now() - 45 * 60000).toISOString()
+            },
+            {
+              id: 'v2',
+              challan_number: 'ECH-2026-892402',
+              violation_type: 'NO_HELMET',
+              license_plate_number: 'MH12DE1432',
+              confidence: 0.93,
+              rider_confidence: 0.91,
+              fine_amount: 1000.0,
+              fine_status: 'PENDING',
+              frame_number: 88,
+              timestamp_seconds: 5.9,
+              vehicle_type: 'SCOOTER',
+              latitude: 28.4612,
+              longitude: 77.0285,
+              location_name: 'NH-48 Sector 14 Link B',
+              notes: 'Two-wheeler rider without headgear. Captured via CCTV.',
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              created_at: new Date(Date.now() - 135 * 60000).toISOString()
+            },
+            {
+              id: 'v3',
+              challan_number: 'ECH-2026-892403',
+              violation_type: 'NO_HELMET',
+              license_plate_number: 'KA05MK9821',
+              confidence: 0.95,
+              rider_confidence: 0.96,
+              fine_amount: 1000.0,
+              fine_status: 'PAID',
+              frame_number: 135,
+              timestamp_seconds: 9.0,
+              vehicle_type: 'MOTORCYCLE',
+              latitude: 28.4720,
+              longitude: 77.0515,
+              location_name: 'NH-48 IFFCO Chowk Flyover',
+              notes: 'Paid online via citizen portal payment gateway.',
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              created_at: new Date(Date.now() - 330 * 60000).toISOString()
+            },
+            {
+              id: 'v4',
+              challan_number: 'ECH-2026-892404',
+              violation_type: 'NO_HELMET',
+              license_plate_number: 'HR26DQ5519',
+              confidence: 0.94,
+              rider_confidence: 0.89,
+              fine_amount: 1000.0,
+              fine_status: 'ISSUED',
+              frame_number: 190,
+              timestamp_seconds: 12.7,
+              vehicle_type: 'MOTORCYCLE',
+              latitude: 28.4900,
+              longitude: 77.0880,
+              location_name: 'NH-48 Cyber City Interchange',
+              notes: 'Automatic citation dispatched via SMS/Vahan registry notification.',
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              created_at: new Date(Date.now() - 490 * 60000).toISOString()
+            }
+          ];
+
+          if (status && status !== 'ALL') {
+            items = items.filter(v => v.fine_status === status);
+          }
+          if (vtype && vtype !== 'ALL') {
+            items = items.filter(v => v.violation_type === vtype);
+          }
+          if (search) {
+            items = items.filter(v => 
+              v.license_plate_number.toLowerCase().includes(search) ||
+              v.challan_number.toLowerCase().includes(search) ||
+              v.location_name.toLowerCase().includes(search)
+            );
+          }
+
+          return sendJson(res, 200, { total: items.length, items });
+        }
+
+        if (normalized === '/violations/stats' && method === 'GET') {
+          return sendJson(res, 200, {
+            total_violations: 4,
+            helmet_violations_count: 4,
+            total_fines_amount: 4000.0,
+            paid_fines_amount: 1000.0,
+            unpaid_fines_amount: 3000.0,
+            issued_count: 2,
+            pending_count: 1,
+            paid_count: 1,
+            unique_plates_count: 3
+          });
+        }
+
+        // Stolen Vehicles Registry Endpoints
+        if (normalized === '/stolen-vehicles' && method === 'GET') {
+          return sendJson(res, 200, [
+            {
+              id: 'sv-001',
+              vehicle_number: 'HR26DQ5519',
+              fir_number: 'FIR-2026-HR-8821',
+              owner_name: 'Vikram Singh',
+              owner_contact: '+91 98112 34567',
+              vehicle_type: 'MOTORCYCLE',
+              brand_model: 'Honda CB Shine 125',
+              color: 'Black/Red',
+              registration_date: '2022-04-15',
+              theft_date: '2026-07-28',
+              theft_location: 'Sector 29 Market Parking, Gurugram',
+              police_station: 'DLF Phase 2 Police Station, Gurugram',
+              investigating_officer: 'SI Rajesh Kumar',
+              status: 'ACTIVE',
+              priority: 'CRITICAL',
+              created_at: '2026-07-28T09:00:00Z',
+              updated_at: '2026-07-28T09:00:00Z'
+            },
+            {
+              id: 'sv-002',
+              vehicle_number: 'DL01AB1234',
+              fir_number: 'FIR-2026-DEL-1092',
+              owner_name: 'Rajesh Sharma',
+              owner_contact: '+91 98765 43210',
+              vehicle_type: 'SEDAN',
+              brand_model: 'Maruti Suzuki Dzire',
+              color: 'White',
+              registration_date: '2021-08-20',
+              theft_date: '2026-07-27',
+              theft_location: 'Hauz Khas Market, New Delhi',
+              police_station: 'Hauz Khas Police Station, Delhi',
+              investigating_officer: 'Inspector R. K. Nair',
+              status: 'INVESTIGATING',
+              priority: 'HIGH',
+              created_at: '2026-07-27T14:30:00Z',
+              updated_at: '2026-07-27T14:30:00Z'
+            },
+            {
+              id: 'sv-003',
+              vehicle_number: 'MH12DE1432',
+              fir_number: 'FIR-2026-MH-4401',
+              owner_name: 'Amitabh Deshmukh',
+              owner_contact: '+91 99220 12345',
+              vehicle_type: 'SCOOTER',
+              brand_model: 'TVS Jupiter 110',
+              color: 'Grey',
+              registration_date: '2020-01-10',
+              theft_date: '2026-07-25',
+              theft_location: 'FC Road, Pune',
+              police_station: 'Shivajinagar Police Station, Pune',
+              investigating_officer: 'PSI Patil',
+              status: 'RECOVERED',
+              priority: 'MEDIUM',
+              created_at: '2026-07-25T11:00:00Z',
+              updated_at: '2026-07-28T16:00:00Z'
+            }
+          ]);
+        }
+
+        if (normalized === '/stolen-vehicles/alerts' && method === 'GET') {
+          return sendJson(res, 200, [
+            {
+              id: 'sta-001',
+              stolen_vehicle_id: 'sv-001',
+              vehicle_number: 'HR26DQ5519',
+              owner_name: 'Vikram Singh',
+              fir_number: 'FIR-2026-HR-8821',
+              camera_id: 'cam-001',
+              camera_name: 'NH-48 Sirhaul Toll Plaza - Gateway Cam 01',
+              camera_location: 'NH-48 Sirhaul Gateway, Delhi-Gurugram Border',
+              latitude: 28.5080,
+              longitude: 77.1020,
+              timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              ocr_text: 'HR26DQ5519',
+              confidence: 0.98,
+              status: 'ACTIVE',
+              remarks: 'Real-time ANPR match by numberplate-yolo-v26n.pt. Highway Intercept Patrol Unit 7 dispatched.',
+              created_at: new Date(Date.now() - 12 * 60000).toISOString(),
+              updated_at: new Date(Date.now() - 12 * 60000).toISOString()
+            },
+            {
+              id: 'sta-002',
+              stolen_vehicle_id: 'sv-002',
+              vehicle_number: 'DL01AB1234',
+              owner_name: 'Rajesh Sharma',
+              fir_number: 'FIR-2026-DEL-1092',
+              camera_id: 'cam-002',
+              camera_name: 'NH-48 Cyber City Gateway - ANPR Cam 02',
+              camera_location: 'NH-48 Cyber City Interchange, Gurugram',
+              latitude: 28.4900,
+              longitude: 77.0880,
+              timestamp: new Date(Date.now() - 75 * 60000).toISOString(),
+              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+              plate_crop_url: '/processed/violations/sample_plate.jpg',
+              ocr_text: 'DL01AB1234',
+              confidence: 0.96,
+              status: 'INVESTIGATING',
+              remarks: 'Traffic police squad deployed at Shankar Chowk.',
+              created_at: new Date(Date.now() - 75 * 60000).toISOString(),
+              updated_at: new Date(Date.now() - 75 * 60000).toISOString()
+            }
+          ]);
+        }
+
+        if (normalized === '/stolen-vehicles/stats' && method === 'GET') {
+          return sendJson(res, 200, {
+            total_stolen_vehicles: 3,
+            active_alerts: 1,
+            alerts_today: 2,
+            recovered_vehicles: 1,
+            total_alerts_all_time: 2,
+            critical_alerts_count: 1
+          });
+        }
+
+        // Videos Upload & Processing Endpoints
         if (normalized === '/videos/upload' && method === 'POST') {
           const id = `vid-${Date.now().toString(36)}`;
           return sendJson(res, 200, {
@@ -210,27 +613,151 @@ export function devApiPlugin(): Plugin {
 
         if (normalized === '/driver/potholes') {
           return sendJson(res, 200, {
-            total: 3,
+            total: 7,
             potholes: [
               {
-                id: 'pot_01',
-                latitude: 28.6145,
-                longitude: 77.2095,
+                id: 'pot_101',
+                pothole_id: 'POT-101',
+                latitude: 28.4595,
+                longitude: 77.0266,
                 severity: 'critical',
-                road_name: 'NH-44 Expressway',
-                road_authority: 'NHAI',
+                category: 'pothole',
+                model_name: 'best.pt',
+                depth_cm: 6.8,
+                width_cm: 45.0,
+                road_name: 'NH-48 Sector 14 Link A',
+                road_authority: 'National Highways Authority of India (NHAI)',
                 confidence: 0.94,
-                detected_at: new Date().toISOString()
+                detected_at: new Date(Date.now() - 15 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
               },
               {
-                id: 'pot_02',
-                latitude: 28.6180,
-                longitude: 77.2140,
+                id: 'crk_102',
+                pothole_id: 'CRK-102',
+                latitude: 28.4612,
+                longitude: 77.0282,
+                severity: 'medium',
+                category: 'longitudinal_crack',
+                model_name: 'best.pt',
+                depth_cm: 1.8,
+                width_cm: 32.0,
+                road_name: 'NH-48 Sector 14 Link B',
+                road_authority: 'National Highways Authority of India (NHAI)',
+                confidence: 0.82,
+                detected_at: new Date(Date.now() - 40 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+              },
+              {
+                id: 'pot_103',
+                pothole_id: 'POT-103',
+                latitude: 28.4635,
+                longitude: 77.0305,
+                severity: 'critical',
+                category: 'broken_road',
+                model_name: 'best.pt',
+                depth_cm: 8.5,
+                width_cm: 95.0,
+                road_name: 'NH-48 Sector 14 North',
+                road_authority: 'National Highways Authority of India (NHAI)',
+                confidence: 0.91,
+                detected_at: new Date(Date.now() - 65 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+              },
+              {
+                id: 'crk_104',
+                pothole_id: 'CRK-104',
+                latitude: 28.4720,
+                longitude: 77.0515,
+                severity: 'low',
+                category: 'transverse_crack',
+                model_name: 'best.pt',
+                depth_cm: 1.2,
+                width_cm: 75.0,
+                road_name: 'NH-48 IFFCO Chowk Flyover',
+                road_authority: 'National Highways Authority of India (NHAI)',
+                confidence: 0.76,
+                detected_at: new Date(Date.now() - 95 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+              },
+              {
+                id: 'pot_105',
+                pothole_id: 'POT-105',
+                latitude: 28.4810,
+                longitude: 77.0690,
                 severity: 'high',
-                road_name: 'NH-44 Expressway',
-                road_authority: 'NHAI',
+                category: 'pothole',
+                model_name: 'best.pt',
+                depth_cm: 5.4,
+                width_cm: 42.0,
+                road_name: 'NH-48 Signature Tower Segment',
+                road_authority: 'State PWD Division',
+                confidence: 0.89,
+                detected_at: new Date(Date.now() - 140 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+              },
+              {
+                id: 'asp_106',
+                pothole_id: 'ASP-106',
+                latitude: 28.4980,
+                longitude: 77.0930,
+                severity: 'medium',
+                category: 'missing_asphalt',
+                model_name: 'best.pt',
+                depth_cm: 4.1,
+                width_cm: 50.0,
+                road_name: 'NH-48 Shankar Chowk Flyover',
+                road_authority: 'National Highways Authority of India (NHAI)',
+                confidence: 0.85,
+                detected_at: new Date(Date.now() - 180 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+              },
+              {
+                id: 'pot_107',
+                pothole_id: 'POT-107',
+                latitude: 28.5080,
+                longitude: 77.1020,
+                severity: 'high',
+                category: 'pothole',
+                model_name: 'best.pt',
+                depth_cm: 6.0,
+                width_cm: 55.0,
+                road_name: 'NH-48 Sirhaul Toll Plaza',
+                road_authority: 'National Highways Authority of India (NHAI)',
                 confidence: 0.88,
-                detected_at: new Date(Date.now() - 120000).toISOString()
+                detected_at: new Date(Date.now() - 220 * 60000).toISOString(),
+                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+              }
+            ]
+          });
+        }
+
+        if ((normalized === '/driver/heatmap' || normalized === '/analytics/pothole-heatmap') && method === 'GET') {
+          return sendJson(res, 200, {
+            points: [
+              { latitude: 28.4595, longitude: 77.0266, intensity: 0.95, severity: 'critical', category: 'pothole', pothole_id: 'POT-101' },
+              { latitude: 28.4612, longitude: 77.0282, intensity: 0.60, severity: 'medium', category: 'longitudinal_crack', pothole_id: 'CRK-102' },
+              { latitude: 28.4635, longitude: 77.0305, intensity: 0.92, severity: 'critical', category: 'broken_road', pothole_id: 'POT-103' },
+              { latitude: 28.4720, longitude: 77.0515, intensity: 0.45, severity: 'low', category: 'transverse_crack', pothole_id: 'CRK-104' },
+              { latitude: 28.4810, longitude: 77.0690, intensity: 0.85, severity: 'high', category: 'pothole', pothole_id: 'POT-105' },
+              { latitude: 28.4980, longitude: 77.0930, intensity: 0.70, severity: 'medium', category: 'missing_asphalt', pothole_id: 'ASP-106' },
+              { latitude: 28.5080, longitude: 77.1020, intensity: 0.88, severity: 'high', category: 'pothole', pothole_id: 'POT-107' }
+            ],
+            hotspots: [
+              {
+                id: 'hs-nh48-sec14',
+                road_name: 'NH-48 Sector 14 Interchange',
+                pothole_count: 5,
+                avg_severity: 84.5,
+                risk_level: 'critical',
+                center: [28.4615, 77.0285]
+              },
+              {
+                id: 'hs-nh48-iffco',
+                road_name: 'NH-48 IFFCO Chowk & Cyber City',
+                pothole_count: 3,
+                avg_severity: 72.0,
+                risk_level: 'high',
+                center: [28.4765, 77.0600]
               }
             ]
           });

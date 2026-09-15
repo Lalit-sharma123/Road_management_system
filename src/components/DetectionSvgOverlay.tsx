@@ -219,8 +219,9 @@ export const DetectionSvgOverlay: React.FC<DetectionSvgOverlayProps> = ({
         const bracketLen = Math.min(18, Math.max(6, Math.floor(Math.min(boxW, boxH) * 0.22)));
         const strokeWidth = isSelected || isHovered ? 3 : 2;
         const confPercent = Math.round((det.confidence || 0.85) * 100);
-        const labelText = `${style.label} ${confPercent}%`;
-        const badgeWidth = Math.max(75, labelText.length * 7.5 + 16);
+        const displayTitle = det.label || style.label;
+        const labelText = showConfidence ? `${displayTitle} ${confPercent}%` : displayTitle;
+        const badgeWidth = Math.max(75, labelText.length * 6.8 + 14);
         const badgeHeight = 20;
 
         // Position badge above box, or inside if too close to top edge

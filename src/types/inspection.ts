@@ -53,6 +53,13 @@ export interface Detection {
   severity: SeverityLevel;
   severity_score: number; // 0.0 to 100.0
   bbox: BoundingBox;
+  model_name?: string;
+  latitude?: number;
+  longitude?: number;
+  road_name?: string;
+  road_authority?: string;
+  depth_cm?: number;
+  width_cm?: number;
 }
 
 export interface FrameData {

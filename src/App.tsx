@@ -613,6 +613,7 @@ export default function App() {
           <GpsMappingView 
             video={selectedVideo}
             onNavigate={setActiveTab}
+            cameras={cameras}
           />
         )}
 

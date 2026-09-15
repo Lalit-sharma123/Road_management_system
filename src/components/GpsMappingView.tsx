@@ -26,9 +26,16 @@ import {
   Database,
   RefreshCw,
   Info,
-  Clock
+  Clock,
+  Camera,
+  Video,
+  AlertCircle
 } from 'lucide-react';
-import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot } from '../types/inspection';
+import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot, CameraDevice, TrafficViolation } from '../types/inspection';
+import { StolenVehicleAlert } from '../types/stolenVehicle';
+import { cameraService } from '../services/systemService';
+import { violationService } from '../services/violationService';
+import { stolenVehicleService } from '../services/stolenVehicleService';
 import { heatmapService } from '../services/heatmapService';
 import { apiClient } from '../services/apiClient';
 
@@ -51,6 +58,9 @@ export interface DynamicPotholeMarker {
   evidence_image_url?: string;
   distance_meters?: number;
   lane_position?: string;
+  model_name?: string;
+  depth_cm?: number;
+  width_cm?: number;
 }
 
 export interface GpsMappingViewProps {
@@ -61,6 +71,7 @@ export interface GpsMappingViewProps {
   compact?: boolean;
   onReportPothole?: (marker: DynamicPotholeMarker) => void;
   heightClass?: string;
+  cameras?: CameraDevice[];
 }
 
 export interface GPSDamageMarker {
@@ -78,6 +89,9 @@ export interface GPSDamageMarker {
   image_url: string;
   distance_meters?: number;
   lane_position?: string;
+  model_name?: string;
+  depth_cm?: number;
+  width_cm?: number;
 }
 
 const defaultStaticMarkers: GPSDamageMarker[] = [
@@ -86,14 +100,17 @@ const defaultStaticMarkers: GPSDamageMarker[] = [
     pothole_id: 'POT-101',
     frame_number: 120,
     timestamp_sec: 4.0,
-    latitude: 28.4600,
-    longitude: 77.0270,
+    latitude: 28.4595,
+    longitude: 77.0266,
     category: 'pothole',
     severity: 'critical',
     confidence: 0.94,
-    road_name: 'NH-48 Sector 14 Corridor A',
+    road_name: 'NH-48 Sector 14 Link A',
     road_authority: 'National Highways Authority of India (NHAI)',
-    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 6.8,
+    width_cm: 45.0
   },
   {
     id: 'marker-102',
@@ -105,65 +122,97 @@ const defaultStaticMarkers: GPSDamageMarker[] = [
     category: 'longitudinal_crack',
     severity: 'medium',
     confidence: 0.82,
-    road_name: 'NH-48 Sector 14 Corridor A',
+    road_name: 'NH-48 Sector 14 Link B',
     road_authority: 'National Highways Authority of India (NHAI)',
-    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 1.8,
+    width_cm: 32.0
   },
   {
     id: 'marker-103',
     pothole_id: 'POT-103',
     frame_number: 468,
     timestamp_sec: 15.6,
-    latitude: 28.4628,
-    longitude: 77.0298,
+    latitude: 28.4635,
+    longitude: 77.0305,
     category: 'broken_road',
     severity: 'critical',
     confidence: 0.91,
-    road_name: 'NH-48 Sector 14 Corridor B',
+    road_name: 'NH-48 Sector 14 North',
     road_authority: 'National Highways Authority of India (NHAI)',
-    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 8.5,
+    width_cm: 95.0
   },
   {
     id: 'marker-104',
     pothole_id: 'CRK-104',
     frame_number: 663,
     timestamp_sec: 22.1,
-    latitude: 28.4640,
-    longitude: 77.0310,
+    latitude: 28.4720,
+    longitude: 77.0515,
     category: 'transverse_crack',
     severity: 'low',
     confidence: 0.76,
-    road_name: 'NH-48 Sector 14 Corridor B',
-    road_authority: 'State PWD Division',
-    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+    road_name: 'NH-48 IFFCO Chowk Flyover',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 1.2,
+    width_cm: 75.0
   },
   {
     id: 'marker-105',
     pothole_id: 'POT-105',
     frame_number: 954,
     timestamp_sec: 31.8,
-    latitude: 28.4660,
-    longitude: 77.0330,
+    latitude: 28.4810,
+    longitude: 77.0690,
     category: 'pothole',
     severity: 'high',
     confidence: 0.89,
-    road_name: 'NH-48 Sector 14 Corridor C',
+    road_name: 'NH-48 Signature Tower Segment',
     road_authority: 'State PWD Division',
-    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 5.4,
+    width_cm: 42.0
   },
   {
     id: 'marker-106',
     pothole_id: 'ASP-106',
     frame_number: 1260,
     timestamp_sec: 42.0,
-    latitude: 28.4682,
-    longitude: 77.0352,
+    latitude: 28.4980,
+    longitude: 77.0930,
     category: 'missing_asphalt',
     severity: 'medium',
     confidence: 0.85,
-    road_name: 'NH-48 Sector 14 Corridor C',
-    road_authority: 'Municipal Corporation Road Division',
-    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+    road_name: 'NH-48 Shankar Chowk Flyover',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 4.1,
+    width_cm: 50.0
+  },
+  {
+    id: 'marker-107',
+    pothole_id: 'POT-107',
+    frame_number: 1350,
+    timestamp_sec: 45.0,
+    latitude: 28.5080,
+    longitude: 77.1020,
+    category: 'pothole',
+    severity: 'high',
+    confidence: 0.88,
+    road_name: 'NH-48 Sirhaul Toll Plaza',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+    model_name: 'best.pt',
+    depth_cm: 6.0,
+    width_cm: 55.0
   }
 ];
 
@@ -174,7 +223,8 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   currentVehiclePosition,
   compact = false,
   onReportPothole,
-  heightClass
+  heightClass,
+  cameras: propsCameras
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -199,6 +249,40 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const [hotspotsList, setHotspotsList] = useState<HeatmapHotspot[]>([]);
   const [dbPotholes, setDbPotholes] = useState<GPSDamageMarker[]>([]);
 
+  // Highway Cameras, Traffic Violations & Stolen Vehicle alerts state
+  const camerasLayerRef = useRef<L.LayerGroup | null>(null);
+  const violationsLayerRef = useRef<L.LayerGroup | null>(null);
+  const [showCameras, setShowCameras] = useState<boolean>(true);
+  const [showViolations, setShowViolations] = useState<boolean>(true);
+  const [highwayCameras, setHighwayCameras] = useState<CameraDevice[]>(propsCameras || []);
+  const [highwayViolations, setHighwayViolations] = useState<TrafficViolation[]>([]);
+  const [stolenAlerts, setStolenAlerts] = useState<StolenVehicleAlert[]>([]);
+
+  // Fetch Highway Cameras, Violations & Alerts
+  useEffect(() => {
+    if (propsCameras && propsCameras.length > 0) {
+      setHighwayCameras(propsCameras);
+    } else {
+      cameraService.listCameras()
+        .then((cams) => {
+          if (Array.isArray(cams) && cams.length > 0) setHighwayCameras(cams);
+        })
+        .catch(() => {});
+    }
+
+    violationService.getViolations({ limit: 25 })
+      .then((res) => {
+        if (Array.isArray(res?.items)) setHighwayViolations(res.items);
+      })
+      .catch(() => {});
+
+    stolenVehicleService.getLiveAlerts(20)
+      .then((alerts) => {
+        if (Array.isArray(alerts)) setStolenAlerts(alerts);
+      })
+      .catch(() => {});
+  }, [propsCameras]);
+
   // Fetch real database recorded potholes from backend
   const loadDatabasePotholes = useCallback(async () => {
     try {
@@ -218,7 +302,10 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
           road_authority: p.road_authority || 'National Highway Authority',
           image_url: p.image_url || p.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
           distance_meters: p.distance_meters,
-          lane_position: p.lane_position
+          lane_position: p.lane_position,
+          model_name: p.model_name || 'best.pt',
+          depth_cm: p.depth_cm,
+          width_cm: p.width_cm
         }));
         setDbPotholes(loaded);
       }
@@ -299,7 +386,10 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
         road_authority: m.road_authority || 'National Highway Authority',
         image_url: m.image_url || m.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
         distance_meters: m.distance_meters,
-        lane_position: m.lane_position
+        lane_position: m.lane_position,
+        model_name: m.model_name || 'best.pt',
+        depth_cm: m.depth_cm,
+        width_cm: m.width_cm
       }));
     }
 
@@ -314,13 +404,17 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
               pothole_id: `POT-${d.id.slice(-4)}`,
               frame_number: f.frame_number,
               timestamp_sec: f.timestamp_sec,
-              latitude: gpsPt ? gpsPt.latitude : (currentVehiclePosition?.lat || 28.4635),
-              longitude: gpsPt ? gpsPt.longitude : (currentVehiclePosition?.lng || 77.0305),
+              latitude: d.latitude || (gpsPt ? gpsPt.latitude : (currentVehiclePosition?.lat || 28.4635)),
+              longitude: d.longitude || (gpsPt ? gpsPt.longitude : (currentVehiclePosition?.lng || 77.0305)),
               category: d.category,
               severity: d.severity,
               confidence: d.confidence,
-              road_name: gpsPt?.road_name || 'Active Road Corridor',
-              image_url: f.image_url
+              road_name: d.road_name || gpsPt?.road_name || 'Active Road Corridor',
+              road_authority: d.road_authority,
+              image_url: f.image_url,
+              model_name: d.model_name || 'best.pt',
+              depth_cm: d.depth_cm,
+              width_cm: d.width_cm
             });
           });
         }
@@ -448,6 +542,14 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       // Layer group for dynamic markers
       const markersLayer = L.layerGroup().addTo(map);
       markersLayerRef.current = markersLayer;
+
+      // Layer group for highway cameras
+      const camerasLayer = L.layerGroup().addTo(map);
+      camerasLayerRef.current = camerasLayer;
+
+      // Layer group for traffic violations & stolen alerts
+      const violationsLayer = L.layerGroup().addTo(map);
+      violationsLayerRef.current = violationsLayer;
 
       // Add vehicle marker if position provided
       if (currentVehiclePosition) {
@@ -614,8 +716,10 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
             </span>
           </div>
           <div style="font-size: 10px; color: #AAA; line-height: 1.5; margin-bottom: 6px;">
+            <div>🤖 <b>Model:</b> <span style="color: #A78BFA; font-weight: bold;">${marker.model_name || 'best.pt'}</span></div>
             <div>🎯 <b>Confidence:</b> <span style="color: #FF9500; font-weight: bold;">${((Number(marker.confidence) || 0.8) * 100).toFixed(0)}%</span></div>
             <div>📍 <b>GPS:</b> ${(Number(marker.latitude) || 28.4595).toFixed(5)}°, ${(Number(marker.longitude) || 77.0266).toFixed(5)}°</div>
+            ${marker.depth_cm ? `<div>📏 <b>Dimensions:</b> Depth ${marker.depth_cm}cm${marker.width_cm ? ` • Width ${marker.width_cm}cm` : ''}</div>` : ''}
             ${marker.road_authority ? `<div>🏛 <b>Authority:</b> <span style="color:#60A5FA;">${marker.road_authority}</span></div>` : ''}
           </div>
         </div>
@@ -630,6 +734,214 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       markersLayerRef.current?.addLayer(leafletMarker);
     });
   }, [filteredMarkers, selectedMarker?.id, showMarkers]);
+
+  // 5. Render Highway Cameras on Leaflet map
+  useEffect(() => {
+    if (!camerasLayerRef.current || !mapInstanceRef.current) return;
+    camerasLayerRef.current.clearLayers();
+
+    if (!showCameras) return;
+
+    highwayCameras.forEach((cam) => {
+      const isOnline = cam.status === 'online';
+      const camIcon = L.divIcon({
+        className: 'custom-camera-marker',
+        html: `
+          <div style="
+            width: 28px;
+            height: 28px;
+            background: #0284C7;
+            border: 2px solid #38BDF8;
+            border-radius: 6px;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.75);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #FFFFFF;
+          ">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+              <circle cx="12" cy="13" r="3"/>
+            </svg>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      const popupHTML = `
+        <div style="font-family: ui-monospace, SFMono-Regular, monospace; color: #E0E0E0; background: #0B132B; padding: 12px; border: 1px solid #0284C7; border-radius: 6px; min-width: 240px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 9px; font-weight: bold; background: #0284C733; color: #38BDF8; border: 1px solid #38BDF8; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;">
+              ${cam.camera_type || 'RTSP Live Stream'}
+            </span>
+            <span style="font-size: 9px; font-weight: bold; color: ${isOnline ? '#34C759' : '#FF3B30'};">
+              ● ${cam.status.toUpperCase()}
+            </span>
+          </div>
+          <div style="font-size: 12px; font-weight: bold; color: #FFF; margin-bottom: 4px;">
+            ${cam.camera_name}
+          </div>
+          <div style="font-size: 10px; color: #94A3B8; margin-bottom: 8px;">
+            📍 ${cam.location_name || 'Highway Corridor'}<br/>
+            🌐 GPS: ${cam.latitude.toFixed(5)}°, ${cam.longitude.toFixed(5)}°<br/>
+            ⚡ Stream: 1920x1080 @ ${cam.fps || 30} FPS
+          </div>
+          <button id="view-cam-${cam.id}" style="width: 100%; padding: 6px 10px; background: #0284C7; color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px;">
+            Open Live Camera Feed
+          </button>
+        </div>
+      `;
+
+      const marker = L.marker([cam.latitude, cam.longitude], { icon: camIcon })
+        .bindPopup(popupHTML, { className: 'custom-leaflet-popup' });
+
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(`view-cam-${cam.id}`);
+        if (btn) {
+          btn.onclick = () => onNavigate?.('live-grid');
+        }
+      });
+
+      camerasLayerRef.current?.addLayer(marker);
+    });
+  }, [highwayCameras, showCameras, onNavigate]);
+
+  // 6. Render Traffic Violations & Stolen Alerts on Leaflet map
+  useEffect(() => {
+    if (!violationsLayerRef.current || !mapInstanceRef.current) return;
+    violationsLayerRef.current.clearLayers();
+
+    if (!showViolations) return;
+
+    // Stolen vehicle alerts (Priority Red Flashing)
+    stolenAlerts.forEach((alert) => {
+      if (!alert.latitude || !alert.longitude) return;
+      const alertIcon = L.divIcon({
+        className: 'custom-stolen-marker',
+        html: `
+          <div style="
+            width: 30px;
+            height: 30px;
+            background: #DC2626;
+            border: 2px solid #F87171;
+            border-radius: 50%;
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #FFFFFF;
+            font-size: 14px;
+          ">
+            🚨
+          </div>
+        `,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+
+      const popupHTML = `
+        <div style="font-family: ui-monospace, SFMono-Regular, monospace; color: #E0E0E0; background: #1C0505; padding: 12px; border: 1px solid #DC2626; border-radius: 6px; min-width: 250px;">
+          <div style="font-size: 10px; font-weight: bold; color: #F87171; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            🚨 STOLEN VEHICLE ALERT (FIR ACTIVE)
+          </div>
+          <div style="font-size: 14px; font-weight: 900; color: #FFF; letter-spacing: 1px; margin-bottom: 4px;">
+            ${alert.vehicle_number}
+          </div>
+          <div style="font-size: 10px; color: #E2E8F0; margin-bottom: 6px;">
+            📄 <b>FIR:</b> ${alert.fir_number || 'FIR-2026-HR-8821'}<br/>
+            🚘 <b>Owner:</b> ${alert.owner_name || 'Reported Stolen'}<br/>
+            🤖 <b>ANPR Model:</b> <span style="color:#FBBF24;">numberplate-yolo-v26n.pt</span><br/>
+            📍 <b>Location:</b> ${alert.camera_location || alert.camera_name || 'NH-48 Sirhaul Gateway'}
+          </div>
+          <button id="view-alert-${alert.id}" style="width: 100%; padding: 6px 10px; background: #DC2626; color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; text-transform: uppercase;">
+            Open Stolen Alerts Desk
+          </button>
+        </div>
+      `;
+
+      const marker = L.marker([alert.latitude, alert.longitude], { icon: alertIcon })
+        .bindPopup(popupHTML, { className: 'custom-leaflet-popup' });
+
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(`view-alert-${alert.id}`);
+        if (btn) {
+          btn.onclick = () => onNavigate?.('stolen-alerts');
+        }
+      });
+
+      violationsLayerRef.current?.addLayer(marker);
+    });
+
+    // Traffic violations (Helmet / Speed / ANPR)
+    highwayViolations.forEach((v) => {
+      const lat = v.latitude ?? 28.4595;
+      const lng = v.longitude ?? 77.0266;
+      const modelUsed = v.violation_type.toLowerCase().includes('helmet')
+        ? 'helmet.pt'
+        : 'numberplate-yolo-v26n.pt';
+
+      const vIcon = L.divIcon({
+        className: 'custom-violation-marker',
+        html: `
+          <div style="
+            width: 26px;
+            height: 26px;
+            background: #D97706;
+            border: 2px solid #FBBF24;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #FFFFFF;
+            font-size: 12px;
+          ">
+            🛡️
+          </div>
+        `,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+
+      const popupHTML = `
+        <div style="font-family: ui-monospace, SFMono-Regular, monospace; color: #E0E0E0; background: #181205; padding: 12px; border: 1px solid #D97706; border-radius: 6px; min-width: 230px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span style="font-size: 9px; font-weight: bold; background: #D9770633; color: #FBBF24; border: 1px solid #FBBF24; padding: 2px 6px; border-radius: 3px; text-transform: uppercase;">
+              ${v.violation_type.replace(/_/g, ' ')}
+            </span>
+            <span style="font-size: 10px; font-weight: bold; color: #34C759;">₹${v.fine_amount}</span>
+          </div>
+          <div style="font-size: 13px; font-weight: 800; color: #FFF; margin-bottom: 4px;">
+            ${v.license_plate_number}
+          </div>
+          <div style="font-size: 10px; color: #CBD5E1; margin-bottom: 6px;">
+            🤖 <b>Model:</b> <span style="color:#FBBF24;">${modelUsed}</span><br/>
+            📍 <b>Road:</b> ${v.location_name || 'NH-48 Corridor'}<br/>
+            ⏱️ <b>Time:</b> ${new Date(v.created_at).toLocaleTimeString()}
+          </div>
+          <button id="view-viol-${v.id}" style="width: 100%; padding: 6px 10px; background: #D97706; color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; text-transform: uppercase;">
+            View e-Challan
+          </button>
+        </div>
+      `;
+
+      const marker = L.marker([lat, lng], { icon: vIcon })
+        .bindPopup(popupHTML, { className: 'custom-leaflet-popup' });
+
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(`view-viol-${v.id}`);
+        if (btn) {
+          btn.onclick = () => onNavigate?.('violations');
+        }
+      });
+
+      violationsLayerRef.current?.addLayer(marker);
+    });
+  }, [highwayViolations, stolenAlerts, showViolations, onNavigate]);
 
   const handleCenterOnVehicle = () => {
     if (currentVehiclePosition && mapInstanceRef.current) {
@@ -785,29 +1097,55 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       <div className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-[#111111] border border-[#2A2A2A] p-3 text-xs">
           {/* Layer Toggles */}
-          <div className="sm:col-span-4 flex items-center space-x-2">
+          <div className="sm:col-span-5 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setShowHeatmap(!showHeatmap)}
-              className={`px-3 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+              className={`px-2.5 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
                 showHeatmap
                   ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm'
                   : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
               }`}
             >
               <Flame className={`w-3.5 h-3.5 ${showHeatmap ? 'fill-amber-400' : ''}`} />
-              <span>HEATMAP {showHeatmap ? 'ACTIVE' : 'OFF'}</span>
+              <span>HEATMAP</span>
             </button>
 
             <button
               onClick={() => setShowMarkers(!showMarkers)}
-              className={`px-3 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+              className={`px-2.5 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
                 showMarkers
                   ? 'bg-blue-500/20 text-blue-400 border-blue-500/50'
                   : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
               }`}
             >
               <MapPin className="w-3.5 h-3.5" />
-              <span>PINS {showMarkers ? 'ON' : 'OFF'}</span>
+              <span>DEFECTS ({filteredMarkers.length})</span>
+            </button>
+
+            <button
+              onClick={() => setShowCameras(!showCameras)}
+              className={`px-2.5 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+                showCameras
+                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/50'
+                  : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
+              }`}
+              title="Toggle Live Highway ANPR Cameras"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>CAMS ({highwayCameras.length})</span>
+            </button>
+
+            <button
+              onClick={() => setShowViolations(!showViolations)}
+              className={`px-2.5 py-1.5 border flex items-center gap-1.5 font-bold transition-all ${
+                showViolations
+                  ? 'bg-amber-600/20 text-amber-400 border-amber-500/50'
+                  : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
+              }`}
+              title="Toggle Traffic Violations & Stolen Vehicle Alerts"
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>ALERTS ({highwayViolations.length + stolenAlerts.length})</span>
             </button>
 
             <button
