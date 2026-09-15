@@ -123,7 +123,11 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
 
   // Batch Processing Queue state
   const [queue, setQueue] = useState<BatchQueueItem[]>(() => {
-    // Pre-populate with 3 highway corridors so the user can immediately test the batch queue
+    // In real data mode (default), start with an empty queue for user-uploaded videos
+    const dataMode = localStorage.getItem('nhai_gis_data_mode') || 'real';
+    if (dataMode === 'real') {
+      return [];
+    }
     return SAMPLE_HIGHWAY_BATCH.map((item, idx) => ({
       ...item,
       id: `batch_init_${Date.now()}_${idx}`,

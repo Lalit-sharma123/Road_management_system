@@ -3,8 +3,123 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { sampleVideos } from '../data/mockData';
 import { sampleCameras } from '../data/mockCameras';
 
-let memoryVideos = [...sampleVideos];
-let memoryCameras = [...sampleCameras];
+let memoryVideos: any[] = [...sampleVideos];
+let memoryCameras: any[] = [...sampleCameras];
+
+let memoryPotholes: any[] = [
+  {
+    id: 'pot_101',
+    pothole_id: 'POT-101',
+    latitude: 28.4595,
+    longitude: 77.0266,
+    severity: 'critical',
+    category: 'pothole',
+    model_name: 'best.pt',
+    depth_cm: 6.8,
+    width_cm: 45.0,
+    road_name: 'NH-48 Sector 14 Link A',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.94,
+    detected_at: new Date(Date.now() - 15 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'crk_102',
+    pothole_id: 'CRK-102',
+    latitude: 28.4612,
+    longitude: 77.0282,
+    severity: 'medium',
+    category: 'longitudinal_crack',
+    model_name: 'best.pt',
+    depth_cm: 1.8,
+    width_cm: 32.0,
+    road_name: 'NH-48 Sector 14 Link B',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.82,
+    detected_at: new Date(Date.now() - 40 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'pot_103',
+    pothole_id: 'POT-103',
+    latitude: 28.4635,
+    longitude: 77.0305,
+    severity: 'critical',
+    category: 'broken_road',
+    model_name: 'best.pt',
+    depth_cm: 8.5,
+    width_cm: 95.0,
+    road_name: 'NH-48 Sector 14 North',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.91,
+    detected_at: new Date(Date.now() - 65 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'crk_104',
+    pothole_id: 'CRK-104',
+    latitude: 28.4720,
+    longitude: 77.0515,
+    severity: 'low',
+    category: 'transverse_crack',
+    model_name: 'best.pt',
+    depth_cm: 1.2,
+    width_cm: 75.0,
+    road_name: 'NH-48 IFFCO Chowk Flyover',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.76,
+    detected_at: new Date(Date.now() - 95 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'pot_105',
+    pothole_id: 'POT-105',
+    latitude: 28.4810,
+    longitude: 77.0690,
+    severity: 'high',
+    category: 'pothole',
+    model_name: 'best.pt',
+    depth_cm: 5.4,
+    width_cm: 42.0,
+    road_name: 'NH-48 Signature Tower Segment',
+    road_authority: 'State PWD Division',
+    confidence: 0.89,
+    detected_at: new Date(Date.now() - 140 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'asp_106',
+    pothole_id: 'ASP-106',
+    latitude: 28.4980,
+    longitude: 77.0930,
+    severity: 'medium',
+    category: 'missing_asphalt',
+    model_name: 'best.pt',
+    depth_cm: 4.1,
+    width_cm: 50.0,
+    road_name: 'NH-48 Shankar Chowk Flyover',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.85,
+    detected_at: new Date(Date.now() - 180 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
+  },
+  {
+    id: 'pot_107',
+    pothole_id: 'POT-107',
+    latitude: 28.5080,
+    longitude: 77.1020,
+    severity: 'high',
+    category: 'pothole',
+    model_name: 'best.pt',
+    depth_cm: 6.0,
+    width_cm: 55.0,
+    road_name: 'NH-48 Sirhaul Toll Plaza',
+    road_authority: 'National Highways Authority of India (NHAI)',
+    confidence: 0.88,
+    detected_at: new Date(Date.now() - 220 * 60000).toISOString(),
+    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+  }
+];
 
 interface StoredComplaint {
   id: string;
@@ -611,155 +726,78 @@ export function devApiPlugin(): Plugin {
           });
         }
 
-        if (normalized === '/driver/potholes') {
+        if (normalized === '/driver/potholes' || normalized === '/driver/potholes/clear-sample') {
+          if (method === 'DELETE' || normalized === '/driver/potholes/clear-sample') {
+            const initialCount = memoryPotholes.length;
+            memoryPotholes = memoryPotholes.filter(p => !p.id.startsWith('pot_10') && !p.id.startsWith('crk_10') && !p.id.startsWith('asp_10'));
+            return sendJson(res, 200, {
+              status: 'cleared',
+              cleared_count: initialCount - memoryPotholes.length,
+              remaining_count: memoryPotholes.length,
+              potholes: memoryPotholes
+            });
+          }
+
+          if (method === 'POST') {
+            const body = await parseJsonBody(req).catch(() => ({}));
+            const newPothole = {
+              id: body.id || `pot_${Date.now()}`,
+              pothole_id: body.pothole_id || `POT-${Math.floor(100 + Math.random() * 900)}`,
+              latitude: Number(body.latitude) || 28.4595,
+              longitude: Number(body.longitude) || 77.0266,
+              severity: body.severity || 'high',
+              category: body.category || 'pothole',
+              model_name: body.model_name || 'best.pt',
+              depth_cm: Number(body.depth_cm) || 5.0,
+              width_cm: Number(body.width_cm) || 40.0,
+              road_name: body.road_name || 'Surveyed Road Corridor',
+              road_authority: body.road_authority || 'National Highways Authority of India (NHAI)',
+              confidence: Number(body.confidence) || 0.92,
+              detected_at: body.detected_at || new Date().toISOString(),
+              image_url: body.image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
+            };
+            memoryPotholes.unshift(newPothole);
+            return sendJson(res, 201, {
+              status: 'success',
+              message: 'Road defect mapped successfully',
+              pothole: newPothole
+            });
+          }
+
           return sendJson(res, 200, {
-            total: 7,
-            potholes: [
-              {
-                id: 'pot_101',
-                pothole_id: 'POT-101',
-                latitude: 28.4595,
-                longitude: 77.0266,
-                severity: 'critical',
-                category: 'pothole',
-                model_name: 'best.pt',
-                depth_cm: 6.8,
-                width_cm: 45.0,
-                road_name: 'NH-48 Sector 14 Link A',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.94,
-                detected_at: new Date(Date.now() - 15 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'crk_102',
-                pothole_id: 'CRK-102',
-                latitude: 28.4612,
-                longitude: 77.0282,
-                severity: 'medium',
-                category: 'longitudinal_crack',
-                model_name: 'best.pt',
-                depth_cm: 1.8,
-                width_cm: 32.0,
-                road_name: 'NH-48 Sector 14 Link B',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.82,
-                detected_at: new Date(Date.now() - 40 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'pot_103',
-                pothole_id: 'POT-103',
-                latitude: 28.4635,
-                longitude: 77.0305,
-                severity: 'critical',
-                category: 'broken_road',
-                model_name: 'best.pt',
-                depth_cm: 8.5,
-                width_cm: 95.0,
-                road_name: 'NH-48 Sector 14 North',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.91,
-                detected_at: new Date(Date.now() - 65 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'crk_104',
-                pothole_id: 'CRK-104',
-                latitude: 28.4720,
-                longitude: 77.0515,
-                severity: 'low',
-                category: 'transverse_crack',
-                model_name: 'best.pt',
-                depth_cm: 1.2,
-                width_cm: 75.0,
-                road_name: 'NH-48 IFFCO Chowk Flyover',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.76,
-                detected_at: new Date(Date.now() - 95 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'pot_105',
-                pothole_id: 'POT-105',
-                latitude: 28.4810,
-                longitude: 77.0690,
-                severity: 'high',
-                category: 'pothole',
-                model_name: 'best.pt',
-                depth_cm: 5.4,
-                width_cm: 42.0,
-                road_name: 'NH-48 Signature Tower Segment',
-                road_authority: 'State PWD Division',
-                confidence: 0.89,
-                detected_at: new Date(Date.now() - 140 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'asp_106',
-                pothole_id: 'ASP-106',
-                latitude: 28.4980,
-                longitude: 77.0930,
-                severity: 'medium',
-                category: 'missing_asphalt',
-                model_name: 'best.pt',
-                depth_cm: 4.1,
-                width_cm: 50.0,
-                road_name: 'NH-48 Shankar Chowk Flyover',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.85,
-                detected_at: new Date(Date.now() - 180 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80'
-              },
-              {
-                id: 'pot_107',
-                pothole_id: 'POT-107',
-                latitude: 28.5080,
-                longitude: 77.1020,
-                severity: 'high',
-                category: 'pothole',
-                model_name: 'best.pt',
-                depth_cm: 6.0,
-                width_cm: 55.0,
-                road_name: 'NH-48 Sirhaul Toll Plaza',
-                road_authority: 'National Highways Authority of India (NHAI)',
-                confidence: 0.88,
-                detected_at: new Date(Date.now() - 220 * 60000).toISOString(),
-                image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80'
-              }
-            ]
+            total: memoryPotholes.length,
+            potholes: memoryPotholes
           });
         }
 
         if ((normalized === '/driver/heatmap' || normalized === '/analytics/pothole-heatmap') && method === 'GET') {
+          const heatmapPoints = memoryPotholes.map(p => {
+            const intensity = p.severity === 'critical' ? 0.95 : p.severity === 'high' ? 0.82 : p.severity === 'medium' ? 0.60 : 0.40;
+            return {
+              latitude: p.latitude,
+              longitude: p.longitude,
+              intensity,
+              severity: p.severity,
+              category: p.category,
+              pothole_id: p.pothole_id || p.id
+            };
+          });
+
+          // Compute cluster hotspots
+          const hotspots = [
+            {
+              id: 'hs-active-survey',
+              road_name: memoryPotholes[0]?.road_name || 'Active Road Corridor',
+              pothole_count: memoryPotholes.length,
+              avg_severity: +(memoryPotholes.reduce((acc, curr) => acc + (curr.severity === 'critical' ? 90 : curr.severity === 'high' ? 75 : curr.severity === 'medium' ? 55 : 30), 0) / Math.max(1, memoryPotholes.length)).toFixed(1),
+              risk_level: memoryPotholes.some(p => p.severity === 'critical') ? 'critical' : 'high',
+              center: [memoryPotholes[0]?.latitude || 28.4615, memoryPotholes[0]?.longitude || 77.0285] as [number, number]
+            }
+          ];
+
           return sendJson(res, 200, {
-            points: [
-              { latitude: 28.4595, longitude: 77.0266, intensity: 0.95, severity: 'critical', category: 'pothole', pothole_id: 'POT-101' },
-              { latitude: 28.4612, longitude: 77.0282, intensity: 0.60, severity: 'medium', category: 'longitudinal_crack', pothole_id: 'CRK-102' },
-              { latitude: 28.4635, longitude: 77.0305, intensity: 0.92, severity: 'critical', category: 'broken_road', pothole_id: 'POT-103' },
-              { latitude: 28.4720, longitude: 77.0515, intensity: 0.45, severity: 'low', category: 'transverse_crack', pothole_id: 'CRK-104' },
-              { latitude: 28.4810, longitude: 77.0690, intensity: 0.85, severity: 'high', category: 'pothole', pothole_id: 'POT-105' },
-              { latitude: 28.4980, longitude: 77.0930, intensity: 0.70, severity: 'medium', category: 'missing_asphalt', pothole_id: 'ASP-106' },
-              { latitude: 28.5080, longitude: 77.1020, intensity: 0.88, severity: 'high', category: 'pothole', pothole_id: 'POT-107' }
-            ],
-            hotspots: [
-              {
-                id: 'hs-nh48-sec14',
-                road_name: 'NH-48 Sector 14 Interchange',
-                pothole_count: 5,
-                avg_severity: 84.5,
-                risk_level: 'critical',
-                center: [28.4615, 77.0285]
-              },
-              {
-                id: 'hs-nh48-iffco',
-                road_name: 'NH-48 IFFCO Chowk & Cyber City',
-                pothole_count: 3,
-                avg_severity: 72.0,
-                risk_level: 'high',
-                center: [28.4765, 77.0600]
-              }
-            ]
+            points: heatmapPoints,
+            hotspots
           });
         }
 

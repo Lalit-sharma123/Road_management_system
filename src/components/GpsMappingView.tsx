@@ -29,7 +29,18 @@ import {
   Clock,
   Camera,
   Video,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Upload,
+  Download,
+  Trash2,
+  Locate,
+  Check,
+  X,
+  FileSpreadsheet,
+  FileText,
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot, CameraDevice, TrafficViolation } from '../types/inspection';
 import { StolenVehicleAlert } from '../types/stolenVehicle';
@@ -231,6 +242,58 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const heatLayerRef = useRef<any>(null);
   const vehicleMarkerRef = useRef<L.Marker | null>(null);
+  const surveyorMarkerRef = useRef<L.Marker | null>(null);
+  const polylineRef = useRef<L.Polyline | null>(null);
+
+  // Real Data vs Demo Data mode state
+  const [dataMode, setDataMode] = useState<'real' | 'all'>(() => {
+    const saved = localStorage.getItem('nhai_gis_data_mode');
+    return saved === 'all' ? 'all' : 'real'; // Default strictly to 'real' as requested
+  });
+
+  // Persistent Real Road Surveyed Defects
+  const [realMappedDefects, setRealMappedDefects] = useState<GPSDamageMarker[]>(() => {
+    try {
+      const saved = localStorage.getItem('nhai_real_survey_defects_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse saved real survey defects:', e);
+    }
+    return [];
+  });
+
+  // Pinning & Interactive Mapping Mode
+  const [isPinningMode, setIsPinningMode] = useState<boolean>(false);
+  const isPinningModeRef = useRef<boolean>(false);
+  useEffect(() => {
+    isPinningModeRef.current = isPinningMode;
+    if (mapContainerRef.current) {
+      mapContainerRef.current.style.cursor = isPinningMode ? 'crosshair' : 'grab';
+    }
+  }, [isPinningMode]);
+
+  // Modal and Live GPS states
+  const [isAddDefectModalOpen, setIsAddDefectModalOpen] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [surveyorGps, setSurveyorGps] = useState<{ lat: number; lng: number } | null>(null);
+  const [importStats, setImportStats] = useState<{ total: number; message: string } | null>(null);
+
+  // Add Defect Form Inputs
+  const [newDefectLat, setNewDefectLat] = useState<number | string>(28.4635);
+  const [newDefectLng, setNewDefectLng] = useState<number | string>(77.0305);
+  const [newDefectCategory, setNewDefectCategory] = useState<DamageCategory>('pothole');
+  const [newDefectSeverity, setNewDefectSeverity] = useState<SeverityLevel>('high');
+  const [newDefectRoadName, setNewDefectRoadName] = useState<string>('National Highway Survey Corridor');
+  const [newDefectRoadAuthority, setNewDefectRoadAuthority] = useState<string>('National Highways Authority of India (NHAI)');
+  const [newDefectDepth, setNewDefectDepth] = useState<number | string>(5.5);
+  const [newDefectWidth, setNewDefectWidth] = useState<number | string>(42.0);
+  const [newDefectConfidence, setNewDefectConfidence] = useState<number>(0.94);
+  const [newDefectImageUrl, setNewDefectImageUrl] = useState<string>('');
+  const [newDefectNotes, setNewDefectNotes] = useState<string>('');
 
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -257,6 +320,322 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const [highwayCameras, setHighwayCameras] = useState<CameraDevice[]>(propsCameras || []);
   const [highwayViolations, setHighwayViolations] = useState<TrafficViolation[]>([]);
   const [stolenAlerts, setStolenAlerts] = useState<StolenVehicleAlert[]>([]);
+
+  // Save data mode preference
+  const handleToggleDataMode = (mode: 'real' | 'all') => {
+    setDataMode(mode);
+    localStorage.setItem('nhai_gis_data_mode', mode);
+  };
+
+  // Persist real surveyed defects to localStorage
+  const saveRealDefects = (defects: GPSDamageMarker[]) => {
+    setRealMappedDefects(defects);
+    try {
+      localStorage.setItem('nhai_real_survey_defects_v2', JSON.stringify(defects));
+    } catch (e) {
+      console.error('Failed to save real survey defects:', e);
+    }
+  };
+
+  // Add a newly pinned/surveyed defect
+  const handleAddRealDefect = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const lat = Number(newDefectLat);
+    const lng = Number(newDefectLng);
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      alert('Please enter valid GPS coordinates (Latitude between -90 and 90, Longitude between -180 and 180)');
+      return;
+    }
+
+    const uniquePotholeId = `POT-REAL-${Math.floor(100 + Math.random() * 900)}`;
+    const newMarker: GPSDamageMarker = {
+      id: `real_pot_${Date.now()}`,
+      pothole_id: uniquePotholeId,
+      frame_number: 1,
+      timestamp_sec: Math.floor(Date.now() / 1000) % 3600,
+      latitude: lat,
+      longitude: lng,
+      category: newDefectCategory,
+      severity: newDefectSeverity,
+      confidence: Number(newDefectConfidence) || 0.95,
+      road_name: newDefectRoadName.trim() || 'Surveyed Highway Segment',
+      road_authority: newDefectRoadAuthority.trim() || 'National Highways Authority of India (NHAI)',
+      image_url: newDefectImageUrl.trim() || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+      depth_cm: Number(newDefectDepth) || 5.0,
+      width_cm: Number(newDefectWidth) || 40.0,
+      model_name: 'best.pt'
+    };
+
+    const updated = [newMarker, ...realMappedDefects];
+    saveRealDefects(updated);
+
+    // Also sync to devApi backend
+    try {
+      await apiClient.post('/driver/potholes', newMarker);
+    } catch (err) {
+      console.debug('Failed to sync to backend /driver/potholes:', err);
+    }
+
+    setIsAddDefectModalOpen(false);
+    setIsPinningMode(false);
+
+    // Fly to newly added point
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([lat, lng], 17, { duration: 1.0 });
+    }
+  };
+
+  // Acquire real device GPS location using HTML5 Geolocation API
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        const lat = parseFloat(pos.coords.latitude.toFixed(6));
+        const lng = parseFloat(pos.coords.longitude.toFixed(6));
+        setSurveyorGps({ lat, lng });
+        setNewDefectLat(lat);
+        setNewDefectLng(lng);
+
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.flyTo([lat, lng], 17, { duration: 1.2 });
+
+          // Update or place surveyor position marker
+          if (!surveyorMarkerRef.current) {
+            const surveyorIcon = L.divIcon({
+              className: 'surveyor-marker',
+              html: `
+                <div style="position:relative; width:36px; height:36px; display:flex; align-items:center; justify-content:center;">
+                  <div style="position:absolute; width:36px; height:36px; border-radius:50%; background:rgba(37,99,235,0.3); animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>
+                  <div style="width:22px; height:22px; border-radius:50%; background:#2563EB; border:2px solid #FFF; box-shadow:0 0 12px rgba(37,99,235,0.9); display:flex; align-items:center; justify-content:center; color:white;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+                  </div>
+                </div>
+              `,
+              iconSize: [36, 36],
+              iconAnchor: [18, 18]
+            });
+            surveyorMarkerRef.current = L.marker([lat, lng], { icon: surveyorIcon })
+              .addTo(mapInstanceRef.current)
+              .bindPopup('<b style="color:#2563EB">📡 Real Surveyor GPS Location</b><br/>Acquired via Device Telemetry');
+          } else {
+            surveyorMarkerRef.current.setLatLng([lat, lng]);
+          }
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        console.warn('Geolocation error:', err);
+        alert('Could not acquire GPS position. Please check browser location permissions or ensure location services are enabled.');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  };
+
+  // Import real survey data (CSV or GeoJSON)
+  const handleSurveyFileUpload = (fileOrEvent: File | React.ChangeEvent<HTMLInputElement>) => {
+    let file: File | null = null;
+    if (fileOrEvent instanceof File) {
+      file = fileOrEvent;
+    } else if (fileOrEvent && 'target' in fileOrEvent && fileOrEvent.target.files && fileOrEvent.target.files[0]) {
+      file = fileOrEvent.target.files[0];
+    }
+    if (!file) return;
+
+    const reader = new FileReader();
+    const fileName = file.name.toLowerCase();
+
+    reader.onload = async (e) => {
+      const content = e.target?.result as string;
+      if (!content) return;
+
+      const parsedItems: GPSDamageMarker[] = [];
+
+      try {
+        if (fileName.endsWith('.geojson') || fileName.endsWith('.json')) {
+          const geojson = JSON.parse(content);
+          const features = geojson.features || (geojson.type === 'Feature' ? [geojson] : []);
+          features.forEach((feat: any, idx: number) => {
+            if (feat.geometry && feat.geometry.type === 'Point' && Array.isArray(feat.geometry.coordinates)) {
+              const [lon, lat] = feat.geometry.coordinates;
+              const props = feat.properties || {};
+              parsedItems.push({
+                id: `import_${Date.now()}_${idx}`,
+                pothole_id: props.pothole_id || props.id || `POT-IMP-${idx + 1}`,
+                frame_number: idx * 10,
+                timestamp_sec: idx * 2,
+                latitude: Number(lat),
+                longitude: Number(lon),
+                category: (props.category as DamageCategory) || 'pothole',
+                severity: (props.severity as SeverityLevel) || 'high',
+                confidence: Number(props.confidence) || 0.92,
+                road_name: props.road_name || props.road || 'Imported Road Survey Corridor',
+                road_authority: props.road_authority || 'Surveyed Authority',
+                image_url: props.image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+                depth_cm: Number(props.depth_cm) || 4.5,
+                width_cm: Number(props.width_cm) || 35.0,
+                model_name: props.model_name || 'best.pt'
+              });
+            }
+          });
+        } else {
+          // Parse CSV
+          const lines = content.split(/\r?\n/).filter(line => line.trim().length > 0);
+          if (lines.length > 1) {
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+            const latIdx = headers.findIndex(h => h === 'latitude' || h === 'lat' || h === 'y');
+            const lngIdx = headers.findIndex(h => h === 'longitude' || h === 'lng' || h === 'lon' || h === 'x');
+            const catIdx = headers.findIndex(h => h === 'category' || h === 'type' || h === 'damage_type');
+            const sevIdx = headers.findIndex(h => h === 'severity' || h === 'level');
+            const roadIdx = headers.findIndex(h => h === 'road_name' || h === 'road' || h === 'street' || h === 'highway');
+            const confIdx = headers.findIndex(h => h === 'confidence' || h === 'score');
+            const depthIdx = headers.findIndex(h => h === 'depth_cm' || h === 'depth');
+            const widthIdx = headers.findIndex(h => h === 'width_cm' || h === 'width');
+
+            if (latIdx !== -1 && lngIdx !== -1) {
+              for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
+                const lat = parseFloat(cols[latIdx]);
+                const lng = parseFloat(cols[lngIdx]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  parsedItems.push({
+                    id: `import_csv_${Date.now()}_${i}`,
+                    pothole_id: `POT-CSV-${i}`,
+                    frame_number: i * 15,
+                    timestamp_sec: i * 2,
+                    latitude: lat,
+                    longitude: lng,
+                    category: (catIdx !== -1 ? (cols[catIdx] as DamageCategory) : 'pothole') || 'pothole',
+                    severity: (sevIdx !== -1 ? (cols[sevIdx] as SeverityLevel) : 'high') || 'high',
+                    confidence: confIdx !== -1 ? parseFloat(cols[confIdx]) || 0.90 : 0.90,
+                    road_name: roadIdx !== -1 && cols[roadIdx] ? cols[roadIdx] : 'Surveyed Road Corridor',
+                    road_authority: 'Highway Inspection Survey',
+                    image_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+                    depth_cm: depthIdx !== -1 ? parseFloat(cols[depthIdx]) || 5.0 : 5.0,
+                    width_cm: widthIdx !== -1 ? parseFloat(cols[widthIdx]) || 40.0 : 40.0,
+                    model_name: 'best.pt'
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        if (parsedItems.length > 0) {
+          const combined = [...parsedItems, ...realMappedDefects];
+          saveRealDefects(combined);
+          setImportStats({
+            total: parsedItems.length,
+            message: `Successfully imported ${parsedItems.length} real road survey points.`
+          });
+
+          // Zoom map to fit imported points
+          if (mapInstanceRef.current && parsedItems.length > 0) {
+            const bounds = L.latLngBounds(parsedItems.map(p => [p.latitude, p.longitude]));
+            mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+          }
+        } else {
+          setImportStats({
+            total: 0,
+            message: 'No valid GPS defect coordinates found. Ensure columns contain "latitude" and "longitude".'
+          });
+        }
+      } catch (err: any) {
+        setImportStats({
+          total: 0,
+          message: `File parse error: ${err.message || 'Invalid format'}`
+        });
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
+  // Export current mapped defects as GeoJSON
+  const handleExportGeoJSON = () => {
+    const geojson = {
+      type: 'FeatureCollection',
+      features: damageMarkers.map(m => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [m.longitude, m.latitude]
+        },
+        properties: {
+          id: m.id,
+          pothole_id: m.pothole_id,
+          category: m.category,
+          severity: m.severity,
+          confidence: m.confidence,
+          road_name: m.road_name,
+          road_authority: m.road_authority,
+          depth_cm: m.depth_cm,
+          width_cm: m.width_cm,
+          timestamp_sec: m.timestamp_sec
+        }
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `road_defects_gis_survey_${Date.now()}.geojson`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export current mapped defects as CSV
+  const handleExportCSV = () => {
+    const header = 'id,pothole_id,latitude,longitude,category,severity,confidence,road_name,road_authority,depth_cm,width_cm,timestamp_sec\n';
+    const rows = damageMarkers.map(m => 
+      `"${m.id}","${m.pothole_id || ''}",${m.latitude},${m.longitude},"${m.category}","${m.severity}",${m.confidence},"${m.road_name.replace(/"/g, '""')}","${(m.road_authority || '').replace(/"/g, '""')}",${m.depth_cm || 0},${m.width_cm || 0},${m.timestamp_sec}`
+    ).join('\n');
+
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `road_defects_gis_survey_${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Permanently purge demo sample data
+  const handlePurgeSampleData = async () => {
+    if (confirm('Permanently purge default sample defects? Only real surveyed potholes and geotagged uploads will remain on the map.')) {
+      try {
+        await apiClient.delete('/driver/potholes/clear-sample');
+      } catch (e) {
+        console.debug('Backend clear notice:', e);
+      }
+      setDataMode('real');
+      localStorage.setItem('nhai_gis_data_mode', 'real');
+      loadDatabasePotholes();
+      loadHistoricalHeatmap();
+    }
+  };
+
+  // Delete individual real defect
+  const handleDeleteDefect = (defectId: string) => {
+    const updated = realMappedDefects.filter(m => m.id !== defectId);
+    saveRealDefects(updated);
+  };
+
+  // Clear all real mapped survey points
+  const handleClearAllRealDefects = () => {
+    if (confirm('Clear all your surveyed real road defect points from this device?')) {
+      saveRealDefects([]);
+    }
+  };
 
   // Fetch Highway Cameras, Violations & Alerts
   useEffect(() => {
@@ -293,8 +672,8 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
           pothole_id: p.pothole_id || `POT-${idx + 100}`,
           frame_number: p.frame_number || (idx * 30),
           timestamp_sec: p.timestamp ? Math.round(new Date(p.timestamp).getTime() / 1000) % 3600 : idx * 2,
-          latitude: p.latitude,
-          longitude: p.longitude,
+          latitude: Number(p.latitude),
+          longitude: Number(p.longitude),
           category: (p.category as DamageCategory) || 'pothole',
           severity: (p.severity as SeverityLevel) || 'high',
           confidence: p.confidence ?? 0.90,
@@ -318,10 +697,20 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     loadDatabasePotholes();
   }, [loadDatabasePotholes]);
 
-  // Base road GPS track points derived from video or real database coordinates
+  // Base road GPS track points derived from real defects, video, or real database coordinates
   const gpsTracks: GPSPoint[] = useMemo(() => {
     if (video?.gps_tracks && video.gps_tracks.length > 0) {
       return video.gps_tracks;
+    }
+    if (realMappedDefects.length > 0) {
+      return realMappedDefects.map((p, i) => ({
+        frame_number: p.frame_number || (i * 30),
+        latitude: p.latitude,
+        longitude: p.longitude,
+        altitude_meters: 215.0 + (i * 0.2),
+        speed_kmh: 40.0,
+        road_name: p.road_name
+      }));
     }
     if (dbPotholes.length > 0) {
       return dbPotholes.map((p, i) => ({
@@ -333,15 +722,15 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
         road_name: p.road_name
       }));
     }
-    const centerLat = currentVehiclePosition?.lat || 28.4595;
-    const centerLng = currentVehiclePosition?.lng || 77.0266;
+    const centerLat = currentVehiclePosition?.lat || (realMappedDefects[0]?.latitude) || 28.4595;
+    const centerLng = currentVehiclePosition?.lng || (realMappedDefects[0]?.longitude) || 77.0266;
     return [
-      { frame_number: 1, latitude: centerLat, longitude: centerLng, altitude_meters: 215.4, speed_kmh: 42.5, road_name: 'National Highway Corridor' },
-      { frame_number: 150, latitude: centerLat + 0.0013, longitude: centerLng + 0.0012, altitude_meters: 215.8, speed_kmh: 44.1, road_name: 'National Highway Corridor' },
-      { frame_number: 300, latitude: centerLat + 0.0026, longitude: centerLng + 0.0025, altitude_meters: 216.2, speed_kmh: 41.8, road_name: 'National Highway Corridor' },
-      { frame_number: 450, latitude: centerLat + 0.0040, longitude: centerLng + 0.0039, altitude_meters: 215.1, speed_kmh: 45.0, road_name: 'National Highway Corridor' }
+      { frame_number: 1, latitude: centerLat, longitude: centerLng, altitude_meters: 215.4, speed_kmh: 42.5, road_name: 'Surveyed Highway Corridor' },
+      { frame_number: 150, latitude: centerLat + 0.0013, longitude: centerLng + 0.0012, altitude_meters: 215.8, speed_kmh: 44.1, road_name: 'Surveyed Highway Corridor' },
+      { frame_number: 300, latitude: centerLat + 0.0026, longitude: centerLng + 0.0025, altitude_meters: 216.2, speed_kmh: 41.8, road_name: 'Surveyed Highway Corridor' },
+      { frame_number: 450, latitude: centerLat + 0.0040, longitude: centerLng + 0.0039, altitude_meters: 215.1, speed_kmh: 45.0, road_name: 'Surveyed Highway Corridor' }
     ];
-  }, [video?.gps_tracks, dbPotholes, currentVehiclePosition]);
+  }, [video?.gps_tracks, realMappedDefects, dbPotholes, currentVehiclePosition]);
 
   // Fetch Historical Database Pothole Detections for Heatmap
   const loadHistoricalHeatmap = useCallback(async () => {
@@ -369,43 +758,46 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     loadHistoricalHeatmap();
   }, [loadHistoricalHeatmap]);
 
-  // Derive Geotagged Damage Markers dynamically from real props, video frames, or database
+  // Derive Geotagged Damage Markers dynamically from real props, video frames, surveyed defects, or database
   const damageMarkers: GPSDamageMarker[] = useMemo(() => {
+    const allReal: GPSDamageMarker[] = [...realMappedDefects];
+
     if (potholeMarkers && potholeMarkers.length > 0) {
-      return potholeMarkers.map((m, idx) => ({
-        id: m.id || m.pothole_id || m.detection_id || `pot-${idx}-${m.latitude}-${m.longitude}`,
-        pothole_id: m.pothole_id || `POT-${m.track_id || idx + 1}`,
-        frame_number: m.frame_number ?? (idx * 15),
-        timestamp_sec: m.timestamp_sec ?? (m.timestamp ? Math.round(new Date(m.timestamp).getTime() / 1000) : idx * 2),
-        latitude: m.latitude,
-        longitude: m.longitude,
-        category: ((m.category as DamageCategory) || 'pothole'),
-        severity: ((m.severity as SeverityLevel) || 'high'),
-        confidence: m.confidence ?? 0.92,
-        road_name: m.road_name || 'Active Road Corridor',
-        road_authority: m.road_authority || 'National Highway Authority',
-        image_url: m.image_url || m.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
-        distance_meters: m.distance_meters,
-        lane_position: m.lane_position,
-        model_name: m.model_name || 'best.pt',
-        depth_cm: m.depth_cm,
-        width_cm: m.width_cm
-      }));
+      potholeMarkers.forEach((m, idx) => {
+        allReal.push({
+          id: m.id || m.pothole_id || m.detection_id || `pot-${idx}-${m.latitude}-${m.longitude}`,
+          pothole_id: m.pothole_id || `POT-${m.track_id || idx + 1}`,
+          frame_number: m.frame_number ?? (idx * 15),
+          timestamp_sec: m.timestamp_sec ?? (m.timestamp ? Math.round(new Date(m.timestamp).getTime() / 1000) : idx * 2),
+          latitude: Number(m.latitude),
+          longitude: Number(m.longitude),
+          category: ((m.category as DamageCategory) || 'pothole'),
+          severity: ((m.severity as SeverityLevel) || 'high'),
+          confidence: m.confidence ?? 0.92,
+          road_name: m.road_name || 'Active Road Corridor',
+          road_authority: m.road_authority || 'National Highway Authority',
+          image_url: m.image_url || m.evidence_image_url || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+          distance_meters: m.distance_meters,
+          lane_position: m.lane_position,
+          model_name: m.model_name || 'best.pt',
+          depth_cm: m.depth_cm,
+          width_cm: m.width_cm
+        });
+      });
     }
 
     if (video?.frames && video.frames.length > 0) {
-      const extracted: GPSDamageMarker[] = [];
       video.frames.forEach((f) => {
         if (f.has_damage && f.detections && f.detections.length > 0) {
           f.detections.forEach((d) => {
             const gpsPt = video.gps_tracks?.find((g) => g.frame_number >= f.frame_number) || video.gps_tracks?.[0];
-            extracted.push({
+            allReal.push({
               id: d.id,
               pothole_id: `POT-${d.id.slice(-4)}`,
               frame_number: f.frame_number,
               timestamp_sec: f.timestamp_sec,
-              latitude: d.latitude || (gpsPt ? gpsPt.latitude : (currentVehiclePosition?.lat || 28.4635)),
-              longitude: d.longitude || (gpsPt ? gpsPt.longitude : (currentVehiclePosition?.lng || 77.0305)),
+              latitude: Number(d.latitude || (gpsPt ? gpsPt.latitude : (currentVehiclePosition?.lat || 28.4635))),
+              longitude: Number(d.longitude || (gpsPt ? gpsPt.longitude : (currentVehiclePosition?.lng || 77.0305))),
               category: d.category,
               severity: d.severity,
               confidence: d.confidence,
@@ -419,15 +811,33 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
           });
         }
       });
-      if (extracted.length > 0) return extracted;
     }
 
     if (dbPotholes.length > 0) {
-      return dbPotholes;
+      allReal.push(...dbPotholes);
     }
 
+    // Deduplicate allReal by coordinates + id
+    const uniqueRealMap = new Map<string, GPSDamageMarker>();
+    allReal.forEach(item => {
+      const key = `${Number(item.latitude).toFixed(5)}_${Number(item.longitude).toFixed(5)}_${item.category}`;
+      if (!uniqueRealMap.has(key)) {
+        uniqueRealMap.set(key, item);
+      }
+    });
+    const uniqueReal = Array.from(uniqueRealMap.values());
+
+    // In 'real' mode, NEVER use defaultStaticMarkers!
+    if (dataMode === 'real') {
+      return uniqueReal;
+    }
+
+    // In 'all' mode, fall back to defaultStaticMarkers if uniqueReal is empty
+    if (uniqueReal.length > 0) {
+      return uniqueReal;
+    }
     return defaultStaticMarkers;
-  }, [potholeMarkers, video, dbPotholes, currentVehiclePosition]);
+  }, [dataMode, realMappedDefects, potholeMarkers, video, dbPotholes, currentVehiclePosition]);
 
   const [selectedMarker, setSelectedMarker] = useState<GPSDamageMarker>(damageMarkers[0] || defaultStaticMarkers[0]);
 
@@ -529,15 +939,13 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       ).addTo(map);
 
       // Create polyline track
-      const polylineCoords: [number, number][] = gpsTracks.map(p => [p.latitude, p.longitude]);
-      if (polylineCoords.length > 1) {
-        L.polyline(polylineCoords, {
-          color: '#3B82F6',
-          weight: 3,
-          opacity: 0.8,
-          dashArray: '6, 6'
-        }).addTo(map);
-      }
+      const polyline = L.polyline([], {
+        color: '#3B82F6',
+        weight: 3,
+        opacity: 0.8,
+        dashArray: '6, 6'
+      }).addTo(map);
+      polylineRef.current = polyline;
 
       // Layer group for dynamic markers
       const markersLayer = L.layerGroup().addTo(map);
@@ -550,6 +958,18 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       // Layer group for traffic violations & stolen alerts
       const violationsLayer = L.layerGroup().addTo(map);
       violationsLayerRef.current = violationsLayer;
+
+      // Map click listener for interactive pinning of real defects
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        if (isPinningModeRef.current) {
+          const lat = parseFloat(e.latlng.lat.toFixed(6));
+          const lng = parseFloat(e.latlng.lng.toFixed(6));
+          setNewDefectLat(lat);
+          setNewDefectLng(lng);
+          setIsAddDefectModalOpen(true);
+          setIsPinningMode(false);
+        }
+      });
 
       // Add vehicle marker if position provided
       if (currentVehiclePosition) {
@@ -581,6 +1001,14 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
       }
     };
   }, []);
+
+  // Update GPS polyline track when gpsTracks change
+  useEffect(() => {
+    if (polylineRef.current && gpsTracks.length > 1) {
+      const coords: [number, number][] = gpsTracks.map(p => [p.latitude, p.longitude]);
+      polylineRef.current.setLatLngs(coords);
+    }
+  }, [gpsTracks]);
 
   // 2. Smoothly update vehicle position marker
   useEffect(() => {
@@ -1042,55 +1470,167 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   // Full View Layout (for GPS Mapping Tab)
   return (
     <div className="space-y-6 text-[#E0E0E0] font-mono">
-      {/* GIS Mapping Banner */}
-      <div className="bg-[#141414] border border-[#2A2A2A] p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2 text-[#2563EB] text-[10px] uppercase tracking-widest mb-0.5">
-            <Globe className="w-3.5 h-3.5" />
-            <span>INTERACTIVE LEAFLET GIS ROAD DEFECT & HEATMAP MAPPER</span>
+      {/* Real Data Mode Command & GIS Navigation Header */}
+      <div className="bg-[#111111] border border-blue-900/40 p-4 rounded-t-sm shadow-md">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2">
+              <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${
+                dataMode === 'real'
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 flex items-center gap-1'
+                  : 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+              }`}>
+                {dataMode === 'real' ? (
+                  <>
+                    <Zap className="w-3 h-3 fill-emerald-400" />
+                    <span>REAL DATA MODE (LIVE SURVEY)</span>
+                  </>
+                ) : (
+                  <span>DEMO / SAMPLE DATA MODE</span>
+                )}
+              </span>
+
+              <span className="text-[10px] text-[#888]">
+                {dataMode === 'real' 
+                  ? `${damageMarkers.length} Real Mapped Defect${damageMarkers.length === 1 ? '' : 's'}`
+                  : `${damageMarkers.length} Defect Pins Displayed`}
+              </span>
+            </div>
+
+            <h2 className="text-base font-bold text-white uppercase flex items-center gap-2">
+              <Globe className="w-4 h-4 text-[#2563EB]" />
+              <span>{video?.title || 'National Highway Corridor'} GIS Map & Heatmap</span>
+            </h2>
+            <p className="text-[11px] text-[#888]">
+              Direct GPS defect mapping engine. Map real surveyed potholes, live mobile surveyor telemetry, and import/export GIS survey packages.
+            </p>
           </div>
-          <h2 className="text-base font-bold text-white uppercase">{video?.title || 'Active Corridor'} Spatial Heatmap</h2>
-          <p className="text-[11px] text-[#888]">
-            Historical pothole density heatmap overlay with semi-transparent gradient blending, combined with geotagged discrete severity pins.
-          </p>
+
+          {/* Mode Switch & Real Survey Quick Actions */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Mode Switch Button */}
+            <div className="bg-[#1A1A1A] border border-[#333] p-1 flex items-center rounded text-xs">
+              <button
+                type="button"
+                onClick={() => handleToggleDataMode('real')}
+                className={`px-3 py-1 text-[11px] font-bold uppercase transition-all rounded ${
+                  dataMode === 'real'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-[#888] hover:text-white'
+                }`}
+              >
+                ⚡ Real Data
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleDataMode('all')}
+                className={`px-3 py-1 text-[11px] font-bold uppercase transition-all rounded ${
+                  dataMode === 'all'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-[#888] hover:text-white'
+                }`}
+              >
+                All / Demo
+              </button>
+            </div>
+
+            {/* Map Pinning Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsPinningMode(!isPinningMode)}
+              className={`px-3 py-1.5 text-xs font-bold uppercase border flex items-center gap-1.5 transition-all ${
+                isPinningMode
+                  ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-lg'
+                  : 'bg-[#1E1E1E] hover:bg-[#2A2A2A] text-amber-300 border-amber-500/40 hover:border-amber-400'
+              }`}
+              title="Click anywhere on map to drop a new road defect"
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              <span>{isPinningMode ? 'CLICK MAP TO PIN...' : 'PIN ON MAP'}</span>
+            </button>
+
+            {/* Add Defect Modal Button */}
+            <button
+              type="button"
+              onClick={() => setIsAddDefectModalOpen(true)}
+              className="px-3 py-1.5 text-xs font-bold uppercase bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 flex items-center gap-1.5 transition-all shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>ADD DEFECT</span>
+            </button>
+
+            {/* Real Device GPS Locator */}
+            <button
+              type="button"
+              onClick={handleLocateMe}
+              disabled={isLocating}
+              className="px-3 py-1.5 text-xs font-bold uppercase bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] hover:border-blue-500 text-white flex items-center gap-1.5 transition-all"
+              title="Acquire live device GPS location"
+            >
+              <Locate className={`w-3.5 h-3.5 text-sky-400 ${isLocating ? 'animate-spin' : ''}`} />
+              <span>{isLocating ? 'LOCATING...' : 'MY GPS'}</span>
+            </button>
+
+            {/* Import Survey Data Button */}
+            <button
+              type="button"
+              onClick={() => { setImportStats(null); setIsImportModalOpen(true); }}
+              className="px-3 py-1.5 text-xs font-bold uppercase bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] hover:border-emerald-500 text-white flex items-center gap-1.5 transition-all"
+              title="Import GeoJSON or CSV survey data"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-400" />
+              <span>IMPORT</span>
+            </button>
+
+            {/* Export Dropdown / Buttons */}
+            <button
+              type="button"
+              onClick={handleExportGeoJSON}
+              className="px-2.5 py-1.5 text-xs font-bold uppercase bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] hover:border-indigo-500 text-white flex items-center gap-1 transition-all"
+              title="Export current mapped points as GeoJSON"
+            >
+              <Download className="w-3.5 h-3.5 text-indigo-400" />
+              <span>GEOJSON</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="px-2.5 py-1.5 text-xs font-bold uppercase bg-[#1A1A1A] hover:bg-[#252525] border border-[#333] hover:border-teal-500 text-white flex items-center gap-1 transition-all"
+              title="Export current mapped points as CSV"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-teal-400" />
+              <span>CSV</span>
+            </button>
+
+            {/* Purge Demo Data Button */}
+            <button
+              type="button"
+              onClick={handlePurgeSampleData}
+              className="p-1.5 text-xs font-bold uppercase bg-[#1A1A1A] hover:bg-rose-950/40 border border-[#333] hover:border-rose-600 text-rose-400 transition-all"
+              title="Purge default sample data permanently"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        {/* Heatmap & Severity Legend Badges */}
-        <div className="flex flex-wrap items-center gap-3 text-[10px]">
-          {/* Heatmap Density Legend Pill */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-[#333] rounded">
-            <Flame className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-[#AAA] font-bold">DENSITY:</span>
-            <div className="flex items-center gap-1">
-              <span className="w-2.5 h-2 bg-[#10B981] rounded-xs" title="Low Density" />
-              <span className="w-2.5 h-2 bg-[#06B6D4] rounded-xs" title="Moderate Density" />
-              <span className="w-2.5 h-2 bg-[#FACC15] rounded-xs" title="Medium Density" />
-              <span className="w-2.5 h-2 bg-[#F97316] rounded-xs" title="High Density" />
-              <span className="w-2.5 h-2 bg-[#EF4444] rounded-xs" title="Critical Cluster" />
+        {/* Pinning Mode Active Alert Bar */}
+        {isPinningMode && (
+          <div className="mt-3 p-2.5 bg-rose-950/40 border border-rose-500/60 rounded flex items-center justify-between text-xs text-rose-200">
+            <div className="flex items-center gap-2">
+              <Crosshair className="w-4 h-4 text-rose-400 animate-spin" />
+              <span className="font-bold">CLICK-TO-PIN ACTIVE:</span>
+              <span>Click anywhere on the road map to place a geotagged defect at that coordinate.</span>
             </div>
-            <span className="text-[#888] text-[9px]">Low &rarr; Critical</span>
+            <button
+              onClick={() => setIsPinningMode(false)}
+              className="px-2 py-0.5 bg-rose-800 hover:bg-rose-700 text-white text-[10px] font-bold uppercase rounded"
+            >
+              Cancel
+            </button>
           </div>
-
-          {/* Severity Legend Badges */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1 px-2 py-1 bg-[#34C759]/10 border border-[#34C759]/40 text-[#34C759]">
-              <span className="w-2 h-2 rounded-full bg-[#34C759]" />
-              <span className="font-bold">LOW</span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-[#FFD60A]/10 border border-[#FFD60A]/40 text-[#FFD60A]">
-              <span className="w-2 h-2 rounded-full bg-[#FFD60A]" />
-              <span className="font-bold">MED</span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-[#FF9500]/10 border border-[#FF9500]/40 text-[#FF9500]">
-              <span className="w-2 h-2 rounded-full bg-[#FF9500]" />
-              <span className="font-bold">HIGH</span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-[#FF3B30]/10 border border-[#FF3B30]/40 text-[#FF3B30]">
-              <span className="w-2 h-2 rounded-full bg-[#FF3B30]" />
-              <span className="font-bold">CRIT</span>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Main Map Toolbar & Heatmap Layer Configuration Bar */}
@@ -1361,10 +1901,54 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
           </div>
 
           {/* Leaflet DOM Mounting Container */}
-          <div 
-            ref={mapContainerRef} 
-            className="w-full h-96 bg-[#141414] border border-[#2A2A2A] relative z-0" 
-          />
+          <div className="relative">
+            <div 
+              ref={mapContainerRef} 
+              className="w-full h-96 bg-[#141414] border border-[#2A2A2A] relative z-0" 
+            />
+
+            {/* Empty State Overlay for Real Data Mode when no defects are mapped */}
+            {dataMode === 'real' && damageMarkers.length === 0 && (
+              <div className="absolute inset-0 z-10 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <Zap className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-white font-bold text-sm uppercase tracking-wider">Real Data Mode Active</h4>
+                  <p className="text-[#AAA] text-xs max-w-md mt-1">
+                    No real surveyed defects currently mapped. Choose an action below to populate real road inspection data.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsPinningMode(true)}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold uppercase rounded flex items-center gap-1.5 shadow"
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                    <span>Click Map To Pin Defect</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLocateMe}
+                    disabled={isLocating}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase rounded flex items-center gap-1.5 shadow"
+                  >
+                    <Locate className="w-3.5 h-3.5" />
+                    <span>Acquire Device GPS</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setImportStats(null); setIsImportModalOpen(true); }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase rounded flex items-center gap-1.5 shadow"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import GeoJSON / CSV</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Track telemetry & Heatmap statistics bar */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px]">
@@ -1449,6 +2033,21 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
                 />
               )}
 
+              {/* Record Type Badge */}
+              <div className="flex justify-between items-center pb-1">
+                {selectedMarker.id?.startsWith('real_') || realMappedDefects.some(d => d.id === selectedMarker.id) || dbPotholes.some(p => p.id === selectedMarker.id) ? (
+                  <div className="w-full px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-bold text-[10px] flex items-center justify-between uppercase">
+                    <span className="flex items-center gap-1"><Zap className="w-3 h-3 fill-emerald-400" /> Real Survey Record</span>
+                    <span className="text-emerald-300/80 font-mono text-[9px]">{selectedMarker.id.slice(0, 16)}</span>
+                  </div>
+                ) : (
+                  <div className="w-full px-2 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[10px] flex items-center justify-between uppercase">
+                    <span>Demo / Simulated Record</span>
+                    <span className="text-amber-300/80 font-mono text-[9px]">{selectedMarker.id}</span>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-between items-center border-b border-[#222] pb-2">
                 <span className="text-[#888]">DAMAGE CATEGORY:</span>
                 <span className="text-white font-bold uppercase">{selectedMarker.category.replace('_', ' ')}</span>
@@ -1510,6 +2109,16 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
                 </button>
               )}
 
+              <button
+                type="button"
+                onClick={() => handleDeleteDefect(selectedMarker.id)}
+                className="w-full mt-1.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-100 text-xs uppercase font-bold border border-rose-800 flex items-center justify-center space-x-1.5 transition-all"
+                title="Remove this defect from the active map"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>DELETE THIS DEFECT</span>
+              </button>
+
               {onNavigate && (
                 <button
                   onClick={() => onNavigate('detector')}
@@ -1558,6 +2167,245 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MODAL 1: ADD REAL DEFECT MANUAL / PIN FORM */}
+      {isAddDefectModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141414] border border-[#333] max-w-lg w-full p-5 space-y-4 shadow-2xl rounded-sm">
+            <div className="flex items-center justify-between border-b border-[#2A2A2A] pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase">Add Real Survey Road Defect</h3>
+                  <p className="text-[10px] text-[#888]">Geotag real road anomaly into GIS database</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAddDefectModalOpen(false)}
+                className="text-[#888] hover:text-white font-bold text-lg px-2"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddRealDefect} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Latitude (GPS N)</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    required
+                    value={newDefectLat}
+                    onChange={(e) => setNewDefectLat(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white font-mono focus:border-blue-500 focus:outline-none"
+                    placeholder="28.4595"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Longitude (GPS E)</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    required
+                    value={newDefectLng}
+                    onChange={(e) => setNewDefectLng(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white font-mono focus:border-blue-500 focus:outline-none"
+                    placeholder="77.0266"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Defect Category</label>
+                  <select
+                    value={newDefectCategory}
+                    onChange={(e) => setNewDefectCategory(e.target.value as DamageCategory)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-2.5 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="pothole">Pothole</option>
+                    <option value="alligator_crack">Alligator Crack</option>
+                    <option value="longitudinal_crack">Longitudinal Crack</option>
+                    <option value="transverse_crack">Transverse Crack</option>
+                    <option value="broken_road">Broken Road Edge</option>
+                    <option value="missing_asphalt">Missing Asphalt</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Severity Level</label>
+                  <select
+                    value={newDefectSeverity}
+                    onChange={(e) => setNewDefectSeverity(e.target.value as SeverityLevel)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-2.5 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="critical">🔴 Critical (High Collision Hazard)</option>
+                    <option value="high">🟠 High (Suspension Damage)</option>
+                    <option value="medium">🟡 Medium (Surface Distress)</option>
+                    <option value="low">🟢 Low (Early Raveling)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Road / Corridor Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newDefectRoadName}
+                    onChange={(e) => setNewDefectRoadName(e.target.value)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                    placeholder="NH-48 Corridor (KM 42+200)"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Road Authority</label>
+                  <input
+                    type="text"
+                    value={newDefectRoadAuthority}
+                    onChange={(e) => setNewDefectRoadAuthority(e.target.value)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                    placeholder="NHAI PIU Gurgaon / PWD"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Est. Depth (cm)</label>
+                  <input
+                    type="number"
+                    value={newDefectDepth}
+                    onChange={(e) => setNewDefectDepth(e.target.value)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                    placeholder="8.5"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#AAA] font-bold">Est. Width (cm)</label>
+                  <input
+                    type="number"
+                    value={newDefectWidth}
+                    onChange={(e) => setNewDefectWidth(e.target.value)}
+                    className="w-full bg-[#1F1F1F] border border-[#333] px-3 py-1.5 text-white focus:border-blue-500 focus:outline-none"
+                    placeholder="45"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-[#AAA] font-bold">Field Surveyor Notes (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={newDefectNotes}
+                  onChange={(e) => setNewDefectNotes(e.target.value)}
+                  className="w-full bg-[#1F1F1F] border border-[#333] p-2 text-white focus:border-blue-500 focus:outline-none resize-none"
+                  placeholder="Severe water logging after rain, immediate cold-mix pothole repair recommended."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#222]">
+                <button
+                  type="button"
+                  onClick={() => setIsAddDefectModalOpen(false)}
+                  className="px-4 py-2 bg-[#222] hover:bg-[#333] text-white font-bold uppercase rounded text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase rounded text-xs flex items-center gap-1.5 shadow"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Save Real Defect to GIS</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: IMPORT SURVEY DATA (GEOJSON / CSV) */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141414] border border-[#333] max-w-lg w-full p-5 space-y-4 shadow-2xl rounded-sm">
+            <div className="flex items-center justify-between border-b border-[#2A2A2A] pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase">Import Real Survey Package</h3>
+                  <p className="text-[10px] text-[#888]">Load GeoJSON feature collection or CSV GPS road coordinates</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="text-[#888] hover:text-white font-bold text-lg px-2"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Import Status Alert */}
+            {importStats && (
+              <div className={`p-3 text-xs rounded border ${
+                importStats.total > 0 
+                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300' 
+                  : 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+              }`}>
+                {importStats.message}
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div className="border-2 border-dashed border-[#333] hover:border-emerald-500/60 p-6 rounded text-center transition-all bg-[#181818]">
+                <FileSpreadsheet className="w-8 h-8 mx-auto text-emerald-400 mb-2" />
+                <p className="text-white font-bold text-sm">Select GeoJSON or CSV file</p>
+                <p className="text-[11px] text-[#888] mt-1">
+                  Supported formats: Standard GeoJSON FeatureCollection (Point), CSV with lat/latitude & lng/longitude headers.
+                </p>
+
+                <label className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase cursor-pointer rounded shadow transition-all">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Choose Survey File</span>
+                  <input
+                    type="file"
+                    accept=".geojson,.json,.csv"
+                    onChange={handleSurveyFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <div className="bg-[#1A1A1A] p-3 rounded border border-[#2A2A2A] space-y-1.5 text-[11px]">
+                <div className="font-bold text-white uppercase">Accepted CSV Format Template:</div>
+                <pre className="bg-black/50 p-2 text-emerald-400 font-mono text-[10px] overflow-x-auto rounded">
+{`latitude,longitude,category,severity,road_name
+28.461245,77.029810,pothole,critical,NH-48 Express
+28.463510,77.031200,alligator_crack,high,NH-48 Express
+28.465800,77.033400,broken_road,medium,NH-48 Express`}
+                </pre>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-[#222]">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-4 py-2 bg-[#222] hover:bg-[#333] text-white font-bold uppercase rounded text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
