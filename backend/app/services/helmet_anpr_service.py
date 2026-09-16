@@ -153,7 +153,9 @@ class HelmetANPRService:
         fine_amount: float,
         timestamp_sec: float,
         location_name: str = "National Highway 48",
-        camera_id: str = "CAM-01"
+        camera_id: str = "CAM-01",
+        vehicle_crop: Optional[np.ndarray] = None,
+        plate_crop: Optional[np.ndarray] = None
     ) -> Tuple[str, str, str, str, str, str]:
         """
         Creates TWO distinct evidence images:
@@ -196,7 +198,12 @@ class HelmetANPRService:
         # 3. Create Inset Crops for Rider Head and License Plate
         head_h = max(30, int((ry2 - ry1) * 0.45))
         head_crop = raw_frame[ry1:min(h, ry1 + head_h), rx1:rx2]
-        plate_crop = raw_frame[py1:py2, px1:px2]
+
+        if plate_crop is None or (isinstance(plate_crop, np.ndarray) and plate_crop.size == 0):
+            plate_crop = raw_frame[py1:py2, px1:px2] if (py2 > py1 and px2 > px1) else np.empty((0, 0, 3), dtype=np.uint8)
+
+        if vehicle_crop is None:
+            vehicle_crop = np.empty((0, 0, 3), dtype=np.uint8)
 
         inset_w, inset_h = 220, 120
         pad = 15
@@ -256,7 +263,7 @@ class HelmetANPRService:
         plate_filename = f"plate_{challan_number.lower()}_{int(time.time())}.jpg"
         plate_file_path = os.path.join(VIOLATIONS_DIR, plate_filename)
         
-        if plate_crop.size > 0:
+        if plate_crop is not None and plate_crop.size > 0:
             # Add small OCR badge below plate crop
             ph, pw = plate_crop.shape[:2]
             plate_canvas = np.zeros((ph + 28, pw, 3), dtype=np.uint8)
@@ -265,7 +272,7 @@ class HelmetANPRService:
             cv2.putText(plate_canvas, plate_number, (4, ph + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2, cv2.LINE_AA)
             cv2.imwrite(plate_file_path, plate_canvas, [cv2.IMWRITE_JPEG_QUALITY, 90])
             _, buffer_pl = cv2.imencode('.jpg', plate_canvas, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        elif vehicle_crop.size > 0:
+        elif vehicle_crop is not None and vehicle_crop.size > 0:
             # Extract real license plate ROI from actual vehicle crop
             vh, vw = vehicle_crop.shape[:2]
             real_plate_roi = vehicle_crop[int(vh * 0.60):, :]
@@ -457,6 +464,7 @@ class HelmetANPRService:
                 fine_amount = 1000.0  # ₹1000 standard traffic fine
 
                 # Generate Visual Evidence Snapshots (Full Composite + Plate Crop)
+                vehicle_crop_roi = raw_frame[int(m_y1):int(m_y2), int(m_x1):int(m_x2)] if (m_y2 > m_y1 and m_x2 > m_x1) else None
                 ev_path, ev_url, ev_base64, pl_path, pl_url, pl_base64 = cls.generate_evidence_snapshot(
                     raw_frame=raw_frame,
                     rider_bbox=matched_rider,
@@ -466,7 +474,9 @@ class HelmetANPRService:
                     fine_amount=fine_amount,
                     timestamp_sec=timestamp_sec,
                     location_name=location_name,
-                    camera_id=camera_id or "CAM-01"
+                    camera_id=camera_id or "CAM-01",
+                    vehicle_crop=vehicle_crop_roi,
+                    plate_crop=plate_crop
                 )
 
                 violation_record = {

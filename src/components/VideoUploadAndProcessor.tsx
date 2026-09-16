@@ -81,8 +81,8 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
   onNavigate,
   currentRole
 }) => {
-  // Mode Selection: 'batch' (default) or 'single'
-  const [activeMode, setActiveMode] = useState<'batch' | 'single'>('batch');
+  // Mode Selection: 'single' (default for instant live detection) or 'batch'
+  const [activeMode, setActiveMode] = useState<'batch' | 'single'>('single');
 
   // Single video upload state (preserved for standalone stream inspection)
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -440,10 +440,17 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
   // --- BATCH QUEUE MANAGEMENT HANDLERS ---
 
   const handleMultiFileSelect = (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 1 && autoLaunchRealtime && currentRole !== 'viewer') {
+      // Direct fast track: single video upload directly initiates real-time live stream detection
+      handleSingleFileSelected(fileArray[0], true);
+      return;
+    }
+
     const validExtensions = ['mp4', 'avi', 'mov', 'mkv'];
     const newItems: BatchQueueItem[] = [];
 
-    Array.from(files).forEach((file) => {
+    fileArray.forEach((file) => {
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (validExtensions.includes(ext || '')) {
         newItems.push(createBatchItemFromFile(file));
@@ -458,6 +465,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     setProcessingError(null);
     setQueue((prev) => [...prev, ...newItems]);
     setShowBatchCompletionSummary(false);
+    setActiveMode('batch');
 
     // If no stream is currently previewed, preview the first new item
     if (!previewUrl && newItems.length > 0) {
@@ -472,6 +480,10 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     e.preventDefault();
     setIsDraggingOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer.files.length === 1 && autoLaunchRealtime && currentRole !== 'viewer') {
+        handleSingleFileSelected(e.dataTransfer.files[0], true);
+        return;
+      }
       handleMultiFileSelect(e.dataTransfer.files);
     }
   };
@@ -942,57 +954,86 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
   };
 
   const handleLaunchInstantRealtime = async (file: File, title: string, objUrl: string) => {
-    const videoId = `vid_${Date.now()}`;
-    const newVideo: InspectionVideo = {
-      id: videoId,
-      title: title || file.name.replace(/\.[^/.]+$/, ''),
-      filename: file.name,
-      file_size_bytes: file.size,
-      duration_seconds: 45.0,
-      total_frames: 1350,
-      fps: 30.0,
-      resolution: '1920x1080',
-      status: 'processing',
-      thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
-      video_url: objUrl,
-      local_video_url: objUrl,
-      created_at: new Date().toISOString(),
-      analytics: {
-        road_health_score: 84.5,
-        total_detections: 0,
-        pothole_count: 0,
-        crack_count: 0,
-        critical_count: 0,
-        damage_density_per_km: 0,
-        overall_severity: 'medium'
-      }
-    };
+    setIsProcessing(true);
+    setCurrentStage('Uploading');
+    setProcessProgress(20);
+    setProcessingError(null);
 
-    // Immediately push to app state so LiveProcessing has immediate video context
-    onAddVideo(newVideo);
+    const safeTitle = title || file.name.replace(/\.[^/.]+$/, '');
 
     try {
-      sessionStorage.setItem('preferred_speed_preset', speedProfile || 'turbo');
-    } catch {}
+      // 1. Upload video file to backend FastAPI server to obtain real DB video ID
+      const uploadedVideo = await videoService.uploadVideo(
+        file,
+        safeTitle,
+        (pct) => {
+          setProcessProgress(Math.min(95, Math.round(pct)));
+        }
+      );
 
-    // Navigate immediately to real-time detection view!
-    onNavigate('live_processing');
+      setProcessProgress(100);
 
-    // In parallel background worker, upload and execute pipeline
-    try {
-      videoService.uploadVideo(file, title || file.name).then((res) => {
-        videoService.runProcessingPipeline({
-          video_id: res.id || videoId,
-          confidence_threshold: confThreshold,
-          frame_skip: frameSkip,
-          enable_histogram_equalization: enableClahe,
-          enable_gaussian_blur: enableGaussianBlur,
-          fast_mode: speedProfile === 'turbo' || speedProfile === 'fast',
-          speed_preset: speedProfile
-        }).catch(() => {});
-      }).catch(() => {});
-    } catch (e) {
-      console.warn('Background upload initiation notice:', e);
+      const enrichedVideo: InspectionVideo = {
+        ...uploadedVideo,
+        video_url: objUrl,
+        local_video_url: objUrl,
+        status: 'processing'
+      };
+
+      // 2. Set this video as active in the application state
+      onAddVideo(enrichedVideo);
+
+      try {
+        sessionStorage.setItem('preferred_speed_preset', speedProfile || 'turbo');
+      } catch {}
+
+      // 3. Immediately route user to Live Stream Monitor
+      onNavigate('live_processing');
+
+      // 4. Trigger the YOLO detection pipeline using the real backend video ID
+      videoService.runProcessingPipeline({
+        video_id: uploadedVideo.id,
+        confidence_threshold: confThreshold,
+        frame_skip: frameSkip,
+        enable_histogram_equalization: enableClahe,
+        enable_gaussian_blur: enableGaussianBlur,
+        fast_mode: speedProfile === 'turbo' || speedProfile === 'fast',
+        speed_preset: speedProfile
+      }).catch((err) => {
+        console.warn('Background processing pipeline notice:', err);
+      });
+    } catch (uploadErr: any) {
+      console.warn('Upload encountered error, proceeding with local stream context:', uploadErr);
+      // Resilient fallback: ensure Live Stream Monitor still opens with local video playback
+      const fallbackId = `vid_${Date.now()}`;
+      const fallbackVideo: InspectionVideo = {
+        id: fallbackId,
+        title: safeTitle,
+        filename: file.name,
+        file_size_bytes: file.size,
+        duration_seconds: 45.0,
+        total_frames: 1350,
+        fps: 30.0,
+        resolution: '1920x1080',
+        status: 'processing',
+        thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+        video_url: objUrl,
+        local_video_url: objUrl,
+        created_at: new Date().toISOString(),
+        analytics: {
+          road_health_score: 84.5,
+          total_detections: 0,
+          pothole_count: 0,
+          crack_count: 0,
+          critical_count: 0,
+          damage_density_per_km: 0,
+          overall_severity: 'medium'
+        }
+      };
+      onAddVideo(fallbackVideo);
+      onNavigate('live_processing');
+    } finally {
+      setIsProcessing(false);
     }
   };
 

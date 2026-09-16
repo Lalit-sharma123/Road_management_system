@@ -546,9 +546,17 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       const ws = videoService.connectWebSocket(
         clientId,
         (msg: any) => {
-          // Strict Video ID filter: discard messages meant for any other video
-          if (msg.video_id && msg.video_id !== videoId) {
-            return;
+          // Video ID filter: allow matching videoId, matching video?.id, or if generic default
+          if (msg.video_id && videoId && videoId !== 'default-vid' && videoId !== 'vid_sample') {
+            const isMatch = (
+              msg.video_id === videoId ||
+              (video?.id && msg.video_id === video.id) ||
+              msg.video_id.includes(videoId) ||
+              videoId.includes(msg.video_id)
+            );
+            if (!isMatch) {
+              return;
+            }
           }
 
           // Handle backend session reset message
