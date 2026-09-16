@@ -85,6 +85,20 @@ export const videoService = {
     return response.data;
   },
 
+  async checkBackendStatus(): Promise<{ online: boolean; status: string; port?: number; message?: string }> {
+    try {
+      const response = await apiClient.get('/system/backend-status', { timeout: 2500 });
+      return response.data;
+    } catch {
+      return {
+        online: false,
+        status: 'stopped',
+        port: 8000,
+        message: 'Backend server is stopped or unreachable on port 8000.'
+      };
+    }
+  },
+
   async getVideoDetails(videoId: string): Promise<InspectionVideo> {
     const response = await apiClient.get<InspectionVideo>(`/videos/${videoId}`);
     return response.data;
@@ -118,7 +132,9 @@ export const videoService = {
     onMessage: (data: any) => void,
     onError?: (error: Event) => void,
     sessionId?: string,
-    videoId?: string
+    videoId?: string,
+    onOpen?: () => void,
+    onClose?: (event: CloseEvent) => void
   ): WebSocket {
     const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const defaultBase = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}/api/v1` : 'http://localhost:8000/api/v1';
@@ -140,6 +156,14 @@ export const videoService = {
     }
     
     const ws = new WebSocket(wsURL);
+
+    if (onOpen) {
+      ws.onopen = onOpen;
+    }
+
+    if (onClose) {
+      ws.onclose = onClose;
+    }
 
     ws.onmessage = (event) => {
       try {

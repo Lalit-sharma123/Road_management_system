@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Radio, 
   Activity, 
@@ -35,7 +35,12 @@ import {
   Volume2,
   ExternalLink,
   Shield,
-  User
+  User,
+  Server,
+  Terminal,
+  Cpu,
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
@@ -125,12 +130,97 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
   const [activeSideTab, setActiveSideTab] = useState<'counters' | 'violations' | 'stolen' | 'map'>('counters');
 
-  // Acceleration & Speed Profile: 'turbo' (60+ FPS, ~3s), 'fast' (30 FPS, ~8s), 'precision' (15 FPS, deep)
+  // Backend Connectivity & Inference Engine Selection
+  const [inferenceEngine, setInferenceEngine] = useState<'backend' | 'client'>(() => {
+    try {
+      return (sessionStorage.getItem('preferred_inference_engine') as any) || 'backend';
+    } catch {
+      return 'backend';
+    }
+  });
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'stopped'>('checking');
+  const [backendConnected, setBackendConnected] = useState<boolean>(false);
+  const [videoDuration, setVideoDuration] = useState<number>(video?.duration_seconds || 48.0);
+  const [showBackendConsole, setShowBackendConsole] = useState<boolean>(true);
+  const [backendLogs, setBackendLogs] = useState<Array<{ id: string; time: string; level: 'info' | 'warn' | 'error' | 'detect'; message: string }>>([
+    {
+      id: 'init-1',
+      time: new Date().toLocaleTimeString(),
+      level: 'info',
+      message: 'AI Vision Engine initialized — Checking status of FastAPI Backend on port 8000...'
+    }
+  ]);
+
+  const addBackendLog = useCallback((level: 'info' | 'warn' | 'error' | 'detect', message: string) => {
+    setBackendLogs((prev) => [
+      ...prev.slice(-49),
+      {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        time: new Date().toLocaleTimeString(),
+        level,
+        message,
+      }
+    ]);
+  }, []);
+
+  const checkBackendHealth = useCallback(async () => {
+    try {
+      const res = await videoService.checkBackendStatus();
+      if (res.online) {
+        setBackendStatus('online');
+        setBackendConnected(true);
+        addBackendLog('info', `Backend heartbeat verified: FastAPI running on port ${res.port || 8000}`);
+      } else {
+        setBackendStatus('stopped');
+        setBackendConnected(false);
+        addBackendLog('error', `Backend unreachable: server stopped on port ${res.port || 8000}. Real-time detection halted.`);
+      }
+    } catch {
+      setBackendStatus('stopped');
+      setBackendConnected(false);
+      addBackendLog('error', 'Backend health probe failed: port 8000 unreachable. Backend is stopped.');
+    }
+  }, [addBackendLog]);
+
+  useEffect(() => {
+    checkBackendHealth();
+    const probeTimer = setInterval(checkBackendHealth, 5000);
+    return () => clearInterval(probeTimer);
+  }, [checkBackendHealth]);
+
+  const handleSwitchInferenceEngine = (engine: 'backend' | 'client') => {
+    setInferenceEngine(engine);
+    try { sessionStorage.setItem('preferred_inference_engine', engine); } catch(e) {}
+    if (engine === 'client') {
+      addBackendLog('warn', 'Switched to In-Browser Client AI Engine (local vision fallback).');
+      setStatusText('⚡ In-Browser Client AI Engine Active');
+      setIsPaused(false);
+      if (userVideoElemRef.current) userVideoElemRef.current.play().catch(() => {});
+    } else {
+      addBackendLog('info', 'Switched to Primary FastAPI Backend Engine (Port 8000). Probing backend...');
+      checkBackendHealth();
+    }
+  };
+
+  const handleSeekVideo = (seekTimeSec: number) => {
+    const clampedSec = Math.max(0, Math.min(seekTimeSec, videoDuration > 0 ? videoDuration : 48));
+    setTimestamp(parseFloat(clampedSec.toFixed(2)));
+    const targetFrame = Math.floor(clampedSec * 30);
+    setFrameNumber(targetFrame);
+    if (videoDuration > 0) {
+      setProgress(Math.min(100, Math.round((clampedSec / videoDuration) * 100)));
+    }
+    if (userVideoElemRef.current) {
+      userVideoElemRef.current.currentTime = clampedSec;
+    }
+  };
+
+  // Acceleration & Speed Profile: 'precision' (1x normal rate, frame-by-frame deep inspection), 'fast' (1.25x), 'turbo' (1.5x)
   const [speedPreset, setSpeedPreset] = useState<'turbo' | 'fast' | 'precision'>(() => {
     try {
-      return (sessionStorage.getItem('preferred_speed_preset') as any) || 'turbo';
+      return (sessionStorage.getItem('preferred_speed_preset') as any) || 'precision';
     } catch {
-      return 'turbo';
+      return 'precision';
     }
   });
   const accelIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -273,6 +363,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         if (v.duration && isFinite(v.duration) && v.duration > 0) {
           const calcFrames = Math.max(30, Math.round(v.duration * 30));
           setTotalFrames(calcFrames);
+          setVideoDuration(v.duration);
         }
       };
       v.onended = () => {
@@ -281,7 +372,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       if (v.src !== videoSource) {
         v.src = videoSource;
         v.load();
-        v.play().catch((e) => console.log('Video playback notice:', e));
+        if (inferenceEngine === 'client' || backendStatus === 'online') {
+          v.play().catch((e) => console.log('Video playback notice:', e));
+        } else {
+          v.pause();
+        }
       }
     }
     return () => {
@@ -983,24 +1078,42 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         },
         (err) => {
           console.warn('[Frontend] Live Processing WS Connection Notice:', err);
-          // If connection fails, automatically attempt reconnect after 1.5s
+          setBackendConnected(false);
+          setBackendStatus('stopped');
+          addBackendLog('error', 'WebSocket connection failed on port 8000. Backend service is offline.');
+          if (inferenceEngine === 'backend') {
+            if (userVideoElemRef.current) userVideoElemRef.current.pause();
+            setIsPaused(true);
+            setStatusText('🛑 Backend Stopped (Port 8000) — AI detection halted.');
+          }
           if (isSubscribed) {
             clearTimeout(reconnectTimeout);
-            reconnectTimeout = setTimeout(establishWebSocket, 1500);
+            reconnectTimeout = setTimeout(establishWebSocket, 2500);
           }
         },
         uniqueSessionId,
-        videoId
-      );
-
-      // Listen for socket close to auto-reconnect
-      ws.onclose = () => {
-        if (isSubscribed) {
-          console.log('[Frontend] WebSocket closed. Automatically reconnecting in 1.5s...');
-          clearTimeout(reconnectTimeout);
-          reconnectTimeout = setTimeout(establishWebSocket, 1500);
+        videoId,
+        () => {
+          setBackendConnected(true);
+          setBackendStatus('online');
+          addBackendLog('info', `WebSocket connected to FastAPI Backend (/process/ws/${clientId})`);
+          setStatusText('● Connected to Backend YOLO Processing Stream (Port 8000)');
+        },
+        (closeEv) => {
+          setBackendConnected(false);
+          setBackendStatus('stopped');
+          addBackendLog('warn', `WebSocket connection closed (code ${closeEv.code}). Backend stopped.`);
+          if (inferenceEngine === 'backend') {
+            if (userVideoElemRef.current) userVideoElemRef.current.pause();
+            setIsPaused(true);
+            setStatusText('🛑 Backend Server Stopped (Port 8000) — AI detection halted.');
+          }
+          if (isSubscribed) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(establishWebSocket, 2500);
+          }
         }
-      };
+      );
 
       wsRef.current = ws;
     };
@@ -1154,8 +1267,12 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     let localFrame = frameNumber;
     let roadOffset = 0;
 
-    const intervalMs = speedPreset === 'turbo' ? 25 : speedPreset === 'fast' ? 45 : 75;
-    const frameStep = speedPreset === 'turbo' ? 4 : speedPreset === 'fast' ? 2 : 1;
+    const intervalMs = speedPreset === 'turbo' ? 33 : speedPreset === 'fast' ? 45 : 66;
+    const frameStep = speedPreset === 'turbo' ? 2 : 1;
+
+    if (userVidInit && !userVidInit.paused) {
+      userVidInit.playbackRate = speedPreset === 'turbo' ? 1.5 : speedPreset === 'fast' ? 1.25 : 1.0;
+    }
 
     accelIntervalRef.current = setInterval(() => {
       // Only synthesize frames if WebSocket hasn't delivered a frame in the last 600ms
@@ -1290,7 +1407,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               setRoadDamageCount(visionResult.roadDamageCount);
               setRoadHealth(visionResult.roadHealthScore);
 
-              if (!visionResult.isRoadPavement) {
+              if (visionResult.isRoadPavement) {
+                setStatusText(
+                  `● Road Damage Detector [best.pt] Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | ANPR: ${visionResult.numberPlateCount} Plates [1x Precision Inspection]`
+                );
+              } else {
                 setStatusText(
                   visionResult.sceneType === 'pedestrian_surveillance'
                     ? `● Pedestrian Stream: ${visionResult.pedestrianCount} Person(s) Active — Road damage detector [best.pt] idle (no asphalt pavement).`
@@ -1779,14 +1900,66 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           <p className="text-xs text-[#888]">{statusText}</p>
         </div>
 
-        {/* Action Controls: Pause, Resume, Stop, Results */}
+        {/* Action Controls: Speed Presets, Pause, Resume, Stop, Results */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* Speed Preset Controller */}
+          <div className="flex items-center gap-1 bg-[#161616] p-1 border border-[#2A2A2A] rounded">
+            <span className="text-[9px] text-[#888] font-mono uppercase px-1.5 flex items-center gap-1">
+              <Gauge className="w-3 h-3 text-[#34C759]" />
+              Speed:
+            </span>
+            <button
+              onClick={() => {
+                setSpeedPreset('precision');
+                try { sessionStorage.setItem('preferred_speed_preset', 'precision'); } catch(e) {}
+                if (userVideoElemRef.current) userVideoElemRef.current.playbackRate = 1.0;
+              }}
+              className={`px-2 py-1 text-[10px] font-mono font-bold uppercase rounded transition-all ${
+                speedPreset === 'precision'
+                  ? 'bg-[#34C759] text-black shadow font-black'
+                  : 'text-[#888] hover:text-white'
+              }`}
+              title="Precision Mode: Inspects every single frame without skipping for complete pothole detection"
+            >
+              1x Precision
+            </button>
+            <button
+              onClick={() => {
+                setSpeedPreset('fast');
+                try { sessionStorage.setItem('preferred_speed_preset', 'fast'); } catch(e) {}
+                if (userVideoElemRef.current) userVideoElemRef.current.playbackRate = 1.25;
+              }}
+              className={`px-2 py-1 text-[10px] font-mono font-bold uppercase rounded transition-all ${
+                speedPreset === 'fast'
+                  ? 'bg-[#2563EB] text-white shadow font-black'
+                  : 'text-[#888] hover:text-white'
+              }`}
+            >
+              1.25x Normal
+            </button>
+            <button
+              onClick={() => {
+                setSpeedPreset('turbo');
+                try { sessionStorage.setItem('preferred_speed_preset', 'turbo'); } catch(e) {}
+                if (userVideoElemRef.current) userVideoElemRef.current.playbackRate = 1.5;
+              }}
+              className={`px-2 py-1 text-[10px] font-mono font-bold uppercase rounded transition-all ${
+                speedPreset === 'turbo'
+                  ? 'bg-[#FF9500] text-white shadow font-black'
+                  : 'text-[#888] hover:text-white'
+              }`}
+            >
+              1.5x Fast
+            </button>
+          </div>
+
           <div className="bg-[#1A1A1A] border border-[#333] px-3 py-1.5 text-right">
             <p className="text-[9px] text-[#888] uppercase">Inference Speed</p>
             <p className="text-xs font-bold text-[#34C759] flex items-center justify-end gap-1">
+              {speedPreset === 'precision' && <span className="text-emerald-400">🎯</span>}
               {speedPreset === 'turbo' && <span className="text-amber-400">⚡</span>}
               <span>{fps} FPS</span>
-              <span className="text-[10px] text-slate-400 font-normal">{latencyMs > 0 ? `// ${latencyMs}ms` : '// ACCELERATED'}</span>
+              <span className="text-[10px] text-slate-400 font-normal">{latencyMs > 0 ? `// ${latencyMs}ms` : '// STEADY'}</span>
             </p>
           </div>
           <div className="bg-[#1A1A1A] border border-[#333] px-3 py-1.5 text-right">

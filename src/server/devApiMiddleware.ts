@@ -1,7 +1,44 @@
 import type { Plugin, Connect } from 'vite';
-import { IncomingMessage, ServerResponse } from 'http';
+import http, { IncomingMessage, ServerResponse } from 'http';
 import { sampleVideos } from '../data/mockData';
 import { sampleCameras } from '../data/mockCameras';
+
+async function checkBackendLive(): Promise<{ online: boolean; port: number; target: string; message: string; data?: any }> {
+  return new Promise((resolve) => {
+    const targetUrl = process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+    try {
+      const parsed = new URL(targetUrl);
+      const req = http.request({
+        hostname: parsed.hostname,
+        port: parsed.port || 8000,
+        path: '/',
+        method: 'GET',
+        timeout: 800,
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            resolve({ online: true, port: Number(parsed.port) || 8000, target: targetUrl, message: 'FastAPI Backend is ONLINE', data });
+          } catch {
+            resolve({ online: true, port: Number(parsed.port) || 8000, target: targetUrl, message: 'Backend is ONLINE' });
+          }
+        });
+      });
+      req.on('error', (err) => {
+        resolve({ online: false, port: 8000, target: targetUrl, message: `Backend server stopped (Port 8000: ${err.message})` });
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ online: false, port: 8000, target: targetUrl, message: 'Backend connection timeout on port 8000' });
+      });
+      req.end();
+    } catch (e: any) {
+      resolve({ online: false, port: 8000, target: targetUrl, message: e.message });
+    }
+  });
+}
 
 let memoryVideos: any[] = [...sampleVideos];
 let memoryCameras: any[] = [...sampleCameras];
@@ -653,15 +690,41 @@ export function devApiPlugin(): Plugin {
           });
         }
 
+        // System Backend Connectivity Status Check
+        if (
+          normalized === '/system/backend-status' ||
+          normalized === '/api/v1/system/backend-status' ||
+          cleanPath.endsWith('/system/backend-status')
+        ) {
+          const liveStatus = await checkBackendLive();
+          return sendJson(res, 200, liveStatus);
+        }
+
         if (normalized === '/process/run' && method === 'POST') {
           const body = await parseJsonBody(req).catch(() => ({}));
+          const backendLive = await checkBackendLive();
+
+          // If caller explicitly requested backend engine and backend is stopped
+          if (body.inference_engine === 'backend' && !backendLive.online) {
+            return sendJson(res, 503, {
+              status: 'error',
+              error: 'backend_stopped',
+              message: 'FastAPI backend server is stopped (port 8000 unreachable). Detection cannot start without backend service.',
+              online: false,
+              port: 8000
+            });
+          }
+
           const isTurbo = body.fast_mode !== false && (body.speed_preset === 'turbo' || body.frame_skip >= 4 || !body.speed_preset);
           return sendJson(res, 200, {
             video_id: body.video_id || 'vid-mock',
             status: 'processing',
-            message: isTurbo 
-              ? '⚡ Ultra-Fast OpenCV frame extraction & Tensor Core INT8 YOLO inference initiated (Target: 60+ FPS)' 
-              : 'OpenCV frame extraction & YOLO tensor inference initiated',
+            backend_online: backendLive.online,
+            message: backendLive.online
+              ? 'FastAPI Backend YOLO tensor inference initiated on port 8000'
+              : (isTurbo 
+                ? '⚡ Ultra-Fast OpenCV frame extraction & Tensor Core INT8 YOLO inference initiated (Target: 60+ FPS)' 
+                : 'OpenCV frame extraction & YOLO tensor inference initiated'),
             total_frames_processed: isTurbo ? 270 : 1350,
             total_detections_found: 12,
             road_health_score: 74.2,

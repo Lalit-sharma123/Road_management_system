@@ -66,10 +66,10 @@ export const DetectionSvgOverlay: React.FC<DetectionSvgOverlayProps> = ({
     if (cat.includes('pothole') || (t === 'damage' && sev.includes('CRITICAL'))) {
       return {
         stroke: '#FF3B30',
-        fill: 'rgba(255, 59, 48, 0.12)',
-        badgeBg: '#FF3B30',
+        fill: 'rgba(255, 59, 48, 0.16)',
+        badgeBg: '#DC2626',
         textColor: '#FFFFFF',
-        label: 'POTHOLE',
+        label: cat.includes('water') ? 'POTHOLE (WATER-FILLED)' : 'POTHOLE (CRITICAL)',
         iconName: 'pothole',
         severityLevel: 'CRITICAL'
       };
