@@ -34,7 +34,8 @@ import {
   AlertOctagon,
   Volume2,
   ExternalLink,
-  Shield
+  Shield,
+  User
 } from 'lucide-react';
 import L from 'leaflet';
 import { InspectionVideo } from '../types/inspection';
@@ -95,6 +96,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const [missingAsphaltCount, setMissingAsphaltCount] = useState<number>(0);
   const [roadDamageCount, setRoadDamageCount] = useState<number>(0);
   const [vehicleCount, setVehicleCount] = useState<number>(0);
+  const [pedestrianCount, setPedestrianCount] = useState<number>(0);
   const [helmetCount, setHelmetCount] = useState<number>(0);
   const [numberPlateCount, setNumberPlateCount] = useState<number>(0);
   const [helmetViolationsCount, setHelmetViolationsCount] = useState<number>(0);
@@ -1280,12 +1282,21 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
               // Update real metrics
               setVehicleCount(visionResult.vehicleCount);
+              setPedestrianCount(visionResult.pedestrianCount);
               setNumberPlateCount(visionResult.numberPlateCount);
               setHelmetCount(visionResult.helmetCount);
               setPotholeCount(visionResult.potholeCount);
               setCrackCount(visionResult.crackCount);
               setRoadDamageCount(visionResult.roadDamageCount);
               setRoadHealth(visionResult.roadHealthScore);
+
+              if (!visionResult.isRoadPavement) {
+                setStatusText(
+                  visionResult.sceneType === 'pedestrian_surveillance'
+                    ? `● Pedestrian Stream: ${visionResult.pedestrianCount} Person(s) Active — Road damage detector [best.pt] idle (no asphalt pavement).`
+                    : `● Non-Road Scene: Road damage detector [best.pt] idle (no pavement detected).`
+                );
+              }
 
               // Add newly discovered real damage defects to timeline
               for (const det of visionResult.detections) {
@@ -2126,6 +2137,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   { id: 'all', label: 'All' },
                   { id: 'damage', label: 'Damage', color: 'text-[#FF3B30]' },
                   { id: 'vehicle', label: 'Vehicles', color: 'text-[#00C2FF]' },
+                  { id: 'person', label: 'People', color: 'text-[#818CF8]' },
                   { id: 'helmet', label: 'Helmets', color: 'text-[#FFD60A]' },
                   { id: 'plate', label: 'Plates', color: 'text-[#34C759]' }
                 ].map((f) => (
@@ -2320,7 +2332,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   <BarChart2 className="w-4 h-4 text-[#FF3B30]" />
                   Live Multi-Model Counters
                 </span>
-                <span className="text-[#2563EB] font-mono font-bold">{totalDetectionsCount + vehicleCount + numberPlateCount} TOTAL</span>
+                <span className="text-[#2563EB] font-mono font-bold">
+                  {totalDetectionsCount + vehicleCount + numberPlateCount + pedestrianCount} TOTAL
+                </span>
               </h3>
 
               {/* Damage Counters */}
@@ -2348,8 +2362,16 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 </div>
               </div>
 
-              {/* Vehicles, Helmets & Plates Counters */}
-              <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#2A2A2A]">
+              {/* Pedestrians, Vehicles, Helmets & Plates Counters */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#2A2A2A]">
+                <div className="bg-[#1A1A1A] p-2 border border-[#818CF8]/40 flex justify-between items-center">
+                  <span className="text-[#818CF8] font-bold text-[10px] uppercase flex items-center gap-1">
+                    <User className="w-3.5 h-3.5 text-[#818CF8]" />
+                    People
+                  </span>
+                  <span className="text-[#818CF8] font-bold font-mono text-sm">{pedestrianCount}</span>
+                </div>
+
                 <div className="bg-[#1A1A1A] p-2 border border-[#2563EB]/40 flex justify-between items-center">
                   <span className="text-[#2563EB] font-bold text-[10px] uppercase flex items-center gap-1">
                     <Car className="w-3.5 h-3.5 text-[#2563EB]" />

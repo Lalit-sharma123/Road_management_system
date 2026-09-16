@@ -88,8 +88,21 @@ export const DetectionSvgOverlay: React.FC<DetectionSvgOverlayProps> = ({
       };
     }
 
+    // 2.5 Pedestrians & Persons (YOLOv8 Class 0)
+    if (cat.includes('person') || cat.includes('pedestrian') || t === 'pedestrian') {
+      return {
+        stroke: '#818CF8',
+        fill: 'rgba(129, 140, 248, 0.12)',
+        badgeBg: '#4F46E5',
+        textColor: '#FFFFFF',
+        label: 'PERSON',
+        iconName: 'person',
+        severityLevel: 'INFO'
+      };
+    }
+
     // 3. Vehicles & Traffic Objects
-    if (cat.includes('car') || cat.includes('truck') || cat.includes('bus') || cat.includes('motorcycle') || cat.includes('bicycle') || cat.includes('person') || t === 'vehicle') {
+    if (cat.includes('car') || cat.includes('truck') || cat.includes('bus') || cat.includes('motorcycle') || cat.includes('bicycle') || t === 'vehicle') {
       return {
         stroke: '#00C2FF',
         fill: 'rgba(0, 194, 255, 0.10)',
