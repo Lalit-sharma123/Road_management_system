@@ -47,6 +47,7 @@ import { InspectionVideo } from '../types/inspection';
 import { videoService } from '../services/videoService';
 import { apiClient } from '../services/apiClient';
 import { stolenVehicleService } from '../services/stolenVehicleService';
+import { StolenVehicleAlert } from '../types/stolenVehicle';
 import { DetectionSvgOverlay, OverlayDetection } from './DetectionSvgOverlay';
 import { stolenAlertAudio } from '../utils/stolenSoundAlert';
 import { realtimeVisionEngine } from '../utils/realtimeVisionEngine';
@@ -971,14 +972,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 is_new_event: isNew,
                 remarks: st.remarks || `Stolen vehicle detected: ${st.vehicle_number}`
               };
-              const normStolenPlate = String(stAlert.vehicle_number || stAlert.ocr_text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-              const isFirstTimePlate = normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate);
+              const normStolenPlate = stolenVehicleService.normalizePlate(stAlert.vehicle_number || stAlert.ocr_text || '');
+              const isFirstTimePlate = Boolean(normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate) && !stolenVehicleService.hasPlateBeenAlerted(normStolenPlate));
 
               // Record in local persistent storage so Stolen Alerts center has all details
               stolenVehicleService.recordLiveAlert(stAlert).catch(() => {});
 
               if (isNew && isFirstTimePlate) {
                 alertedStolenPlatesRef.current.add(normStolenPlate);
+                stolenVehicleService.markPlateAlerted(normStolenPlate);
                 setLatestStolenAlert(stAlert);
                 setIsAlertBannerDismissed(false);
               } else if (!latestStolenAlert) {
@@ -1066,14 +1068,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               remarks: rawAlert.remarks || rawAlert.message || `Stolen vehicle detected: ${rawAlert.vehicle_number}`
             };
 
-            const normStolenPlate = String(stAlert.vehicle_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const isFirstTimePlate = normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate);
+            const normStolenPlate = stolenVehicleService.normalizePlate(stAlert.vehicle_number || '');
+            const isFirstTimePlate = Boolean(normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate) && !stolenVehicleService.hasPlateBeenAlerted(normStolenPlate));
 
             // Record in local persistent storage so Stolen Alerts center has all details
             stolenVehicleService.recordLiveAlert(stAlert).catch(() => {});
 
             if (isNew && isFirstTimePlate) {
               alertedStolenPlatesRef.current.add(normStolenPlate);
+              stolenVehicleService.markPlateAlerted(normStolenPlate);
               setLatestStolenAlert(stAlert);
               setIsAlertBannerDismissed(false);
             } else if (!latestStolenAlert) {
@@ -1726,6 +1729,58 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             if (localFrame % 40 === 0) {
               setVehicleCount((c) => c + 1);
               setNumberPlateCount((c) => c + 1);
+            }
+          }
+
+          // Evaluate detected plates in this frame against Registered Stolen Vehicles
+          // STRICT RULE: If a stolen vehicle is detected, send the alert message ONLY ONE TIME
+          for (const det of detectionsThisFrame) {
+            if (det.category === 'number_plate' || det.type === 'plate') {
+              const rawText = (det.label || '').replace(/.*Plate\s*-\s*/i, '').trim() || (det as any).plateNumber || '';
+              if (rawText) {
+                const stolenMatch = stolenVehicleService.isPlateStolen(rawText);
+                if (stolenMatch) {
+                  const norm = stolenVehicleService.normalizePlate(stolenMatch.vehicle_number);
+                  const alreadyAlerted = alertedStolenPlatesRef.current.has(norm) || stolenVehicleService.hasPlateBeenAlerted(norm);
+                  if (!alreadyAlerted) {
+                    alertedStolenPlatesRef.current.add(norm);
+                    stolenVehicleService.markPlateAlerted(norm);
+
+                    const oneTimeAlert: StolenVehicleAlert = {
+                      id: `sta-${Date.now()}-${norm}`,
+                      stolen_vehicle_id: stolenMatch.id,
+                      vehicle_number: stolenMatch.vehicle_number,
+                      display_number: stolenMatch.vehicle_number,
+                      owner_name: stolenMatch.owner_name,
+                      fir_number: stolenMatch.fir_number,
+                      camera_name: 'Live Video ANPR Stream',
+                      camera_location: 'Road Video Inspection Feed',
+                      latitude: currentGps.lat,
+                      longitude: currentGps.lng,
+                      timestamp: new Date().toISOString(),
+                      first_detected_at: new Date().toISOString(),
+                      last_detected_at: new Date().toISOString(),
+                      ocr_text: rawText,
+                      confidence: det.confidence || 0.96,
+                      status: 'ACTIVE',
+                      source: 'video',
+                      video_id: videoId,
+                      detection_count: 1,
+                      is_new_event: true,
+                      remarks: `🚨 STOLEN VEHICLE INTERCEPT: Registered vehicle '${stolenMatch.vehicle_number}' identified during video inspection (${stolenMatch.fir_number}).`
+                    };
+
+                    stolenVehicleService.recordLiveAlert(oneTimeAlert).catch(() => {});
+                    setLatestStolenAlert(oneTimeAlert);
+                    setIsAlertBannerDismissed(false);
+                    setLiveStolenAlerts(prev => [oneTimeAlert, ...prev]);
+
+                    try {
+                      window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: oneTimeAlert }));
+                    } catch (e) {}
+                  }
+                }
+              }
             }
           }
 

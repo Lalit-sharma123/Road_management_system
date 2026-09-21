@@ -1084,13 +1084,14 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
 
           if ((wsData.type === 'stolen_alert' || wsData.type === 'stolen_vehicle_alert' || wsData.event === 'STOLEN_VEHICLE_DETECTED') && wsData.alert) {
             const alert = wsData.alert;
-            const normPlate = String(alert.vehicle_number || alert.ocr_text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const isFirstTime = normPlate && !alertedPlatesRef.current.has(normPlate);
+            const normPlate = stolenVehicleService.normalizePlate(alert.vehicle_number || alert.ocr_text || '');
+            const isFirstTime = Boolean(normPlate && !alertedPlatesRef.current.has(normPlate) && !stolenVehicleService.hasPlateBeenAlerted(normPlate));
 
             stolenVehicleService.recordLiveAlert(alert).catch(() => {});
 
             if (isFirstTime) {
               alertedPlatesRef.current.add(normPlate);
+              stolenVehicleService.markPlateAlerted(normPlate);
               addLog('Running YOLO', 50, `🚨 CRITICAL ALERT: Stolen Vehicle Detected - Target Plate: ${alert.vehicle_number}`);
               try {
                 window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: alert }));

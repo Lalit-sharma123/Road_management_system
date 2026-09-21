@@ -31,6 +31,8 @@ export interface StolenVehicleAlert {
   id: string;
   stolen_vehicle_id?: string | null;
   vehicle_number: string;
+  display_number?: string | null;
+  is_new_event?: boolean;
   owner_name?: string | null;
   fir_number?: string | null;
   camera_id?: string | null;
@@ -58,8 +60,8 @@ export interface StolenVehicleAlert {
   status: 'ACTIVE' | 'INVESTIGATING' | 'INTERCEPTED' | 'RESOLVED' | 'FALSE_POSITIVE' | string;
   resolved_by?: string | null;
   remarks?: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface StolenVehicleStats {

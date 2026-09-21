@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppTopBar } from './components/shell/AppTopBar';
 import { AppSidebar } from './components/shell/AppSidebar';
 import { AppStatusBar } from './components/shell/AppStatusBar';
@@ -201,12 +201,15 @@ export default function App() {
   // Stolen Vehicle Real-Time Alert Modal State
   const [activeStolenAlert, setActiveStolenAlert] = useState<StolenVehicleAlert | null>(null);
 
+  // Persistent Single-Time Alert deduplication refs across re-renders
+  // Ensures once a registered stolen vehicle is detected, an alert message is sent strictly ONE TIME
+  const alertedPlatesRef = useRef<Set<string>>(new Set());
+  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+
   // Real-Time Global WebSocket Listener for Stolen Vehicle Alerts & Critical Events
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: any = null;
-    const alertedPlatesSet = new Set<string>();
-    const seenAlertIds = new Set<string>();
 
     const handleStolenAlertData = (alert: any) => {
       if (!alert) return;
@@ -214,23 +217,29 @@ export default function App() {
       // Always save or update alert details in local/live storage for Stolen Alerts view
       stolenVehicleService.recordLiveAlert(alert).catch(() => {});
 
-      // If backend explicitly marked this as continuous update (not new event), skip popup/alarm
+      // If backend explicitly marked this as continuous encounter (not new event), skip popup/alarm
       if (alert.is_new_event === false) return;
 
       const rawPlate = alert.vehicle_number || alert.plate_number || alert.ocr_text || '';
-      const normPlate = String(rawPlate).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const normPlate = stolenVehicleService.normalizePlate(rawPlate);
       const alertId = alert.id || alert.alert_id || alert.event_id;
 
-      // Deduplicate: ONLY alert ONE TIME for the same vehicle plate
-      if (normPlate && alertedPlatesSet.has(normPlate)) {
+      if (!normPlate) return;
+
+      // STRICT USER INTENT REQUIREMENT:
+      // "when i registered the stolen vehicle and in video this number plate is detected
+      // do not send the alert message again an again only send it one time"
+      if (alertedPlatesRef.current.has(normPlate) || stolenVehicleService.hasPlateBeenAlerted(normPlate)) {
         return;
       }
-      if (alertId && seenAlertIds.has(alertId)) {
+      if (alertId && seenAlertIdsRef.current.has(alertId)) {
         return;
       }
 
-      if (normPlate) alertedPlatesSet.add(normPlate);
-      if (alertId) seenAlertIds.add(alertId);
+      // Mark as alerted globally and in session so it NEVER fires again
+      alertedPlatesRef.current.add(normPlate);
+      stolenVehicleService.markPlateAlerted(normPlate);
+      if (alertId) seenAlertIdsRef.current.add(alertId);
 
       setActiveStolenAlert(alert);
       stolenAlertAudio.playAlarmSound();

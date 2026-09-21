@@ -483,7 +483,12 @@ async def execute_video_processing_task(
                     db_session=None
                 )
                 for st_alert in frame_stolen_alerts:
-                    if st_alert.get("is_new_event", False) or not any(x.get("id") == st_alert.get("id") for x in stolen_alerts_list):
+                    st_norm = str(st_alert.get("normalized_vehicle_number") or st_alert.get("vehicle_number") or "").upper().replace(" ", "").replace("-", "")
+                    already_in_list = any(
+                        str(x.get("normalized_vehicle_number") or x.get("vehicle_number") or "").upper().replace(" ", "").replace("-", "") == st_norm
+                        for x in stolen_alerts_list
+                    )
+                    if not already_in_list:
                         stolen_vehicle_count += 1
                         stolen_alerts_list.append(st_alert)
             except Exception as stolen_err:

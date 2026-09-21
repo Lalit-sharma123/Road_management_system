@@ -41,6 +41,10 @@ class StolenVehicleService:
     # Cooldown tracker: f"{scope}_{normalized_plate}" -> timestamp
     _cooldown_tracker: Dict[str, float] = {}
 
+    # Strict single-time alert tracker: scope -> Set[normalized_plate]
+    # Guarantees each detected stolen vehicle only triggers the alert message ONCE per stream/session
+    _alerted_plates: Dict[str, Set[str]] = {}
+
     # Temporal confirmation cache for multi-frame OCR stability:
     # normalized_plate -> {"last_seen": float, "ocr_confidence": float, "plate_confidence": float, "confirmation_count": int}
     _plate_temporal_cache: Dict[str, Dict[str, Any]] = {}
@@ -82,9 +86,15 @@ class StolenVehicleService:
             cd_keys = [k for k in cls._cooldown_tracker if s_str in k]
             for k in cd_keys:
                 cls._cooldown_tracker.pop(k, None)
+
+            # Evict from alerted plates
+            alerted_keys = [k for k in cls._alerted_plates if s_str in k or k in s_str]
+            for k in alerted_keys:
+                cls._alerted_plates.pop(k, None)
         else:
             cls._active_encounters.clear()
             cls._cooldown_tracker.clear()
+            cls._alerted_plates.clear()
             cls._plate_temporal_cache.clear()
 
         logger.info(f"🔄 StolenVehicleService session state reset (scope: {scope_id or 'ALL'}).")
@@ -499,10 +509,16 @@ class StolenVehicleService:
             try:
                 from app.services.helmet_anpr_service import HelmetANPRService
                 if plate_crop is not None and plate_crop.size > 0:
+                    v_track = v.get("tracking_id") or v.get("track_id")
+                    if v_track is not None:
+                        v_seed = int(v_track) if str(v_track).isdigit() else (sum(ord(c) for c in str(v_track)) % 1000)
+                    else:
+                        v_seed = int((vx1 * 17 + vy1 * 31 + vw * 7 + vh * 13)) % 1000
+
                     if hasattr(HelmetANPRService, "perform_anpr_ocr"):
-                        extracted_text, ocr_conf = HelmetANPRService.perform_anpr_ocr(plate_crop, vehicle_id_seed=frame_number + v_idx)
+                        extracted_text, ocr_conf = HelmetANPRService.perform_anpr_ocr(plate_crop, vehicle_id_seed=v_seed)
                     elif hasattr(HelmetANPRService, "extract_license_plate_text"):
-                        extracted_text, ocr_conf = HelmetANPRService.extract_license_plate_text(plate_crop, vehicle_id_seed=frame_number + v_idx)
+                        extracted_text, ocr_conf = HelmetANPRService.extract_license_plate_text(plate_crop, vehicle_id_seed=v_seed)
             except Exception:
                 pass
 
@@ -651,12 +667,28 @@ class StolenVehicleService:
                     logger.warning(f"Note on encounter re-hydration: {dbe}")
 
             # Check if encounter is active or was already alerted in this session/scope
-            is_same_session_encounter = existing_encounter is not None
+            already_alerted_in_scope = norm_plate in cls._alerted_plates.get(scope_key, set())
+            is_same_session_encounter = (existing_encounter is not None) or already_alerted_in_scope
             if not is_same_session_encounter and norm_plate in cls._cooldown_tracker:
                 if (now_sec - cls._cooldown_tracker[norm_plate]) < 3600:
                     is_same_session_encounter = True
 
-            if is_same_session_encounter and existing_encounter:
+            if is_same_session_encounter:
+                if not existing_encounter:
+                    existing_encounter = {
+                        "alert_id": str(uuid.uuid4()),
+                        "last_seen": now_sec,
+                        "detection_count": 1,
+                        "first_detected_at": now_dt,
+                        "last_detected_at": now_dt,
+                        "first_frame": frame_number or 1,
+                        "last_frame": frame_number or 1,
+                        "highest_conf": float(ocr_confidence),
+                        "persisted_in_db": True,
+                        "alert_dict": None
+                    }
+                    scope_encounters[norm_plate] = existing_encounter
+
                 # 🔄 CONTINUOUS ENCOUNTER: Increment counter and update timestamps without triggering new alarms/popups
                 existing_encounter["last_seen"] = now_sec
                 existing_encounter["detection_count"] += 1
@@ -767,6 +799,10 @@ class StolenVehicleService:
                 }
 
             # 🚨 NEW ENCOUNTER: Vehicle detected for the first time or re-entered after cooldown
+            # Record in single-time alert tracker for this session/stream
+            cls._alerted_plates.setdefault(scope_key, set()).add(norm_plate)
+            cls._cooldown_tracker[norm_plate] = now_sec
+
             alert_id = str(uuid.uuid4())
             disp_number = cls.format_display_number(stolen_record.get("vehicle_number", norm_plate))
 

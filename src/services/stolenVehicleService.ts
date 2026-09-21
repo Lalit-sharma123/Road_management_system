@@ -10,6 +10,20 @@ import {
 const STORAGE_VEHICLES_KEY = 'stolen_vehicles_registry_v1';
 const STORAGE_ALERTS_KEY = 'stolen_alerts_history_v1';
 const STORAGE_SETTINGS_KEY = 'stolen_vehicle_settings_v1';
+const SESSION_ALERTED_PLATES_KEY = 'stolen_plates_alerted_session_v1';
+
+const sessionAlertedPlatesSet = new Set<string>();
+
+// Pre-hydrate session deduplication tracker from sessionStorage
+try {
+  const rawSession = typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY) : null;
+  if (rawSession) {
+    const list: string[] = JSON.parse(rawSession);
+    if (Array.isArray(list)) {
+      list.forEach(p => sessionAlertedPlatesSet.add(String(p).toUpperCase().replace(/[^A-Z0-9]/g, '')));
+    }
+  }
+} catch (e) {}
 
 const INITIAL_STOLEN_VEHICLES: StolenVehicle[] = [
   {
@@ -679,5 +693,107 @@ export const stolenVehicleService = {
     }
 
     return settings;
+  },
+
+  // ==========================================
+  // Single-Alert Deduplication & Stolen Matching
+  // ==========================================
+  normalizePlate(plateStr: string): string {
+    return String(plateStr || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  },
+
+  /**
+   * Fast synchronous lookup to check if a detected number plate belongs to
+   * an active registered stolen vehicle.
+   */
+  isPlateStolen(plateStr: string): StolenVehicle | null {
+    const norm = this.normalizePlate(plateStr);
+    if (!norm || norm.length < 4) return null;
+
+    const vehicles = getStoredVehicles();
+
+    // 1. Exact normalized match
+    const exact = vehicles.find(v => {
+      const vNorm = this.normalizePlate(v.vehicle_number);
+      const active = (v.status || '').toUpperCase() !== 'RECOVERED' && (v.status || '').toUpperCase() !== 'INACTIVE';
+      return active && vNorm === norm;
+    });
+    if (exact) return exact;
+
+    // 2. Substring & 1-character OCR error tolerance for plate text >= 5 chars
+    for (const v of vehicles) {
+      const active = (v.status || '').toUpperCase() !== 'RECOVERED' && (v.status || '').toUpperCase() !== 'INACTIVE';
+      if (!active) continue;
+
+      const vNorm = this.normalizePlate(v.vehicle_number);
+      if (vNorm.length >= 5 && norm.length >= 5) {
+        if (vNorm.includes(norm) || norm.includes(vNorm)) {
+          return v;
+        }
+        if (vNorm.length === norm.length) {
+          let diffs = 0;
+          for (let i = 0; i < vNorm.length; i++) {
+            if (vNorm[i] !== norm[i]) diffs++;
+            if (diffs > 1) break;
+          }
+          if (diffs <= 1) return v;
+        }
+      }
+    }
+    return null;
+  },
+
+  /**
+   * Guarantees an alert for a detected stolen plate is sent ONLY ONE TIME.
+   * Subsequent detections in the same video/session return true, suppressing repeat alert messages.
+   */
+  hasPlateBeenAlerted(plateStr: string): boolean {
+    const norm = this.normalizePlate(plateStr);
+    if (!norm) return false;
+    if (sessionAlertedPlatesSet.has(norm)) return true;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY);
+        if (raw) {
+          const list: string[] = JSON.parse(raw);
+          if (Array.isArray(list) && list.includes(norm)) {
+            sessionAlertedPlatesSet.add(norm);
+            return true;
+          }
+        }
+      }
+    } catch {}
+    return false;
+  },
+
+  /**
+   * Marks a plate as alerted so it is never alerted again during this inspection/session.
+   */
+  markPlateAlerted(plateStr: string): void {
+    const norm = this.normalizePlate(plateStr);
+    if (!norm) return;
+    sessionAlertedPlatesSet.add(norm);
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY);
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        if (!list.includes(norm)) {
+          list.push(norm);
+          sessionStorage.setItem(SESSION_ALERTED_PLATES_KEY, JSON.stringify(list));
+        }
+      }
+    } catch {}
+  },
+
+  /**
+   * Clears the session deduplication tracker.
+   */
+  clearSessionAlertedPlates(): void {
+    sessionAlertedPlatesSet.clear();
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem(SESSION_ALERTED_PLATES_KEY);
+      }
+    } catch {}
   }
 };
