@@ -84,21 +84,7 @@ export const InspectionDamageSeverityChart: React.FC<InspectionDamageSeverityCha
       });
     }
 
-    // Fallback baseline defect events if frames are sparse, aligned with official audit samples
-    const baseEvents = [
-      { time: 4.0, frame: 120, category: 'pothole', severity: 'critical' as SeverityLevel, score: 92, conf: 0.94, note: 'Cold-mix asphalt patch within 48h' },
-      { time: 7.2, frame: 216, category: 'alligator_crack', severity: 'high' as SeverityLevel, score: 74, conf: 0.88, note: 'Milling & binder sealing' },
-      { time: 9.3, frame: 280, category: 'longitudinal_crack', severity: 'medium' as SeverityLevel, score: 48, conf: 0.82, note: 'Rubberized crack seal filling' },
-      { time: 15.6, frame: 468, category: 'broken_road', severity: 'critical' as SeverityLevel, score: 95, conf: 0.91, note: 'Full depth patch & sub-base compaction' },
-      { time: 22.1, frame: 663, category: 'transverse_crack', severity: 'low' as SeverityLevel, score: 24, conf: 0.76, note: 'Monitor during next routine cycle' },
-      { time: 26.5, frame: 795, category: 'alligator_crack', severity: 'medium' as SeverityLevel, score: 52, conf: 0.84, note: 'Surface bituminous seal coat' },
-      { time: 31.8, frame: 954, category: 'pothole', severity: 'high' as SeverityLevel, score: 81, conf: 0.89, note: 'Asphalt levelling patch within 7 days' },
-      { time: 38.4, frame: 1152, category: 'missing_asphalt', severity: 'high' as SeverityLevel, score: 68, conf: 0.87, note: 'Pavement edge patching' },
-      { time: 42.0, frame: 1260, category: 'missing_asphalt', severity: 'medium' as SeverityLevel, score: 55, conf: 0.85, note: 'Aggregate re-fill & compaction' },
-      { time: 46.2, frame: 1386, category: 'transverse_crack', severity: 'low' as SeverityLevel, score: 28, conf: 0.79, note: 'Routine scheduled seal' }
-    ];
-
-    // Combine raw detections with base events normalized to video duration
+    // Extract real detections only from frames
     const eventPoints: TimelineDataPoint[] = [];
 
     if (rawDetections.length > 0) {
@@ -124,41 +110,20 @@ export const InspectionDamageSeverityChart: React.FC<InspectionDamageSeverityCha
       });
     }
 
-    // If we have few or no frame detections, scale baseEvents to match duration
-    if (eventPoints.length < 3) {
-      const scaleFactor = duration / 48.0;
-      baseEvents.forEach((ev, idx) => {
-        const scaledTime = Math.min(parseFloat((ev.time * scaleFactor).toFixed(1)), duration - 0.5);
-        const scaledFrame = Math.round(scaledTime * fps);
-        eventPoints.push({
-          timeSec: scaledTime,
-          frameNumber: scaledFrame,
-          severityScore: ev.score,
-          severityLevel: ev.severity,
-          category: ev.category,
-          confidence: ev.conf,
-          detectionId: `synth-${idx}`,
-          isDefectEvent: true,
-          actionNote: ev.note
-        });
-      });
-    }
-
     // Sort defect points by time
     eventPoints.sort((a, b) => a.timeSec - b.timeSec);
 
-    // Build dense continuous timeline curve across entire inspection duration (sampled every ~0.5s or 1s)
+    // Build continuous timeline curve across inspection duration
     const denseStep = duration > 120 ? 2 : duration > 60 ? 1 : 0.5;
     const continuousPoints: TimelineDataPoint[] = [];
     const totalSteps = Math.ceil(duration / denseStep);
 
-    // Baseline road condition vibration / micro-roughness (10 - 20 severity score)
+    // If no defects detected, road is clear (score 0)
     for (let i = 0; i <= totalSteps; i++) {
       const t = Math.min(i * denseStep, duration);
       const frameNum = Math.round(t * fps);
 
-      // Check distance to nearby defect events to create realistic Gaussian influence peaks
-      let combinedScore = 12 + Math.sin(t * 0.4) * 4 + Math.cos(t * 0.9) * 3; // Pavement ambient roughness
+      let combinedScore = 0;
       let dominantCategory: string | undefined = undefined;
       let dominantConfidence: number | undefined = undefined;
       let dominantLevel: SeverityLevel = 'low';
@@ -167,7 +132,7 @@ export const InspectionDamageSeverityChart: React.FC<InspectionDamageSeverityCha
       for (const ev of eventPoints) {
         const diff = Math.abs(t - ev.timeSec);
         if (diff < 2.5) {
-          // Gaussian peak
+          // Gaussian peak around detected real defects
           const weight = Math.exp(-Math.pow(diff / 1.1, 2));
           const added = ev.severityScore * weight;
           if (added > combinedScore) {
@@ -225,7 +190,7 @@ export const InspectionDamageSeverityChart: React.FC<InspectionDamageSeverityCha
     const scores = timelineData.continuousPoints.map(p => p.severityScore);
     
     const maxScore = Math.max(...scores, 0);
-    const peakPoint = timelineData.continuousPoints.find(p => p.severityScore === maxScore) || defects[0];
+    const peakPoint = maxScore > 0 ? timelineData.continuousPoints.find(p => p.severityScore === maxScore) : undefined;
     const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '0.0';
     
     const criticalEvents = defects.filter(d => d.severityLevel === 'critical' || d.severityScore >= 75);
@@ -239,7 +204,7 @@ export const InspectionDamageSeverityChart: React.FC<InspectionDamageSeverityCha
       maxScore,
       peakTime: peakPoint ? peakPoint.timeSec : 0,
       peakFrame: peakPoint ? peakPoint.frameNumber : 0,
-      peakCategory: peakPoint?.category || 'pothole',
+      peakCategory: peakPoint?.category || (defects.length > 0 ? 'pothole' : 'None'),
       avgScore,
       criticalCount: criticalEvents.length,
       highCount: highEvents.length,

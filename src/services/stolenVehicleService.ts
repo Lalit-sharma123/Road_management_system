@@ -25,152 +25,9 @@ try {
   }
 } catch (e) {}
 
-const INITIAL_STOLEN_VEHICLES: StolenVehicle[] = [
-  {
-    id: 'sv-001',
-    vehicle_number: 'HR26DQ5519',
-    owner_name: 'Vikram Singh',
-    vehicle_type: 'CAR',
-    fir_number: 'FIR-2026-HR-8821',
-    police_station: 'DLF Phase 2 Police Station, Gurugram',
-    date_reported: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
-    reason: 'Armed Vehicle Theft at Cyber Hub Parking',
-    priority: 'CRITICAL',
-    status: 'ACTIVE',
-    notes: 'Silver Hyundai Creta. Suspects heading towards NH-48 Expressway.',
-    created_at: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 24 * 3600000).toISOString()
-  },
-  {
-    id: 'sv-002',
-    vehicle_number: 'DL01AB1234',
-    owner_name: 'Rajesh Sharma',
-    vehicle_type: 'CAR',
-    fir_number: 'FIR-2026-DEL-1092',
-    police_station: 'Connaught Place Police Station, New Delhi',
-    date_reported: new Date(Date.now() - 5 * 24 * 3600000).toISOString(),
-    reason: 'Vehicle Theft from Residential Driveway',
-    priority: 'HIGH',
-    status: 'ACTIVE',
-    notes: 'White Honda City with tinted windows. Intercept on Ring Road.',
-    created_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString()
-  },
-  {
-    id: 'sv-003',
-    vehicle_number: 'MH12DE1432',
-    owner_name: 'Amitabh Deshmukh',
-    vehicle_type: 'MOTORCYCLE',
-    fir_number: 'FIR-2026-MH-4401',
-    police_station: 'Shivaji Nagar Police Station, Pune',
-    date_reported: new Date(Date.now() - 7 * 24 * 3600000).toISOString(),
-    reason: 'Two-Wheeler Theft from Metro Station',
-    priority: 'HIGH',
-    status: 'ACTIVE',
-    notes: 'Black Royal Enfield Classic 350. Custom exhaust.',
-    created_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString()
-  },
-  {
-    id: 'sv-004',
-    vehicle_number: 'KA05MK9821',
-    owner_name: 'Pooja Reddy',
-    vehicle_type: 'SUV',
-    fir_number: 'FIR-2026-KA-3012',
-    police_station: 'Indiranagar Police Station, Bengaluru',
-    date_reported: new Date(Date.now() - 14 * 24 * 3600000).toISOString(),
-    reason: 'Vehicle Hijack Case',
-    priority: 'MEDIUM',
-    status: 'RECOVERED',
-    notes: 'White Toyota Fortuner. Recovered by Highway Patrol Unit 4.',
-    created_at: new Date(Date.now() - 14 * 24 * 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 1 * 24 * 3600000).toISOString()
-  },
-  {
-    id: 'sv-005',
-    vehicle_number: 'UP16AX7788',
-    owner_name: 'Sunil Verma',
-    vehicle_type: 'CAR',
-    fir_number: 'FIR-2026-UP-6672',
-    police_station: 'Sector 20 Police Station, Noida',
-    date_reported: new Date(Date.now() - 3 * 24 * 3600000).toISOString(),
-    reason: 'Stolen Commercial Delivery Vehicle',
-    priority: 'HIGH',
-    status: 'ACTIVE',
-    notes: 'Red Maruti Swift Dzire. Used in commercial deliveries.',
-    created_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString()
-  }
-];
+const INITIAL_STOLEN_VEHICLES: StolenVehicle[] = [];
 
-const INITIAL_ALERTS: StolenVehicleAlert[] = [
-  {
-    id: 'sta-001',
-    stolen_vehicle_id: 'sv-001',
-    vehicle_number: 'HR26DQ5519',
-    owner_name: 'Vikram Singh',
-    fir_number: 'FIR-2026-HR-8821',
-    camera_id: 'CAM-01',
-    camera_name: 'NH-48 ANPR Live Feed',
-    camera_location: 'NH-48 Cyber City Gateway, Gurugram',
-    latitude: 28.4595,
-    longitude: 77.0266,
-    timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
-    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-    plate_crop_url: '/processed/violations/sample_plate.jpg',
-    ocr_text: 'HR26DQ5519',
-    confidence: 0.98,
-    status: 'ACTIVE',
-    resolved_by: undefined,
-    remarks: 'Real-time ANPR match detected. Alert dispatched to Highway Intercept Patrol Unit 7.',
-    created_at: new Date(Date.now() - 12 * 60000).toISOString(),
-    updated_at: new Date(Date.now() - 12 * 60000).toISOString()
-  },
-  {
-    id: 'sta-002',
-    stolen_vehicle_id: 'sv-002',
-    vehicle_number: 'DL01AB1234',
-    owner_name: 'Rajesh Sharma',
-    fir_number: 'FIR-2026-DEL-1092',
-    camera_id: 'CAM-03',
-    camera_name: 'Ring Road Fixed Optical Sensor',
-    camera_location: 'South Extension Flyover, Delhi',
-    latitude: 28.5708,
-    longitude: 77.2215,
-    timestamp: new Date(Date.now() - 75 * 60000).toISOString(),
-    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-    plate_crop_url: '/processed/violations/sample_plate.jpg',
-    ocr_text: 'DL01AB1234',
-    confidence: 0.96,
-    status: 'INVESTIGATING',
-    resolved_by: 'Inspector R. K. Nair',
-    remarks: 'Traffic police squad deployed at Moolchand junction.',
-    created_at: new Date(Date.now() - 75 * 60000).toISOString(),
-    updated_at: new Date(Date.now() - 75 * 60000).toISOString()
-  },
-  {
-    id: 'sta-003',
-    stolen_vehicle_id: 'sv-003',
-    vehicle_number: 'MH12DE1432',
-    owner_name: 'Amitabh Deshmukh',
-    fir_number: 'FIR-2026-MH-4401',
-    camera_id: 'CAM-02',
-    camera_name: 'Highway Patrol ANPR Mobile 2',
-    camera_location: 'Western Expressway Junction',
-    latitude: 18.5204,
-    longitude: 73.8567,
-    timestamp: new Date(Date.now() - 210 * 60000).toISOString(),
-    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-    plate_crop_url: '/processed/violations/sample_plate.jpg',
-    ocr_text: 'MH12DE1432',
-    confidence: 0.94,
-    status: 'INTERCEPTED',
-    resolved_by: 'Sub-Inspector Patil',
-    remarks: 'Vehicle stopped and rider detained at Checkpoint Bravo.',
-    created_at: new Date(Date.now() - 210 * 60000).toISOString(),
-    updated_at: new Date(Date.now() - 210 * 60000).toISOString()
-  }
-];
+const INITIAL_ALERTS: StolenVehicleAlert[] = [];
 
 const INITIAL_SETTINGS: StolenVehicleSettings = {
   enabled: true,
@@ -188,13 +45,12 @@ function getStoredVehicles(): StolenVehicle[] {
   try {
     const raw = localStorage.getItem(STORAGE_VEHICLES_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_VEHICLES_KEY, JSON.stringify(INITIAL_STOLEN_VEHICLES));
-      return INITIAL_STOLEN_VEHICLES;
+      return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_STOLEN_VEHICLES;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return INITIAL_STOLEN_VEHICLES;
+    return [];
   }
 }
 
@@ -210,13 +66,12 @@ function getStoredAlerts(): StolenVehicleAlert[] {
   try {
     const raw = localStorage.getItem(STORAGE_ALERTS_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_ALERTS_KEY, JSON.stringify(INITIAL_ALERTS));
-      return INITIAL_ALERTS;
+      return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_ALERTS;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return INITIAL_ALERTS;
+    return [];
   }
 }
 
@@ -747,18 +602,42 @@ export const stolenVehicleService = {
    * Guarantees an alert for a detected stolen plate is sent ONLY ONE TIME.
    * Subsequent detections in the same video/session return true, suppressing repeat alert messages.
    */
-  hasPlateBeenAlerted(plateStr: string): boolean {
+  hasPlateBeenAlerted(plateStr: string, vehicleId?: string | null): boolean {
     const norm = this.normalizePlate(plateStr);
-    if (!norm) return false;
-    if (sessionAlertedPlatesSet.has(norm)) return true;
+    if (!norm && !vehicleId) return false;
+
+    if (norm && sessionAlertedPlatesSet.has(norm)) return true;
+    if (vehicleId && sessionAlertedPlatesSet.has(vehicleId)) return true;
+
+    // Check if the plate matches an active registered stolen vehicle
+    const matched = norm ? this.isPlateStolen(norm) : null;
+    if (matched) {
+      const matchNorm = this.normalizePlate(matched.vehicle_number);
+      if (sessionAlertedPlatesSet.has(matchNorm)) return true;
+      if (matched.id && sessionAlertedPlatesSet.has(matched.id)) return true;
+    }
+
     try {
       if (typeof window !== 'undefined') {
-        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY);
+        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY) || localStorage.getItem(SESSION_ALERTED_PLATES_KEY);
         if (raw) {
           const list: string[] = JSON.parse(raw);
-          if (Array.isArray(list) && list.includes(norm)) {
-            sessionAlertedPlatesSet.add(norm);
-            return true;
+          if (Array.isArray(list)) {
+            if (norm && list.includes(norm)) {
+              sessionAlertedPlatesSet.add(norm);
+              return true;
+            }
+            if (vehicleId && list.includes(vehicleId)) {
+              sessionAlertedPlatesSet.add(vehicleId);
+              return true;
+            }
+            if (matched) {
+              const matchNorm = this.normalizePlate(matched.vehicle_number);
+              if (list.includes(matchNorm) || (matched.id && list.includes(matched.id))) {
+                sessionAlertedPlatesSet.add(matchNorm);
+                return true;
+              }
+            }
           }
         }
       }
@@ -769,17 +648,38 @@ export const stolenVehicleService = {
   /**
    * Marks a plate as alerted so it is never alerted again during this inspection/session.
    */
-  markPlateAlerted(plateStr: string): void {
+  markPlateAlerted(plateStr: string, vehicleId?: string | null): void {
     const norm = this.normalizePlate(plateStr);
-    if (!norm) return;
-    sessionAlertedPlatesSet.add(norm);
+    if (!norm && !vehicleId) return;
+
+    if (norm) sessionAlertedPlatesSet.add(norm);
+    if (vehicleId) sessionAlertedPlatesSet.add(vehicleId);
+
+    // If it matches a registered stolen vehicle, mark the canonical registration number and ID too
+    const matched = norm ? this.isPlateStolen(norm) : null;
+    if (matched) {
+      const matchNorm = this.normalizePlate(matched.vehicle_number);
+      sessionAlertedPlatesSet.add(matchNorm);
+      if (matched.id) sessionAlertedPlatesSet.add(matched.id);
+    }
+
     try {
       if (typeof window !== 'undefined') {
-        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY);
+        const raw = sessionStorage.getItem(SESSION_ALERTED_PLATES_KEY) || localStorage.getItem(SESSION_ALERTED_PLATES_KEY);
         const list: string[] = raw ? JSON.parse(raw) : [];
-        if (!list.includes(norm)) {
-          list.push(norm);
+        let modified = false;
+
+        const toAdd = [norm, vehicleId, matched ? this.normalizePlate(matched.vehicle_number) : null, matched?.id].filter(Boolean) as string[];
+        toAdd.forEach(item => {
+          if (!list.includes(item)) {
+            list.push(item);
+            modified = true;
+          }
+        });
+
+        if (modified) {
           sessionStorage.setItem(SESSION_ALERTED_PLATES_KEY, JSON.stringify(list));
+          localStorage.setItem(SESSION_ALERTED_PLATES_KEY, JSON.stringify(list));
         }
       }
     } catch {}

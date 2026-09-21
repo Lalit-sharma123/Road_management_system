@@ -84,28 +84,22 @@ async def get_dashboard_summary(
                 damage_by_type["pothole"] += cnt
                 road_damage_count += cnt
 
-        # Dynamic defaults if database has no detection records yet
-        if total_detections == 0:
-            road_damage_count = 18
-            vehicle_count = 36
-            helmet_count = 14
-            number_plate_count = 12
-            total_detections = road_damage_count + vehicle_count + helmet_count + number_plate_count
-            damage_by_type = {
-                "pothole": 6,
-                "longitudinal_crack": 5,
-                "transverse_crack": 4,
-                "alligator_crack": 2,
-                "missing_asphalt": 1,
-                "broken_road": 0
-            }
-            vehicles_by_type = {
-                "car": 20,
-                "truck": 6,
-                "bus": 3,
-                "motorcycle": 5,
-                "bicycle": 2
-            }
+        # Real detection counts from database (without dummy data fallbacks)
+        damage_by_type = {
+            "pothole": categories_count.get("pothole", 0),
+            "longitudinal_crack": categories_count.get("longitudinal_crack", 0),
+            "transverse_crack": categories_count.get("transverse_crack", 0),
+            "alligator_crack": categories_count.get("alligator_crack", 0),
+            "missing_asphalt": categories_count.get("missing_asphalt", 0),
+            "broken_road": categories_count.get("broken_road", 0)
+        }
+        vehicles_by_type = {
+            "car": vehicles_count.get("car", 0),
+            "truck": vehicles_count.get("truck", 0),
+            "bus": vehicles_count.get("bus", 0),
+            "motorcycle": vehicles_count.get("motorcycle", 0),
+            "bicycle": vehicles_count.get("bicycle", 0)
+        }
 
         # Latest Detections History
         latest_det_stmt = select(Detection).order_by(Detection.id.desc()).limit(10)
@@ -196,54 +190,41 @@ async def get_dashboard_summary(
             "vehicles_by_type": vehicles_by_type,
             "helmet_detections": helmet_count,
             "number_plate_detections": number_plate_count,
-            "helmet_violations_count": helmet_viols_count if total_violations_count > 0 else 4,
-            "total_violations_count": total_violations_count if total_violations_count > 0 else 4,
-            "total_fines_amount": float(total_fines_sum) if total_violations_count > 0 else 4000.0,
-            "paid_fines_amount": float(paid_fines_sum) if total_violations_count > 0 else 1000.0,
+            "helmet_violations_count": helmet_viols_count,
+            "total_violations_count": total_violations_count,
+            "total_fines_amount": float(total_fines_sum),
+            "paid_fines_amount": float(paid_fines_sum),
             "recent_violations": formatted_violations,
             "latest_detections": formatted_latest,
             "total_detections": total_detections,
-            "average_confidence": round(float(avg_conf), 2),
+            "average_confidence": round(float(avg_conf), 2) if total_detections > 0 else 0.0,
             "timestamp": time.time(),
             "recent_videos": formatted_videos
         }
     except Exception as e:
         print(f"Error fetching dashboard summary: {e}")
         return {
-            "total_inspections": 12,
-            "total_distance_km": 42.0,
-            "average_health_score": 84.5,
-            "total_defects_found": 18,
-            "critical_hazards": 2,
-            "road_damage_count": 18,
-            "vehicle_count": 36,
-            "helmet_count": 14,
-            "number_plate_count": 12,
-            "damage_by_type": {
-                "pothole": 6,
-                "longitudinal_crack": 5,
-                "transverse_crack": 4,
-                "alligator_crack": 2,
-                "missing_asphalt": 1,
-                "broken_road": 0
-            },
-            "vehicles_by_type": {
-                "car": 20,
-                "truck": 6,
-                "bus": 3,
-                "motorcycle": 5,
-                "bicycle": 2
-            },
-            "helmet_detections": 14,
-            "number_plate_detections": 12,
-            "helmet_violations_count": 4,
-            "total_violations_count": 4,
-            "total_fines_amount": 4000.0,
-            "paid_fines_amount": 1000.0,
+            "total_inspections": 0,
+            "total_distance_km": 0.0,
+            "average_health_score": 100.0,
+            "total_defects_found": 0,
+            "critical_hazards": 0,
+            "road_damage_count": 0,
+            "vehicle_count": 0,
+            "helmet_count": 0,
+            "number_plate_count": 0,
+            "damage_by_type": {},
+            "vehicles_by_type": {},
+            "helmet_detections": 0,
+            "number_plate_detections": 0,
+            "helmet_violations_count": 0,
+            "total_violations_count": 0,
+            "total_fines_amount": 0.0,
+            "paid_fines_amount": 0.0,
             "recent_violations": [],
             "latest_detections": [],
-            "total_detections": 80,
-            "average_confidence": 0.92,
+            "total_detections": 0,
+            "average_confidence": 0.0,
             "timestamp": time.time(),
             "recent_videos": []
         }

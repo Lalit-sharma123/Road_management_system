@@ -96,30 +96,8 @@ async def get_live_telemetry_analytics(
     )
     total_defects = potholes_found + cracks_found + categories_count["missing_asphalt"] + categories_count["broken_road"]
 
-    if total_defects == 0:
-        categories_count = {
-            "pothole": 6,
-            "longitudinal_crack": 5,
-            "transverse_crack": 4,
-            "alligator_crack": 2,
-            "missing_asphalt": 1,
-            "broken_road": 0
-        }
-        potholes_found = 6
-        cracks_found = 11
-        total_defects = 18
-
+    # Use real counts directly from database
     total_vehicles = sum(vehicles_count.values())
-    if total_vehicles == 0:
-        vehicles_count = {
-            "car": 20,
-            "truck": 6,
-            "bus": 3,
-            "motorcycle": 5,
-            "bicycle": 2,
-            "number_plate": 12
-        }
-        total_vehicles = 36
 
     # -------------------------------------------------------------
     # 2. Road Health Score & Inspections
@@ -240,17 +218,11 @@ async def get_live_telemetry_analytics(
     paid_fines_stmt = select(func.sum(TrafficViolation.fine_amount)).where(TrafficViolation.fine_status == "PAID")
     paid_fines_val = (await db.execute(paid_fines_stmt)).scalar() or 0.0
 
-    if total_violations_count == 0:
-        helmet_violations_count = 4
-        total_violations_count = 8
-        total_fines_val = 8500.0
-        paid_fines_val = 3000.0
-
     violations_breakdown = [
-        {"category": "NO HELMET", "challans": helmet_violations_count or 4, "fines": (helmet_violations_count or 4) * 1000, "fill": "#FF3B30"},
-        {"category": "WRONG-SIDE", "challans": max(1, int(total_violations_count * 0.2)), "fines": 1500, "fill": "#FF9500"},
-        {"category": "ILLEGAL PARKING", "challans": max(1, int(total_violations_count * 0.25)), "fines": 1000, "fill": "#FFD60A"},
-        {"category": "SPEEDING", "challans": max(1, int(total_violations_count * 0.15)), "fines": 2000, "fill": "#E056FD"}
+        {"category": "NO HELMET", "challans": helmet_violations_count, "fines": helmet_violations_count * 1000, "fill": "#FF3B30"},
+        {"category": "WRONG-SIDE", "challans": int(total_violations_count * 0.2), "fines": int(total_violations_count * 0.2) * 1500, "fill": "#FF9500"},
+        {"category": "ILLEGAL PARKING", "challans": int(total_violations_count * 0.25), "fines": int(total_violations_count * 0.25) * 1000, "fill": "#FFD60A"},
+        {"category": "SPEEDING", "challans": int(total_violations_count * 0.15), "fines": int(total_violations_count * 0.15) * 2000, "fill": "#E056FD"}
     ]
 
     # -------------------------------------------------------------
@@ -258,14 +230,14 @@ async def get_live_telemetry_analytics(
     # -------------------------------------------------------------
     frequency_timeline = []
     for step in range(1, 8):
-        step_potholes = max(1, int((potholes_found / 7.0) * (0.8 + 0.4 * (step % 3))))
-        step_cracks = max(1, int((cracks_found / 7.0) * (0.9 + 0.3 * ((step + 1) % 3))))
+        step_potholes = int((potholes_found / 7.0) * (0.8 + 0.4 * (step % 3))) if potholes_found > 0 else 0
+        step_cracks = int((cracks_found / 7.0) * (0.9 + 0.3 * ((step + 1) % 3))) if cracks_found > 0 else 0
         frequency_timeline.append({
             "interval": f"Km {step * 2}-{(step + 1) * 2}",
             "potholes": step_potholes,
             "cracks": step_cracks,
             "frequency_density": round((step_potholes + step_cracks) / 2.0, 1),
-            "severity_index": round(min(1.0, 0.35 + (step_potholes * 0.08)), 2)
+            "severity_index": round(min(1.0, 0.35 + (step_potholes * 0.08)), 2) if step_potholes > 0 else 0.0
         })
 
     # -------------------------------------------------------------
@@ -282,12 +254,12 @@ async def get_live_telemetry_analytics(
         m_name = m_date.strftime("%b")
         months_labels.append(m_name)
         
-        # Base realistic curve matching current real totals
+        # Realistic curve matching current real totals
         ratio = (6 - m_offset) / 6.0
-        p_val = max(2, int(potholes_found * (0.6 + 0.5 * ratio)))
-        c_val = max(5, int(cracks_found * (0.7 + 0.4 * ratio)))
-        s_val = max(0, int((active_alerts_count + intercepted_count) * (0.5 + 0.5 * ratio)))
-        h_val = round(max(60.0, avg_score + (m_offset * 1.5)), 1)
+        p_val = int(potholes_found * (0.6 + 0.5 * ratio)) if potholes_found > 0 else 0
+        c_val = int(cracks_found * (0.7 + 0.4 * ratio)) if cracks_found > 0 else 0
+        s_val = int((active_alerts_count + intercepted_count) * (0.5 + 0.5 * ratio))
+        h_val = round(min(100.0, max(20.0, avg_score + (m_offset * 1.5))), 1)
         
         potholes_trend.append(p_val)
         cracks_trend.append(c_val)

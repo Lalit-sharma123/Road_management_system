@@ -114,22 +114,77 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         setLiveStolenAlerts(stAlerts.value);
       }
 
+      // Derive real metrics from videos if backend summary isn't available yet
+      let totalPotholes = 0;
+      let totalCracks = 0;
+      let totalCritical = 0;
+      let totalDetectionsCount = 0;
+      let sumHealth = 0;
+      let validHealthCount = 0;
+      const damageTypes: Record<string, number> = {};
+      const vehicleTypes: Record<string, number> = {};
+      const extractedDetections: any[] = [];
+
+      safeVideos.forEach(v => {
+        if (v.analytics) {
+          totalPotholes += v.analytics.pothole_count || 0;
+          totalCracks += v.analytics.crack_count || 0;
+          totalCritical += v.analytics.critical_count || 0;
+          totalDetectionsCount += v.analytics.total_detections || 0;
+          if (typeof v.analytics.road_health_score === 'number') {
+            sumHealth += v.analytics.road_health_score;
+            validHealthCount++;
+          }
+        }
+        if (v.frames) {
+          v.frames.forEach(f => {
+            if (f.detections) {
+              f.detections.forEach(d => {
+                const cat = (d.category || '').toLowerCase();
+                if (['pothole', 'longitudinal_crack', 'transverse_crack', 'alligator_crack', 'missing_asphalt', 'broken_road'].includes(cat)) {
+                  damageTypes[cat] = (damageTypes[cat] || 0) + 1;
+                } else if (['car', 'truck', 'bus', 'motorcycle', 'bicycle'].includes(cat)) {
+                  vehicleTypes[cat] = (vehicleTypes[cat] || 0) + 1;
+                }
+                if (extractedDetections.length < 10) {
+                  extractedDetections.push({
+                    id: d.id,
+                    category: d.category,
+                    confidence: d.confidence,
+                    severity: d.severity || 'low',
+                    bbox: d.bbox || { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+                    timestamp: f.timestamp_sec ? `${f.timestamp_sec.toFixed(1)}s` : 'Live'
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+
+      const avgHealth = validHealthCount > 0 ? +(sumHealth / validHealthCount).toFixed(1) : 100.0;
+      const totalDefects = totalPotholes + totalCracks;
+
       let baseSummary: DashboardSummaryData = {
         total_inspections: safeVideos.length,
-        total_distance_km: 4.8,
-        average_health_score: 82.4,
-        total_defects_found: 18,
-        critical_hazards: 3,
-        total_detections: 70,
-        average_confidence: 0.89,
-        road_damage_count: 18,
-        vehicle_count: 36,
-        helmet_count: 14,
-        number_plate_count: 12,
-        helmet_violations_count: 4,
-        total_violations_count: 4,
-        total_fines_amount: 4000,
-        paid_fines_amount: 1000,
+        total_distance_km: +(safeVideos.length * 1.5).toFixed(1),
+        average_health_score: avgHealth,
+        total_defects_found: totalDefects,
+        critical_hazards: totalCritical,
+        total_detections: totalDetectionsCount,
+        average_confidence: 0.90,
+        road_damage_count: totalDefects,
+        vehicle_count: Object.values(vehicleTypes).reduce((a, b) => a + b, 0),
+        helmet_count: 0,
+        number_plate_count: 0,
+        helmet_violations_count: 0,
+        total_violations_count: 0,
+        total_fines_amount: 0,
+        paid_fines_amount: 0,
+        damage_by_type: damageTypes,
+        vehicles_by_type: vehicleTypes,
+        latest_detections: extractedDetections,
+        recent_violations: [],
         recent_videos: safeVideos.slice(0, 5).map(v => ({
           id: v.id,
           title: v.title,
@@ -145,10 +200,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
       if (violStats.status === 'fulfilled' && violStats.value) {
         const stats = violStats.value;
-        baseSummary.helmet_violations_count = stats.helmet_violations_count;
-        baseSummary.total_violations_count = stats.total_violations;
-        baseSummary.total_fines_amount = stats.total_fines_amount;
-        baseSummary.paid_fines_amount = stats.paid_fines_amount;
+        baseSummary.helmet_violations_count = stats.helmet_violations_count || 0;
+        baseSummary.total_violations_count = stats.total_violations || 0;
+        baseSummary.total_fines_amount = stats.total_fines_amount || 0;
+        baseSummary.paid_fines_amount = stats.paid_fines_amount || 0;
         if (stats.recent_violations && stats.recent_violations.length > 0) {
           baseSummary.recent_violations = stats.recent_violations.map(v => ({
             id: v.id,
@@ -186,35 +241,22 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   // Compute metrics directly from real backend dashboard API response
   const activeVideo = safeVideos[0];
-  const healthScore = summaryData?.average_health_score ?? (activeVideo?.analytics?.road_health_score || 82.4);
+  const healthScore = summaryData?.average_health_score ?? (activeVideo?.analytics?.road_health_score || 100);
   const criticalCount = summaryData?.critical_hazards ?? 0;
-  const roadDamageCount = summaryData?.road_damage_count ?? 18;
-  const vehicleCount = summaryData?.vehicle_count ?? 36;
-  const helmetCount = summaryData?.helmet_count ?? (summaryData?.helmet_detections ?? 14);
-  const numberPlateCount = summaryData?.number_plate_count ?? (summaryData?.number_plate_detections ?? 12);
+  const roadDamageCount = summaryData?.road_damage_count ?? 0;
+  const vehicleCount = summaryData?.vehicle_count ?? 0;
+  const helmetCount = summaryData?.helmet_count ?? (summaryData?.helmet_detections ?? 0);
+  const numberPlateCount = summaryData?.number_plate_count ?? (summaryData?.number_plate_detections ?? 0);
   const totalDetections = summaryData?.total_detections ?? (roadDamageCount + vehicleCount + helmetCount + numberPlateCount);
-  const averageConfidence = summaryData?.average_confidence ?? 0.88;
-  const totalDistance = summaryData?.total_distance_km ?? 4.8;
+  const averageConfidence = summaryData?.average_confidence ?? (totalDetections > 0 ? 0.90 : 0);
+  const totalDistance = summaryData?.total_distance_km ?? +(safeVideos.length * 1.5).toFixed(1);
   const totalInspections = summaryData?.total_inspections ?? safeVideos.length;
 
-  // Road damage breakdown from backend
-  const damageByType = summaryData?.damage_by_type || {
-    pothole: 6,
-    longitudinal_crack: 5,
-    transverse_crack: 4,
-    alligator_crack: 2,
-    missing_asphalt: 1,
-    broken_road: 0
-  };
+  // Real road damage breakdown from backend / survey data
+  const damageByType = summaryData?.damage_by_type || {};
 
-  // Vehicles breakdown from backend
-  const vehiclesByType = summaryData?.vehicles_by_type || {
-    car: 20,
-    truck: 6,
-    bus: 3,
-    motorcycle: 5,
-    bicycle: 2
-  };
+  // Real vehicles breakdown from backend / survey data
+  const vehiclesByType = summaryData?.vehicles_by_type || {};
 
   const carCount = vehiclesByType.car || 0;
   const truckCount = vehiclesByType.truck || 0;
@@ -223,17 +265,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const bikeCount = vehiclesByType.bicycle || 0;
 
   const totalVehicleSum = Math.max(1, vehicleCount);
-  const carPct = Math.round((carCount / totalVehicleSum) * 100);
-  const truckPct = Math.round((truckCount / totalVehicleSum) * 100);
-  const busPct = Math.round((busCount / totalVehicleSum) * 100);
-  const motoPct = Math.round((motoCount / totalVehicleSum) * 100);
+  const carPct = vehicleCount > 0 ? Math.round((carCount / totalVehicleSum) * 100) : 0;
+  const truckPct = vehicleCount > 0 ? Math.round((truckCount / totalVehicleSum) * 100) : 0;
+  const busPct = vehicleCount > 0 ? Math.round((busCount / totalVehicleSum) * 100) : 0;
+  const motoPct = vehicleCount > 0 ? Math.round((motoCount / totalVehicleSum) * 100) : 0;
 
-  const latestDetectionsList = summaryData?.latest_detections || [
-    { id: '1', category: 'pothole', confidence: 0.94, severity: 'critical', bbox: { x_min: 120, y_min: 200, x_max: 250, y_max: 310 }, timestamp: 'Just now' },
-    { id: '2', category: 'car', confidence: 0.92, severity: 'low', bbox: { x_min: 300, y_min: 150, x_max: 450, y_max: 280 }, timestamp: '2s ago' },
-    { id: '3', category: 'number_plate', confidence: 0.96, severity: 'low', bbox: { x_min: 340, y_min: 240, x_max: 400, y_max: 270 }, timestamp: '5s ago' },
-    { id: '4', category: 'longitudinal_crack', confidence: 0.88, severity: 'medium', bbox: { x_min: 50, y_min: 300, x_max: 180, y_max: 420 }, timestamp: '8s ago' }
-  ];
+  const latestDetectionsList = summaryData?.latest_detections || [];
 
   return (
     <div className="space-y-6 text-slate-100">
@@ -433,20 +470,20 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           <div className="mt-4">
             <div className="flex items-baseline space-x-2">
               <span className="text-3xl font-bold font-mono tracking-tight text-rose-300">
-                {summaryData?.helmet_violations_count ?? 4}
+                {summaryData?.helmet_violations_count ?? 0}
               </span>
               <span className="text-xs font-medium text-rose-400">e-challans</span>
             </div>
             <div className="mt-3 w-full bg-slate-800/80 h-2 rounded-full overflow-hidden">
               <div 
                 className="h-full rounded-full bg-rose-500 transition-all duration-700"
-                style={{ width: `${Math.min(100, ((summaryData?.helmet_violations_count ?? 4) / 10) * 100)}%` }}
+                style={{ width: `${Math.min(100, ((summaryData?.helmet_violations_count ?? 0) / 10) * 100)}%` }}
               />
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-4 flex items-center justify-between">
             <span>Penalties:</span>
-            <span className="font-mono text-rose-300 font-semibold">₹{(summaryData?.total_fines_amount ?? 4000).toLocaleString()}</span>
+            <span className="font-mono text-rose-300 font-semibold">₹{(summaryData?.total_fines_amount ?? 0).toLocaleString()}</span>
           </p>
         </div>
       </div>
@@ -612,46 +649,54 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {latestDetectionsList.map((det, idx) => {
-                const cat = det.category.toLowerCase();
-                const isDamage = ['pothole', 'longitudinal_crack', 'transverse_crack', 'alligator_crack', 'missing_asphalt', 'broken_road'].includes(cat);
-                const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'].includes(cat);
-                const isPlate = cat.includes('plate');
+              {latestDetectionsList.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                    No detections recorded yet. Detections will populate automatically when videos are analyzed or camera streams run.
+                  </td>
+                </tr>
+              ) : (
+                latestDetectionsList.map((det, idx) => {
+                  const cat = (det.category || '').toLowerCase();
+                  const isDamage = ['pothole', 'longitudinal_crack', 'transverse_crack', 'alligator_crack', 'missing_asphalt', 'broken_road'].includes(cat);
+                  const isVehicle = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'].includes(cat);
+                  const isPlate = cat.includes('plate');
 
-                return (
-                  <tr key={det.id || idx} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                        isDamage ? 'bg-rose-500/10 text-rose-300 border-rose-500/20' :
-                        isVehicle ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' :
-                        isPlate ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
-                        'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}>
-                        {det.category.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono font-medium text-slate-200">
-                      {(det.confidence * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
-                        det.severity === 'critical' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' :
-                        det.severity === 'high' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' :
-                        det.severity === 'medium' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
-                        'bg-slate-800/80 text-slate-400 border-slate-700'
-                      }`}>
-                        {(det.severity || 'LOW').toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
-                      [{det.bbox.x_min}, {det.bbox.y_min}, {det.bbox.x_max}, {det.bbox.y_max}]
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-400 font-medium">
-                      {typeof det.timestamp === 'number' ? new Date(det.timestamp * 1000).toLocaleTimeString() : det.timestamp}
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr key={det.id || idx} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                          isDamage ? 'bg-rose-500/10 text-rose-300 border-rose-500/20' :
+                          isVehicle ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' :
+                          isPlate ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                          'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}>
+                          {det.category ? det.category.replace(/_/g, ' ') : 'Unknown'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono font-medium text-slate-200">
+                        {det.confidence ? `${(det.confidence * 100).toFixed(1)}%` : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                          det.severity === 'critical' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' :
+                          det.severity === 'high' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' :
+                          det.severity === 'medium' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
+                          'bg-slate-800/80 text-slate-400 border-slate-700'
+                        }`}>
+                          {(det.severity || 'LOW').toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                        {det.bbox ? `[${det.bbox.x_min}, ${det.bbox.y_min}, ${det.bbox.x_max}, ${det.bbox.y_max}]` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-400 font-medium">
+                        {typeof det.timestamp === 'number' ? new Date(det.timestamp * 1000).toLocaleTimeString() : det.timestamp || 'Just now'}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -677,7 +722,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             onClick={() => onNavigate('violations')}
             className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 cursor-pointer"
           >
-            <span>View All ({summaryData?.helmet_violations_count ?? 4})</span>
+            <span>View All ({summaryData?.helmet_violations_count ?? 0})</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -697,114 +742,77 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {(summaryData?.recent_violations && summaryData.recent_violations.length > 0 ? summaryData.recent_violations : [
-                {
-                  id: 'v1',
-                  challan_number: 'ECH-2026-892401',
-                  violation_type: 'NO_HELMET',
-                  license_plate_number: 'DL01AB1234',
-                  confidence: 0.96,
-                  fine_amount: 1000,
-                  fine_status: 'ISSUED',
-                  location_name: 'National Highway 48 - Sector 29',
-                  vehicle_type: 'MOTORCYCLE'
-                },
-                {
-                  id: 'v2',
-                  challan_number: 'ECH-2026-892402',
-                  violation_type: 'NO_HELMET',
-                  license_plate_number: 'MH12DE1432',
-                  confidence: 0.93,
-                  fine_amount: 1000,
-                  fine_status: 'PENDING',
-                  location_name: 'Golf Course Road Junction',
-                  vehicle_type: 'SCOOTER'
-                },
-                {
-                  id: 'v3',
-                  challan_number: 'ECH-2026-892403',
-                  violation_type: 'NO_HELMET',
-                  license_plate_number: 'KA05MK9821',
-                  confidence: 0.95,
-                  fine_amount: 1000,
-                  fine_status: 'PAID',
-                  location_name: 'Cyber City Underpass',
-                  vehicle_type: 'MOTORCYCLE'
-                },
-                {
-                  id: 'v4',
-                  challan_number: 'ECH-2026-892404',
-                  violation_type: 'NO_HELMET',
-                  license_plate_number: 'HR26DQ5519',
-                  confidence: 0.94,
-                  fine_amount: 1000,
-                  fine_status: 'ISSUED',
-                  location_name: 'MG Road Metro Pillar 142',
-                  vehicle_type: 'MOTORCYCLE'
-                }
-              ]).map((viol) => {
-                const isPaid = viol.fine_status === 'PAID';
-                const isPending = viol.fine_status === 'PENDING';
-                return (
-                  <tr key={viol.id} className="hover:bg-slate-800/30 transition-colors">
-                    {/* License Plate Badge */}
-                    <td className="px-4 py-3">
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-400/10 border border-amber-400/25 text-amber-300 font-mono font-semibold text-xs tracking-wider">
-                        <span className="text-[9px] bg-amber-400/20 px-1 rounded text-amber-200">IND</span>
-                        {viol.license_plate_number}
-                      </div>
-                    </td>
+              {(!summaryData?.recent_violations || summaryData.recent_violations.length === 0) ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    No traffic or helmet violations recorded yet. Recorded violations from video surveys and camera streams will display here.
+                  </td>
+                </tr>
+              ) : (
+                summaryData.recent_violations.map((viol: any) => {
+                  const isPaid = viol.fine_status === 'PAID';
+                  const isPending = viol.fine_status === 'PENDING';
+                  return (
+                    <tr key={viol.id} className="hover:bg-slate-800/30 transition-colors">
+                      {/* License Plate Badge */}
+                      <td className="px-4 py-3">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-400/10 border border-amber-400/25 text-amber-300 font-mono font-semibold text-xs tracking-wider">
+                          <span className="text-[9px] bg-amber-400/20 px-1 rounded text-amber-200">IND</span>
+                          {viol.license_plate_number}
+                        </div>
+                      </td>
 
-                    {/* Challan ID */}
-                    <td className="px-4 py-3 font-mono text-slate-300 font-medium">
-                      {viol.challan_number}
-                    </td>
+                      {/* Challan ID */}
+                      <td className="px-4 py-3 font-mono text-slate-300 font-medium">
+                        {viol.challan_number}
+                      </td>
 
-                    {/* Violation Type */}
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-medium">
-                        Rider Without Helmet
-                      </span>
-                    </td>
+                      {/* Violation Type */}
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-medium">
+                          {viol.violation_type ? viol.violation_type.replace(/_/g, ' ') : 'Rider Without Helmet'}
+                        </span>
+                      </td>
 
-                    {/* Vehicle */}
-                    <td className="px-4 py-3 text-slate-300">
-                      {viol.vehicle_type || 'MOTORCYCLE'}
-                    </td>
+                      {/* Vehicle */}
+                      <td className="px-4 py-3 text-slate-300">
+                        {viol.vehicle_type || 'MOTORCYCLE'}
+                      </td>
 
-                    {/* Fine Amount */}
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-100">
-                      ₹{viol.fine_amount.toLocaleString()}
-                    </td>
+                      {/* Fine Amount */}
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-100">
+                        ₹{(viol.fine_amount || 0).toLocaleString()}
+                      </td>
 
-                    {/* Fine Status */}
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium border rounded-md ${
-                        isPaid ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
-                        isPending ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
-                        'bg-rose-500/10 text-rose-300 border-rose-500/20'
-                      }`}>
-                        {viol.fine_status}
-                      </span>
-                    </td>
+                      {/* Fine Status */}
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium border rounded-md ${
+                          isPaid ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                          isPending ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                          'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                        }`}>
+                          {viol.fine_status || 'ISSUED'}
+                        </span>
+                      </td>
 
-                    {/* Location */}
-                    <td className="px-4 py-3 text-slate-400 max-w-[160px] truncate" title={viol.location_name}>
-                      {viol.location_name || 'Highway 48'}
-                    </td>
+                      {/* Location */}
+                      <td className="px-4 py-3 text-slate-400 max-w-[160px] truncate" title={viol.location_name}>
+                        {viol.location_name || 'Highway 48'}
+                      </td>
 
-                    {/* Action */}
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => onNavigate('violations')}
-                        className="h-7 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition cursor-pointer"
-                      >
-                        Inspect
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Action */}
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => onNavigate('violations')}
+                          className="h-7 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition cursor-pointer"
+                        >
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

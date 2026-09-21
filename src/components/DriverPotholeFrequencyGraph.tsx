@@ -127,12 +127,12 @@ export const DriverPotholeFrequencyGraph: React.FC<DriverPotholeFrequencyGraphPr
   const stats = useMemo(() => {
     if (!telemetry || !telemetry.frequency_timeline || telemetry.frequency_timeline.length === 0) {
       return {
-        currentRate: 2.0,
-        tenMinTotal: 18,
-        peakRate: 5.0,
-        averageRate: 1.8,
-        criticalCount: 4,
-        hazardLevel: 'MODERATE'
+        currentRate: 0,
+        tenMinTotal: 0,
+        peakRate: 0,
+        averageRate: 0,
+        criticalCount: 0,
+        hazardLevel: 'NOMINAL'
       };
     }
 
@@ -545,6 +545,10 @@ export const DriverPotholeFrequencyGraph: React.FC<DriverPotholeFrequencyGraphPr
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400 py-6">
             <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
             <span>Streaming D3 Pothole Telemetry...</span>
+          </div>
+        ) : (!telemetry?.frequency_timeline || telemetry.frequency_timeline.length === 0) ? (
+          <div className="text-center text-slate-500 text-xs font-mono py-6">
+            No live pothole telemetry reported in current survey window.
           </div>
         ) : (
           <svg 

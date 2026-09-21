@@ -973,14 +973,21 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 remarks: st.remarks || `Stolen vehicle detected: ${st.vehicle_number}`
               };
               const normStolenPlate = stolenVehicleService.normalizePlate(stAlert.vehicle_number || stAlert.ocr_text || '');
-              const isFirstTimePlate = Boolean(normStolenPlate && !alertedStolenPlatesRef.current.has(normStolenPlate) && !stolenVehicleService.hasPlateBeenAlerted(normStolenPlate));
+              const vehicleId = stAlert.stolen_vehicle_id || null;
+              const isFirstTimePlate = Boolean(
+                (normStolenPlate || vehicleId) &&
+                (!normStolenPlate || !alertedStolenPlatesRef.current.has(normStolenPlate)) &&
+                (!vehicleId || !alertedStolenPlatesRef.current.has(vehicleId)) &&
+                !stolenVehicleService.hasPlateBeenAlerted(normStolenPlate, vehicleId)
+              );
 
               // Record in local persistent storage so Stolen Alerts center has all details
               stolenVehicleService.recordLiveAlert(stAlert).catch(() => {});
 
               if (isNew && isFirstTimePlate) {
-                alertedStolenPlatesRef.current.add(normStolenPlate);
-                stolenVehicleService.markPlateAlerted(normStolenPlate);
+                if (normStolenPlate) alertedStolenPlatesRef.current.add(normStolenPlate);
+                if (vehicleId) alertedStolenPlatesRef.current.add(vehicleId);
+                stolenVehicleService.markPlateAlerted(normStolenPlate, vehicleId);
                 setLatestStolenAlert(stAlert);
                 setIsAlertBannerDismissed(false);
               } else if (!latestStolenAlert) {
@@ -1741,10 +1748,16 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                 const stolenMatch = stolenVehicleService.isPlateStolen(rawText);
                 if (stolenMatch) {
                   const norm = stolenVehicleService.normalizePlate(stolenMatch.vehicle_number);
-                  const alreadyAlerted = alertedStolenPlatesRef.current.has(norm) || stolenVehicleService.hasPlateBeenAlerted(norm);
+                  const vehicleId = stolenMatch.id || null;
+                  const alreadyAlerted = (
+                    (norm && alertedStolenPlatesRef.current.has(norm)) ||
+                    (vehicleId && alertedStolenPlatesRef.current.has(vehicleId)) ||
+                    stolenVehicleService.hasPlateBeenAlerted(norm, vehicleId)
+                  );
                   if (!alreadyAlerted) {
-                    alertedStolenPlatesRef.current.add(norm);
-                    stolenVehicleService.markPlateAlerted(norm);
+                    if (norm) alertedStolenPlatesRef.current.add(norm);
+                    if (vehicleId) alertedStolenPlatesRef.current.add(vehicleId);
+                    stolenVehicleService.markPlateAlerted(norm, vehicleId);
 
                     const oneTimeAlert: StolenVehicleAlert = {
                       id: `sta-${Date.now()}-${norm}`,

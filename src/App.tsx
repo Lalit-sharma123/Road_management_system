@@ -222,14 +222,19 @@ export default function App() {
 
       const rawPlate = alert.vehicle_number || alert.plate_number || alert.ocr_text || '';
       const normPlate = stolenVehicleService.normalizePlate(rawPlate);
+      const vehicleId = alert.stolen_vehicle_id || null;
       const alertId = alert.id || alert.alert_id || alert.event_id;
 
-      if (!normPlate) return;
+      if (!normPlate && !vehicleId) return;
 
       // STRICT USER INTENT REQUIREMENT:
       // "when i registered the stolen vehicle and in video this number plate is detected
       // do not send the alert message again an again only send it one time"
-      if (alertedPlatesRef.current.has(normPlate) || stolenVehicleService.hasPlateBeenAlerted(normPlate)) {
+      if (
+        (normPlate && alertedPlatesRef.current.has(normPlate)) ||
+        (vehicleId && alertedPlatesRef.current.has(vehicleId)) ||
+        stolenVehicleService.hasPlateBeenAlerted(normPlate, vehicleId)
+      ) {
         return;
       }
       if (alertId && seenAlertIdsRef.current.has(alertId)) {
@@ -237,8 +242,9 @@ export default function App() {
       }
 
       // Mark as alerted globally and in session so it NEVER fires again
-      alertedPlatesRef.current.add(normPlate);
-      stolenVehicleService.markPlateAlerted(normPlate);
+      if (normPlate) alertedPlatesRef.current.add(normPlate);
+      if (vehicleId) alertedPlatesRef.current.add(vehicleId);
+      stolenVehicleService.markPlateAlerted(normPlate, vehicleId);
       if (alertId) seenAlertIdsRef.current.add(alertId);
 
       setActiveStolenAlert(alert);

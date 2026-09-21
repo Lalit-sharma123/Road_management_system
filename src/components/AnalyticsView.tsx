@@ -159,96 +159,82 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
     });
   };
 
-  // Extract Telemetry Data
+  // Extract Telemetry Data (Real values without synthetic mock constants)
   const roadHealth = telemetry?.road_health || {
-    average_road_health_score: video.analytics?.road_health_score || 82.4,
-    total_inspected_sections: 12,
-    rating: 'GOOD CONDITION'
+    average_road_health_score: video.analytics?.road_health_score ?? (video.id ? 100 : 0),
+    total_inspected_sections: video.id ? 1 : 0,
+    rating: (video.analytics?.road_health_score ?? 100) >= 80 ? 'GOOD CONDITION' : (video.analytics?.road_health_score ?? 100) >= 50 ? 'FAIR CONDITION' : 'CRITICAL DEFECTS'
   };
 
   const potholeTel = telemetry?.pothole_telemetry || {
-    pothole_count: video.analytics?.pothole_count || 6,
-    crack_count: video.analytics?.crack_count || 11,
-    total_defects: (video.analytics?.pothole_count || 6) + (video.analytics?.crack_count || 11),
-    density_per_km: 1.8,
+    pothole_count: video.analytics?.pothole_count || 0,
+    crack_count: video.analytics?.crack_count || 0,
+    total_defects: (video.analytics?.pothole_count || 0) + (video.analytics?.crack_count || 0),
+    density_per_km: video.analytics?.pothole_count ? Number(((video.analytics.pothole_count) / Math.max(1, (video.duration_seconds || 60) / 60)).toFixed(1)) : 0,
     categories: {
-      pothole: 6,
-      longitudinal_crack: 5,
-      transverse_crack: 4,
-      alligator_crack: 2,
-      missing_asphalt: 1,
+      pothole: video.analytics?.pothole_count || 0,
+      longitudinal_crack: 0,
+      transverse_crack: 0,
+      alligator_crack: 0,
+      missing_asphalt: 0,
       broken_road: 0
     },
-    frequency_timeline: [
-      { interval: 'Km 0-2', potholes: 2, cracks: 3, frequency_density: 2.5, severity_index: 0.45 },
-      { interval: 'Km 2-4', potholes: 1, cracks: 2, frequency_density: 1.5, severity_index: 0.38 },
-      { interval: 'Km 4-6', potholes: 3, cracks: 4, frequency_density: 3.5, severity_index: 0.62 },
-      { interval: 'Km 6-8', potholes: 0, cracks: 2, frequency_density: 1.0, severity_index: 0.30 },
-      { interval: 'Km 8-10', potholes: 2, cracks: 1, frequency_density: 1.5, severity_index: 0.40 }
-    ]
+    frequency_timeline: []
   };
 
   const severityTel = telemetry?.severity_scoring || {
-    severities: { low: 7, medium: 6, high: 3, critical: 2 },
-    critical_count: video.analytics?.critical_count || 2,
+    severities: {
+      low: 0,
+      medium: 0,
+      high: 0,
+      critical: video.analytics?.critical_count || 0
+    },
+    critical_count: video.analytics?.critical_count || 0,
     formula_weights: { weight_area: weightArea, weight_confidence: weightConfidence, weight_category: weightCategory },
     estimated_budget: {
-      pothole_repairs: (video.analytics?.pothole_count || 6) * 250,
-      crack_sealing: (video.analytics?.crack_count || 11) * 90,
-      critical_re_asphalt: (video.analytics?.critical_count || 2) * 500,
-      total_estimated_budget: ((video.analytics?.pothole_count || 6) * 250) + ((video.analytics?.crack_count || 11) * 90) + ((video.analytics?.critical_count || 2) * 500)
+      pothole_repairs: (video.analytics?.pothole_count || 0) * 250,
+      crack_sealing: (video.analytics?.crack_count || 0) * 90,
+      critical_re_asphalt: (video.analytics?.critical_count || 0) * 500,
+      total_estimated_budget: ((video.analytics?.pothole_count || 0) * 250) + ((video.analytics?.crack_count || 0) * 90) + ((video.analytics?.critical_count || 0) * 500)
     }
   };
 
   const stolenTel = telemetry?.stolen_vehicle_telemetry || {
-    total_stolen_registered: 5,
-    active_alerts_count: 3,
-    intercepted_count: 1,
-    alerts_today_count: 2,
-    intercept_rate: 25.0,
-    timeline: [
-      { day: 'Day 1', alerts: 1 },
-      { day: 'Day 2', alerts: 0 },
-      { day: 'Day 3', alerts: 2 },
-      { day: 'Day 4', alerts: 1 },
-      { day: 'Day 5', alerts: 3 },
-      { day: 'Day 6', alerts: 1 },
-      { day: 'Day 7', alerts: 2 }
-    ],
+    total_stolen_registered: 0,
+    active_alerts_count: 0,
+    intercepted_count: 0,
+    alerts_today_count: 0,
+    intercept_rate: 0,
+    timeline: [],
     recent_intercepts: []
   };
 
   const mobilityTel = telemetry?.traffic_mobility || {
-    total_vehicles: 36,
+    total_vehicles: video.analytics?.vehicle_count || 0,
     vehicles_by_type: {
-      car: 20,
-      truck: 6,
-      bus: 3,
-      motorcycle: 5,
-      bicycle: 2,
-      number_plate: 12
+      car: video.analytics?.vehicle_count || 0,
+      truck: 0,
+      bus: 0,
+      motorcycle: 0,
+      bicycle: 0,
+      number_plate: 0
     }
   };
 
   const violationsTel = telemetry?.violations_enforcement || {
-    total_violations: 8,
-    helmet_violations: 4,
-    total_fines_amount: 8500,
-    paid_fines_amount: 3000,
-    violations_breakdown: [
-      { category: 'NO HELMET', challans: 4, fines: 4000, fill: '#FF3B30' },
-      { category: 'WRONG-SIDE', challans: 1, fines: 1500, fill: '#FF9500' },
-      { category: 'ILLEGAL PARKING', challans: 2, fines: 1000, fill: '#FFD60A' },
-      { category: 'SPEEDING', challans: 1, fines: 2000, fill: '#E056FD' }
-    ]
+    total_violations: 0,
+    helmet_violations: 0,
+    total_fines_amount: 0,
+    paid_fines_amount: 0,
+    violations_breakdown: []
   };
 
   const trendsTel = telemetry?.monthly_trends || {
-    months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    potholes: [12, 16, 14, 22, 20, 26],
-    cracks: [35, 40, 38, 48, 45, 55],
-    stolen_alerts: [1, 2, 0, 3, 2, 4],
-    average_health_score: [88.5, 86.2, 85.0, 81.4, 82.0, 79.5]
+    months: [],
+    potholes: [],
+    cracks: [],
+    stolen_alerts: [],
+    average_health_score: []
   };
 
   // Color Palettes
@@ -554,31 +540,37 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
               </span>
             </div>
 
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={potholeTel.frequency_timeline} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="potholeGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#FF3B30" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#FF3B30" stopOpacity={0.05}/>
-                    </linearGradient>
-                    <linearGradient id="crackGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#FF9500" stopOpacity={0.7}/>
-                      <stop offset="95%" stopColor="#FF9500" stopOpacity={0.05}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="interval" stroke="#666" fontSize={10} />
-                  <YAxis stroke="#666" fontSize={10} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                  <Area type="monotone" dataKey="potholes" stroke="#FF3B30" fillOpacity={1} fill="url(#potholeGradient)" name="Potholes / Interval" />
-                  <Area type="monotone" dataKey="cracks" stroke="#FF9500" fillOpacity={1} fill="url(#crackGradient)" name="Cracks / Interval" />
-                  <Line type="monotone" dataKey="frequency_density" stroke="#34C759" strokeWidth={2} name="Defect Density Score" dot={{ r: 3 }} />
-                </AreaChart>
-              </ResponsiveContainer>
+            <div className="h-72 w-full flex items-center justify-center">
+              {potholeTel.frequency_timeline.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No distance-interval telemetry logged for this video survey yet.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={potholeTel.frequency_timeline} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="potholeGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#FF3B30" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#FF3B30" stopOpacity={0.05}/>
+                      </linearGradient>
+                      <linearGradient id="crackGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#FF9500" stopOpacity={0.7}/>
+                        <stop offset="95%" stopColor="#FF9500" stopOpacity={0.05}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                    <XAxis dataKey="interval" stroke="#666" fontSize={10} />
+                    <YAxis stroke="#666" fontSize={10} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Area type="monotone" dataKey="potholes" stroke="#FF3B30" fillOpacity={1} fill="url(#potholeGradient)" name="Potholes / Interval" />
+                    <Area type="monotone" dataKey="cracks" stroke="#FF9500" fillOpacity={1} fill="url(#crackGradient)" name="Cracks / Interval" />
+                    <Line type="monotone" dataKey="frequency_density" stroke="#34C759" strokeWidth={2} name="Defect Density Score" dot={{ r: 3 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#222] text-[10px]">
@@ -609,30 +601,36 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
               </span>
             </div>
 
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={defectDistributionData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={95}
-                    paddingAngle={4}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {defectDistributionData.map((entry, index) => (
-                      <Cell key={`damage-cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="h-72 w-full flex items-center justify-center">
+              {defectDistributionData.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No road damage defects detected in selected survey dataset.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={defectDistributionData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={55}
+                      outerRadius={95}
+                      paddingAngle={4}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {defectDistributionData.map((entry, index) => (
+                        <Cell key={`damage-cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#222] text-[10px]">
@@ -668,18 +666,24 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
               </span>
             </div>
 
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stolenTel.timeline} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="day" stroke="#666" fontSize={10} />
-                  <YAxis stroke="#666" fontSize={10} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Bar dataKey="alerts" fill="#F43F5E" radius={[4, 4, 0, 0]} name="Stolen Alerts Recorded" />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-64 w-full flex items-center justify-center">
+              {stolenTel.timeline.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No stolen vehicle intercept alerts logged in this period.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stolenTel.timeline} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                    <XAxis dataKey="day" stroke="#666" fontSize={10} />
+                    <YAxis stroke="#666" fontSize={10} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Bar dataKey="alerts" fill="#F43F5E" radius={[4, 4, 0, 0]} name="Stolen Alerts Recorded" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#222] text-[10px]">
@@ -908,22 +912,28 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
               </span>
             </div>
 
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendsChartData} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="month" stroke="#666" fontSize={11} />
-                  <YAxis stroke="#666" fontSize={11} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                  <Line type="monotone" dataKey="potholes" stroke="#FF3B30" strokeWidth={2} name="Potholes Found" dot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="cracks" stroke="#FF9500" strokeWidth={2} name="Cracks Found" dot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="stolenAlerts" stroke="#F43F5E" strokeWidth={2} name="Stolen Alerts" dot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="healthScore" stroke="#34C759" strokeWidth={2} name="Road Health Score" dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="h-72 w-full flex items-center justify-center">
+              {trendsChartData.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No historical monthly trend logs available yet.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendsChartData} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                    <XAxis dataKey="month" stroke="#666" fontSize={11} />
+                    <YAxis stroke="#666" fontSize={11} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Line type="monotone" dataKey="potholes" stroke="#FF3B30" strokeWidth={2} name="Potholes Found" dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="cracks" stroke="#FF9500" strokeWidth={2} name="Cracks Found" dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="stolenAlerts" stroke="#F43F5E" strokeWidth={2} name="Stolen Alerts" dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="healthScore" stroke="#34C759" strokeWidth={2} name="Road Health Score" dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
@@ -939,22 +949,28 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
               </span>
             </div>
 
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={vehicleChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="name" stroke="#666" fontSize={10} angle={-15} textAnchor="end" />
-                  <YAxis stroke="#666" fontSize={10} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {vehicleChartData.map((entry, index) => (
-                      <Cell key={`veh-bar-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-72 w-full flex items-center justify-center">
+              {vehicleChartData.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No vehicle detections logged in current survey.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={vehicleChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                    <XAxis dataKey="name" stroke="#666" fontSize={10} angle={-15} textAnchor="end" />
+                    <YAxis stroke="#666" fontSize={10} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      {vehicleChartData.map((entry, index) => (
+                        <Cell key={`veh-bar-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         </div>
@@ -974,20 +990,26 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8 h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={violationsTel.violations_breakdown} margin={{ top: 10, right: 10, left: -10, bottom: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="category" stroke="#666" fontSize={10} />
-                  <YAxis stroke="#666" fontSize={10} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
-                  />
-                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
-                  <Bar dataKey="challans" fill="#FF3B30" name="Challans Issued" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="fines" fill="#FF9500" name="Fine Value (₹)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="lg:col-span-8 h-64 w-full flex items-center justify-center">
+              {violationsTel.violations_breakdown.length === 0 ? (
+                <div className="text-center text-slate-500 text-xs font-mono">
+                  No traffic violations or e-challans recorded in this survey.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={violationsTel.violations_breakdown} margin={{ top: 10, right: 10, left: -10, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                    <XAxis dataKey="category" stroke="#666" fontSize={10} />
+                    <YAxis stroke="#666" fontSize={10} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#141414', borderColor: '#333', color: '#FFF', fontSize: '11px', fontFamily: 'monospace' }} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '6px' }} />
+                    <Bar dataKey="challans" fill="#FF3B30" name="Challans Issued" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="fines" fill="#FF9500" name="Fine Value (₹)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             <div className="lg:col-span-4 flex flex-col justify-between space-y-3">

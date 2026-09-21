@@ -91,12 +91,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
       color: CATEGORY_COLORS[String(cat || '').toLowerCase()] || '#2563EB'
     }));
 
-  const displayDamageData = damageDistributionData.length > 0 ? damageDistributionData : [
-    { name: 'POTHOLE', value: 5, color: '#FF3B30' },
-    { name: 'LONGITUDINAL CRACK', value: 8, color: '#FFD60A' },
-    { name: 'TRANSVERSE CRACK', value: 4, color: '#FF9500' },
-    { name: 'ALLIGATOR CRACK', value: 3, color: '#E056FD' }
-  ];
+  const displayDamageData = damageDistributionData;
 
   // 2. Severity Bar Chart Data
   const SEVERITY_COLORS: Record<string, string> = {
@@ -127,34 +122,28 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
     color: VEHICLE_COLORS[String(vClass || '').toLowerCase()] || '#2563EB'
   }));
 
-  const displayVehicleData = vehicleDistributionData.length > 0 ? vehicleDistributionData : [
-    { name: 'PASSENGER CARS', value: 18, color: '#2563EB' },
-    { name: 'HEAVY TRUCKS', value: 6, color: '#7C3AED' },
-    { name: 'BUSES & TRANSIT', value: 3, color: '#DB2777' },
-    { name: 'MOTORCYCLES & BIKES', value: 9, color: '#059669' },
-    { name: 'WRONG-SIDE VIOLATIONS', value: 1, color: '#EF4444' }
-  ];
+  const displayVehicleData = vehicleDistributionData;
 
   // 4. Vehicle Volume Bar Chart Data
   const vehicleVolumeData = [
     {
       category: 'PASSENGER',
-      count: displayVehicleData.find(d => d.name.includes('CAR') || d.name.includes('PASSENGER'))?.value || 18,
+      count: displayVehicleData.find(d => d.name.includes('CAR') || d.name.includes('PASSENGER'))?.value || 0,
       fill: '#2563EB'
     },
     {
       category: 'HEAVY FREIGHT',
-      count: displayVehicleData.find(d => d.name.includes('TRUCK') || d.name.includes('HEAVY'))?.value || 6,
+      count: displayVehicleData.find(d => d.name.includes('TRUCK') || d.name.includes('HEAVY'))?.value || 0,
       fill: '#7C3AED'
     },
     {
       category: 'PUBLIC TRANSIT',
-      count: displayVehicleData.find(d => d.name.includes('BUS'))?.value || 3,
+      count: displayVehicleData.find(d => d.name.includes('BUS'))?.value || 0,
       fill: '#DB2777'
     },
     {
       category: 'MICRO-MOBILITY',
-      count: displayVehicleData.find(d => d.name.includes('MOTORCYCLE') || d.name.includes('BIKE'))?.value || 9,
+      count: displayVehicleData.find(d => d.name.includes('MOTORCYCLE') || d.name.includes('BIKE'))?.value || 0,
       fill: '#059669'
     }
   ];
@@ -235,30 +224,36 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
             <span className="text-[10px] text-[#888]">Structural Defect Types</span>
           </div>
 
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={displayDamageData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={4}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  labelLine={false}
-                >
-                  {displayDamageData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1A1A1A', borderColor: '#333', color: '#FFF', fontSize: '11px' }} 
-                />
-                <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="h-64 w-full flex items-center justify-center">
+            {displayDamageData.length === 0 ? (
+              <div className="text-center text-slate-500 text-xs font-mono">
+                No road damage defects detected in selected survey dataset.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={displayDamageData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={4}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {displayDamageData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1A1A1A', borderColor: '#333', color: '#FFF', fontSize: '11px' }} 
+                  />
+                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -272,30 +267,36 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ dashboardData 
             <span className="text-[10px] text-[#2563EB]">Unified Vehicle Model</span>
           </div>
 
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={displayVehicleData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={80}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  labelLine={false}
-                >
-                  {displayVehicleData.map((entry, index) => (
-                    <Cell key={`veh-cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1A1A1A', borderColor: '#333', color: '#FFF', fontSize: '11px' }} 
-                />
-                <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="h-64 w-full flex items-center justify-center">
+            {displayVehicleData.length === 0 ? (
+              <div className="text-center text-slate-500 text-xs font-mono">
+                No vehicles detected in selected survey dataset.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={displayVehicleData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={80}
+                    paddingAngle={3}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {displayVehicleData.map((entry, index) => (
+                      <Cell key={`veh-cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1A1A1A', borderColor: '#333', color: '#FFF', fontSize: '11px' }} 
+                  />
+                  <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
