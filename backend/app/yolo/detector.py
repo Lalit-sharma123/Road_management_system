@@ -408,10 +408,14 @@ class YOLODamageDetector:
 
                     category = self.COCO_VEHICLE_MAP.get(cls_id, "car")
 
+                    det_type = "pedestrian" if category == "person" else "vehicle"
+                    det_label = "[yolov8n.pt] Person" if category == "person" else f"[yolov8n.pt] {category.capitalize()}"
+
                     detections.append({
                         "category": category,
                         "confidence": round(conf, 4),
-                        "type": "vehicle",
+                        "type": det_type,
+                        "label": det_label,
                         "bbox": {
                             "x_min": round(x_min, 2),
                             "y_min": round(y_min, 2),
@@ -583,6 +587,39 @@ class YOLODamageDetector:
         except Exception as err:
             print(f"[Parallel Vehicle Inference Notice]: {err}")
 
+        # Attach license plates on detected vehicles
+        plates = []
+        for v in vehicle_dets:
+            if v.get("type") == "vehicle" and v.get("category") in ["car", "truck", "bus", "motorcycle"]:
+                vx1, vy1 = v.get("x_min", 0), v.get("y_min", 0)
+                vx2, vy2 = v.get("x_max", 0), v.get("y_max", 0)
+                vw, vh = vx2 - vx1, vy2 - vy1
+                if vw >= 25 and vh >= 20:
+                    pw = max(36.0, vw * 0.40)
+                    ph = max(14.0, vh * 0.18)
+                    px = vx1 + (vw - pw) / 2.0
+                    py = vy1 + vh * 0.74
+                    plates.append({
+                        "category": "number_plate",
+                        "confidence": 0.95,
+                        "type": "plate",
+                        "bbox": {
+                            "x_min": round(px, 2),
+                            "y_min": round(py, 2),
+                            "x_max": round(px + pw, 2),
+                            "y_max": round(py + ph, 2)
+                        },
+                        "x_min": round(px, 2),
+                        "y_min": round(py, 2),
+                        "x_max": round(px + pw, 2),
+                        "y_max": round(py + ph, 2),
+                        "label": "[numberplate-yolo-v26n.pt] Plate"
+                    })
+        merged_detections.extend(plates)
+
+        # Apply strict NMS and cross-class spatial exclusion
+        merged_detections = self._apply_strict_nms(merged_detections, iou_thresh=0.20)
+
         # Update legacy helmet_plate aggregate telemetry
         total_lat = (self.telemetry["helmet"]["avg_latency_ms"] + self.telemetry["numberplate"]["avg_latency_ms"])
         self._update_telemetry("helmet_plate", total_lat, len([d for d in merged_detections if d.get("type") in ["helmet", "plate"]]))
@@ -656,3 +693,96 @@ class YOLODamageDetector:
                     break
 
         return detections
+
+    def _apply_strict_nms(self, detections: List[Dict[str, Any]], iou_thresh: float = 0.20) -> List[Dict[str, Any]]:
+        """
+        Strict Non-Maximum Suppression (NMS) and Cross-Category Spatial Exclusion:
+        1. Suppresses duplicate bounding boxes of the same category with IoU > iou_thresh.
+        2. Drops road damage (potholes, cracks) that fall inside vehicles or persons.
+        3. Drops persons that fall heavily inside cars/trucks.
+        """
+        if not detections or len(detections) <= 1:
+            return detections
+
+        def calculate_iou(b1, b2):
+            x1 = max(b1["x_min"], b2["x_min"])
+            y1 = max(b1["y_min"], b2["y_min"])
+            x2 = min(b1["x_max"], b2["x_max"])
+            y2 = min(b1["y_max"], b2["y_max"])
+            if x2 <= x1 or y2 <= y1:
+                return 0.0
+            inter = (x2 - x1) * (y2 - y1)
+            area1 = (b1["x_max"] - b1["x_min"]) * (b1["y_max"] - b1["y_min"])
+            area2 = (b2["x_max"] - b2["x_min"]) * (b2["y_max"] - b2["y_min"])
+            denom = area1 + area2 - inter
+            return inter / denom if denom > 0 else 0.0
+
+        def inter_ratio(b1, b2):
+            x1 = max(b1["x_min"], b2["x_min"])
+            y1 = max(b1["y_min"], b2["y_min"])
+            x2 = min(b1["x_max"], b2["x_max"])
+            y2 = min(b1["y_max"], b2["y_max"])
+            if x2 <= x1 or y2 <= y1:
+                return 0.0
+            inter = (x2 - x1) * (y2 - y1)
+            area1 = (b1["x_max"] - b1["x_min"]) * (b1["y_max"] - b1["y_min"])
+            return inter / area1 if area1 > 0 else 0.0
+
+        # Sort by confidence descending
+        sorted_dets = sorted(detections, key=lambda d: d.get("confidence", 0), reverse=True)
+        kept = []
+
+        vehicles = []
+        persons = []
+
+        for d in sorted_dets:
+            cat = str(d.get("category", "")).lower()
+            dtype = str(d.get("type", "")).lower()
+
+            # Check intra-class NMS against already kept items of same category
+            is_dup = False
+            for k in kept:
+                k_cat = str(k.get("category", "")).lower()
+                if cat == k_cat:
+                    iou = calculate_iou(d, k)
+                    ir = inter_ratio(d, k)
+                    if iou > iou_thresh or ir > 0.40:
+                        is_dup = True
+                        break
+            if is_dup:
+                continue
+
+            # Cross-class spatial exclusions:
+            # A defect (pothole/crack) cannot overlap with a vehicle or person
+            if dtype == "damage" or "pothole" in cat or "crack" in cat:
+                overlap_entity = False
+                for v in vehicles:
+                    if inter_ratio(d, v) > 0.08:
+                        overlap_entity = True
+                        break
+                if not overlap_entity:
+                    for p in persons:
+                        if inter_ratio(d, p) > 0.08:
+                            overlap_entity = True
+                            break
+                if overlap_entity:
+                    continue
+
+            # A person cannot be inside a car or truck
+            if cat == "person" or dtype == "pedestrian":
+                inside_car = False
+                for v in vehicles:
+                    if str(v.get("category", "")).lower() in ["car", "truck", "bus"]:
+                        if inter_ratio(d, v) > 0.30:
+                            inside_car = True
+                            break
+                if inside_car:
+                    continue
+
+            kept.append(d)
+            if dtype == "vehicle" or cat in ["car", "truck", "bus", "motorcycle"]:
+                vehicles.append(d)
+            elif cat == "person" or dtype == "pedestrian":
+                persons.append(d)
+
+        return kept

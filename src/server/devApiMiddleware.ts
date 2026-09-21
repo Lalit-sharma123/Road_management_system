@@ -13,16 +13,35 @@ async function checkBackendLive(): Promise<{ online: boolean; port: number; targ
         port: parsed.port || 8000,
         path: '/',
         method: 'GET',
-        timeout: 800,
+        timeout: 1000,
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
+          if (res.statusCode !== 200) {
+            resolve({
+              online: false,
+              port: Number(parsed.port) || 8000,
+              target: targetUrl,
+              message: `Backend returned HTTP ${res.statusCode} (Backend server not responding or stopped)`
+            });
+            return;
+          }
           try {
             const data = JSON.parse(body);
-            resolve({ online: true, port: Number(parsed.port) || 8000, target: targetUrl, message: 'FastAPI Backend is ONLINE', data });
+            // Verify this is genuinely our FastAPI application by checking for FastAPI properties
+            if (data && !data.error && (data.status === 'online' || data.docs === '/docs' || data.system || data.version)) {
+              resolve({ online: true, port: Number(parsed.port) || 8000, target: targetUrl, message: 'FastAPI Backend is ONLINE', data });
+            } else {
+              resolve({
+                online: false,
+                port: Number(parsed.port) || 8000,
+                target: targetUrl,
+                message: 'Service on port 8000 is not the Road Damage Detection FastAPI server'
+              });
+            }
           } catch {
-            resolve({ online: true, port: Number(parsed.port) || 8000, target: targetUrl, message: 'Backend is ONLINE' });
+            resolve({ online: false, port: Number(parsed.port) || 8000, target: targetUrl, message: 'Backend response on port 8000 was not valid FastAPI JSON' });
           }
         });
       });
