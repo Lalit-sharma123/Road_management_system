@@ -19,6 +19,7 @@ if (typeof globalThis.localStorage === 'undefined') {
 import { violationService } from '../src/services/violationService';
 import { videoService } from '../src/services/videoService';
 import { authService } from '../src/services/authService';
+import { stolenVehicleService } from '../src/services/stolenVehicleService';
 import { sampleVideos } from '../src/data/mockData';
 
 let totalTests = 0;
@@ -154,7 +155,56 @@ async function runE2ETests() {
   assert(typeof videoService.connectWebSocket === 'function', 'videoService.connectWebSocket is defined');
 
   // ----------------------------------------------------
-  // TEST SUITE 4: Summary Results
+  // TEST SUITE 4: Stolen Vehicle Registry & 1-Time Alert Deduplication
+  // ----------------------------------------------------
+  console.log('\n📋 [Suite 4: Stolen Vehicle Registry & Deduplication]');
+  
+  // Clear any existing alerted cache
+  stolenVehicleService.clearSessionAlertedPlates();
+
+  // Test 4.1: Register a new stolen vehicle
+  const newStolen = await stolenVehicleService.createStolenVehicle({
+    vehicle_number: 'DL9CAA1234',
+    owner_name: 'Test Vehicle Owner',
+    vehicle_type: 'CAR',
+    fir_number: 'FIR-2026-TEST-99',
+    police_station: 'Central Station',
+    reason: 'Reported Stolen Test Case',
+    priority: 'HIGH',
+    status: 'ACTIVE'
+  });
+
+  assert(!!newStolen.id, 'Stolen vehicle registered with ID');
+  assert(newStolen.vehicle_number === 'DL9CAA1234', 'Vehicle number preserved');
+
+  // Test 4.2: Detection match in video
+  const matched = stolenVehicleService.isPlateStolen('DL9CAA1234');
+  assert(matched !== null && matched.id === newStolen.id, 'Stolen vehicle matched by exact plate');
+
+  const matchedFuzzy = stolenVehicleService.isPlateStolen('DL 9C AA 1234');
+  assert(matchedFuzzy !== null && matchedFuzzy.id === newStolen.id, 'Stolen vehicle matched despite spacing/hyphen differences');
+
+  // Test 4.3: Initial alert status (should NOT be alerted yet)
+  const initialAlertCheck = stolenVehicleService.hasPlateBeenAlerted('DL9CAA1234', newStolen.id);
+  assert(initialAlertCheck === false, 'First-time detection is NOT flagged as alerted yet');
+
+  // Test 4.4: Mark as alerted (First-time alert fires)
+  stolenVehicleService.markPlateAlerted('DL9CAA1234', newStolen.id);
+
+  // Test 4.5: Subsequent detections in video (MUST NOT fire again)
+  const secondAlertCheck = stolenVehicleService.hasPlateBeenAlerted('DL9CAA1234', newStolen.id);
+  assert(secondAlertCheck === true, 'Second detection is recognized as already alerted (suppressed)');
+
+  // Test 4.6: Even with spaced/noisy OCR text, deduplication holds
+  const fuzzyAlertCheck = stolenVehicleService.hasPlateBeenAlerted('DL 9C AA 1234');
+  assert(fuzzyAlertCheck === true, 'Fuzzy/spaced OCR detection correctly blocked by single-time deduplication');
+
+  // Test 4.7: Clean up test vehicle
+  const deleteStolenRes = await stolenVehicleService.deleteStolenVehicle(newStolen.id);
+  assert(deleteStolenRes.status === 'success', 'Test stolen vehicle removed cleanly from registry');
+
+  // ----------------------------------------------------
+  // TEST SUITE 5: Summary Results
   // ----------------------------------------------------
   console.log('\n======================================================');
   console.log(`📊 TEST EXECUTION SUMMARY:`);

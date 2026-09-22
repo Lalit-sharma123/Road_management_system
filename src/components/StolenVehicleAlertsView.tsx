@@ -19,11 +19,16 @@ import {
   X,
   Volume2,
   ArrowUpRight,
-  Sparkles
+  Sparkles,
+  Map as MapIcon,
+  Columns,
+  LayoutList,
+  Navigation
 } from 'lucide-react';
 import { StolenVehicleAlert, StolenVehicleStats } from '../types/stolenVehicle';
 import { stolenVehicleService } from '../services/stolenVehicleService';
 import { stolenAlertAudio } from '../utils/stolenSoundAlert';
+import { StolenVehicleAlertMap } from './StolenVehicleAlertMap';
 
 interface StolenVehicleAlertsViewProps {
   onOpenRegistry?: () => void;
@@ -36,6 +41,8 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [simulating, setSimulating] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'split' | 'map' | 'list'>('split');
+  const [selectedMapAlertId, setSelectedMapAlertId] = useState<string | null>(null);
 
   // Detail / Resolve Modal
   const [selectedAlert, setSelectedAlert] = useState<StolenVehicleAlert | null>(null);
@@ -316,77 +323,236 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
         </div>
       </div>
 
-      {/* Search & Filter Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-900/60 border border-slate-800/80 p-4 rounded-xl">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            fetchAlertsAndStats();
-          }}
-          className="md:col-span-6 relative"
-        >
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search plate, FIR, camera name, location..."
-            className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500"
-          />
-        </form>
+      {/* Search, Filter & View Mode Bar */}
+      <div className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-xl space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* View Mode Switcher Pills */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => setViewMode('split')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                viewMode === 'split'
+                  ? 'bg-red-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>Split (Map + Feed)</span>
+            </button>
 
-        <div className="md:col-span-6 flex flex-wrap items-center gap-2 justify-end">
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
-            <Filter className="w-3.5 h-3.5" /> Status:
+            <button
+              type="button"
+              onClick={() => setViewMode('map')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                viewMode === 'map'
+                  ? 'bg-red-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              <span>Alerts Map</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                viewMode === 'list'
+                  ? 'bg-red-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LayoutList className="w-3.5 h-3.5" />
+              <span>Feed List</span>
+            </button>
           </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-red-500"
-          >
-            <option value="ALL">All Alerts</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INVESTIGATING">Investigating</option>
-            <option value="INTERCEPTED">Intercepted</option>
-            <option value="RESOLVED">Resolved</option>
-            <option value="FALSE_POSITIVE">False Positive</option>
-          </select>
+          {/* Quick status count pill */}
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 font-medium">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+              {alerts.filter(a => a.status === 'ACTIVE').length} Active Hotlist Targets
+            </span>
+            <span>•</span>
+            <span className="text-slate-500">
+              {alerts.length} Total Monitored Geotags
+            </span>
+          </div>
+        </div>
 
-          <button
-            type="button"
-            onClick={fetchAlertsAndStats}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition"
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1 border-t border-slate-800/60">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              fetchAlertsAndStats();
+            }}
+            className="md:col-span-6 relative"
           >
-            Refresh
-          </button>
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search plate, FIR, camera name, location..."
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500"
+            />
+          </form>
+
+          <div className="md:col-span-6 flex flex-wrap items-center gap-2 justify-end">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+              <Filter className="w-3.5 h-3.5" /> Status:
+            </div>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-red-500"
+            >
+              <option value="ALL">All Alerts</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INVESTIGATING">Investigating</option>
+              <option value="INTERCEPTED">Intercepted</option>
+              <option value="RESOLVED">Resolved</option>
+              <option value="FALSE_POSITIVE">False Positive</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={fetchAlertsAndStats}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Alerts Grid / Cards */}
-      <div className="space-y-3">
-        {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
-            <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
-            <p className="text-sm">Retrieving alert intelligence records...</p>
+      {/* Main Alerts Content according to View Mode */}
+      {loading ? (
+        <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
+          <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
+          <p className="text-sm">Retrieving alert intelligence records...</p>
+        </div>
+      ) : alerts.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-3">
+          <ShieldAlert className="w-12 h-12 text-slate-600 mx-auto" />
+          <h3 className="text-base font-bold text-slate-200">No Stolen Vehicle Alerts Detected</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            The real-time ANPR engine is actively monitoring live video and camera feeds against the database.
+          </p>
+          <button
+            type="button"
+            onClick={handleSimulate}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl shadow inline-flex items-center gap-1.5 transition mt-2"
+          >
+            <Zap className="w-4 h-4" /> Trigger Test Alert
+          </button>
+        </div>
+      ) : viewMode === 'map' ? (
+        /* Full Screen Stolen Vehicle Alert Map */
+        <div className="space-y-4">
+          <StolenVehicleAlertMap
+            alerts={alerts}
+            selectedAlertId={selectedMapAlertId}
+            onSelectAlert={(alert) => {
+              setSelectedMapAlertId(alert.id);
+            }}
+            onResolveAlert={(alert) => handleOpenResolveModal(alert)}
+            onOpenRegistry={onOpenRegistry}
+            height="640px"
+          />
+        </div>
+      ) : viewMode === 'split' ? (
+        /* Split View: Map on Left (7 cols), Interactive Feed on Right (5 cols) */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-7">
+            <StolenVehicleAlertMap
+              alerts={alerts}
+              selectedAlertId={selectedMapAlertId}
+              onSelectAlert={(alert) => {
+                setSelectedMapAlertId(alert.id);
+              }}
+              onResolveAlert={(alert) => handleOpenResolveModal(alert)}
+              onOpenRegistry={onOpenRegistry}
+              height="600px"
+            />
           </div>
-        ) : alerts.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-3">
-            <ShieldAlert className="w-12 h-12 text-slate-600 mx-auto" />
-            <h3 className="text-base font-bold text-slate-200">No Stolen Vehicle Alerts Detected</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              The real-time ANPR engine is actively monitoring live video and camera feeds against the database.
-            </p>
-            <button
-              type="button"
-              onClick={handleSimulate}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl shadow inline-flex items-center gap-1.5 transition mt-2"
-            >
-              <Zap className="w-4 h-4" /> Trigger Test Alert
-            </button>
+
+          <div className="lg:col-span-5 space-y-3">
+            <div className="flex items-center justify-between px-1 text-xs">
+              <span className="font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <AlertOctagon className="w-4 h-4 text-red-500" />
+                Live Alert Feed ({alerts.length})
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Click alert to pan on map
+              </span>
+            </div>
+
+            <div className="max-h-[560px] overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {alerts.map((alert) => {
+                const isSelected = selectedMapAlertId === alert.id;
+                return (
+                  <div
+                    key={alert.id}
+                    onClick={() => setSelectedMapAlertId(alert.id)}
+                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-slate-900 border-red-500 ring-2 ring-red-500/40 shadow-xl'
+                        : alert.status === 'ACTIVE'
+                        ? 'bg-slate-900/90 border-red-500/50 shadow-md shadow-red-950/20 hover:border-red-400'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Target Plate
+                        </span>
+                        <div className="text-lg font-mono font-black tracking-wider text-emerald-400 bg-slate-950 px-2.5 py-0.5 rounded-lg border border-slate-800 mt-0.5 inline-block">
+                          {alert.vehicle_number}
+                        </div>
+                      </div>
+                      <div>{getStatusBadge(alert.status)}</div>
+                    </div>
+
+                    <div className="mt-2 space-y-1 text-xs text-slate-400">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300 font-medium">{alert.owner_name || 'Owner on File'}</span>
+                        <span className="text-amber-300 font-mono text-[11px]">{alert.fir_number || 'FIR Recorded'}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-slate-400 truncate">
+                        <Camera className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+                        <span className="truncate">{alert.camera_name || 'ANPR Camera'}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-800/60">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          {new Date(alert.last_detected_at || alert.timestamp).toLocaleTimeString()}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenResolveModal(alert);
+                          }}
+                          className="text-[11px] text-red-400 hover:text-red-300 font-semibold underline flex items-center gap-1"
+                        >
+                          <Eye className="w-3 h-3" /> Investigate & Intercept
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        ) : (
-          alerts.map((alert) => (
+        </div>
+      ) : (
+        /* Full Width List Feed */
+        <div className="space-y-3">
+          {alerts.map((alert) => (
             <div
               key={alert.id}
               className={`p-5 rounded-2xl border transition-all ${
@@ -476,9 +642,9 @@ export const StolenVehicleAlertsView: React.FC<StolenVehicleAlertsViewProps> = (
                 </div>
               )}
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Resolve / Investigate Modal */}
       <AnimatePresence>

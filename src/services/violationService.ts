@@ -83,26 +83,37 @@ const INITIAL_VIOLATIONS: TrafficViolation[] = [
   }
 ];
 
+let inMemoryFallbackViolations: TrafficViolation[] | null = null;
+
 function getStoredViolations(): TrafficViolation[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_VIOLATIONS));
-      return INITIAL_VIOLATIONS;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_VIOLATIONS));
+        return INITIAL_VIOLATIONS;
+      }
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_VIOLATIONS;
     }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_VIOLATIONS;
   } catch {
-    return INITIAL_VIOLATIONS;
+    // fall through
   }
+  if (!inMemoryFallbackViolations) {
+    inMemoryFallbackViolations = [...INITIAL_VIOLATIONS];
+  }
+  return inMemoryFallbackViolations;
 }
 
 function saveStoredViolations(list: TrafficViolation[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
   } catch (err) {
     console.warn('Failed to persist violations to localStorage:', err);
   }
+  inMemoryFallbackViolations = [...list];
 }
 
 function calculateStats(items: TrafficViolation[]): ViolationStats {
@@ -270,7 +281,11 @@ export const violationService = {
     saveStoredViolations([newViolation, ...items]);
 
     try {
-      await apiClient.post('/violations/manual', data);
+      await apiClient.post('/violations/manual', {
+        ...data,
+        id: newId,
+        challan_number: newChallanNumber
+      });
     } catch (netErr) {
       console.info('Backend unavailable for manual citation sync; saved locally:', netErr);
     }

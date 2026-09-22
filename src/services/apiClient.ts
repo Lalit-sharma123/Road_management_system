@@ -3,8 +3,9 @@ import axios from 'axios';
 const envApiUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || 
   (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL;
 
+const defaultBaseUrl = typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:3000/api/v1';
 // Use configured environment URL or relative /api/v1 for Vite proxy & reverse proxy compatibility
-const API_URL = envApiUrl || '/api/v1';
+const API_URL = envApiUrl || defaultBaseUrl;
 
 export const apiClient = axios.create({
   baseURL: API_URL,

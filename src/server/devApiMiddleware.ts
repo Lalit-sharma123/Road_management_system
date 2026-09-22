@@ -233,6 +233,194 @@ const memoryComplaints: StoredComplaint[] = [
   }
 ];
 
+const devMockViolations: any[] = [
+  {
+    id: 'v1',
+    challan_number: 'ECH-2026-892401',
+    violation_type: 'NO_HELMET',
+    license_plate_number: 'HR26DQ5519',
+    confidence: 0.96,
+    rider_confidence: 0.94,
+    fine_amount: 1000.0,
+    fine_status: 'ISSUED',
+    frame_number: 42,
+    timestamp_seconds: 2.8,
+    vehicle_type: 'MOTORCYCLE',
+    latitude: 28.4595,
+    longitude: 77.0266,
+    location_name: 'NH-48 Sector 14 Link A',
+    notes: 'Rider detected without helmet on Honda CB Shine. ANPR verified via numberplate-yolo-v26n.pt.',
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    created_at: new Date(Date.now() - 45 * 60000).toISOString()
+  },
+  {
+    id: 'v2',
+    challan_number: 'ECH-2026-892402',
+    violation_type: 'NO_HELMET',
+    license_plate_number: 'MH12DE1432',
+    confidence: 0.93,
+    rider_confidence: 0.91,
+    fine_amount: 1000.0,
+    fine_status: 'PENDING',
+    frame_number: 88,
+    timestamp_seconds: 5.9,
+    vehicle_type: 'SCOOTER',
+    latitude: 28.4612,
+    longitude: 77.0285,
+    location_name: 'NH-48 Sector 14 Link B',
+    notes: 'Two-wheeler rider without headgear. Captured via CCTV.',
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    created_at: new Date(Date.now() - 135 * 60000).toISOString()
+  },
+  {
+    id: 'v3',
+    challan_number: 'ECH-2026-892403',
+    violation_type: 'NO_HELMET',
+    license_plate_number: 'KA05MK9821',
+    confidence: 0.95,
+    rider_confidence: 0.96,
+    fine_amount: 1000.0,
+    fine_status: 'PAID',
+    frame_number: 135,
+    timestamp_seconds: 9.0,
+    vehicle_type: 'MOTORCYCLE',
+    latitude: 28.4720,
+    longitude: 77.0515,
+    location_name: 'NH-48 IFFCO Chowk Flyover',
+    notes: 'Paid online via citizen portal payment gateway.',
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    created_at: new Date(Date.now() - 330 * 60000).toISOString()
+  },
+  {
+    id: 'v4',
+    challan_number: 'ECH-2026-892404',
+    violation_type: 'NO_HELMET',
+    license_plate_number: 'HR26DQ5519',
+    confidence: 0.94,
+    rider_confidence: 0.89,
+    fine_amount: 1000.0,
+    fine_status: 'ISSUED',
+    frame_number: 190,
+    timestamp_seconds: 12.7,
+    vehicle_type: 'MOTORCYCLE',
+    latitude: 28.4900,
+    longitude: 77.0880,
+    location_name: 'NH-48 Cyber City Interchange',
+    notes: 'Automatic citation dispatched via SMS/Vahan registry notification.',
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    created_at: new Date(Date.now() - 490 * 60000).toISOString()
+  }
+];
+
+const devMockStolenVehicles: any[] = [
+  {
+    id: 'sv-001',
+    vehicle_number: 'HR26DQ5519',
+    fir_number: 'FIR-2026-HR-8821',
+    owner_name: 'Vikram Singh',
+    owner_contact: '+91 98112 34567',
+    vehicle_type: 'MOTORCYCLE',
+    brand_model: 'Honda CB Shine 125',
+    color: 'Black/Red',
+    registration_date: '2022-04-15',
+    theft_date: '2026-07-28',
+    theft_location: 'Sector 29 Market Parking, Gurugram',
+    police_station: 'DLF Phase 2 Police Station, Gurugram',
+    investigating_officer: 'SI Rajesh Kumar',
+    status: 'ACTIVE',
+    priority: 'CRITICAL',
+    created_at: '2026-07-28T09:00:00Z',
+    updated_at: '2026-07-28T09:00:00Z'
+  },
+  {
+    id: 'sv-002',
+    vehicle_number: 'DL01AB1234',
+    fir_number: 'FIR-2026-DEL-1092',
+    owner_name: 'Rajesh Sharma',
+    owner_contact: '+91 98765 43210',
+    vehicle_type: 'SEDAN',
+    brand_model: 'Maruti Suzuki Dzire',
+    color: 'White',
+    registration_date: '2021-08-20',
+    theft_date: '2026-07-27',
+    theft_location: 'Hauz Khas Market, New Delhi',
+    police_station: 'Hauz Khas Police Station, Delhi',
+    investigating_officer: 'Inspector R. K. Nair',
+    status: 'INVESTIGATING',
+    priority: 'HIGH',
+    created_at: '2026-07-27T14:30:00Z',
+    updated_at: '2026-07-27T14:30:00Z'
+  },
+  {
+    id: 'sv-003',
+    vehicle_number: 'MH12DE1432',
+    fir_number: 'FIR-2026-MH-4401',
+    owner_name: 'Amitabh Deshmukh',
+    owner_contact: '+91 99220 12345',
+    vehicle_type: 'SCOOTER',
+    brand_model: 'TVS Jupiter 110',
+    color: 'Grey',
+    registration_date: '2020-01-10',
+    theft_date: '2026-07-25',
+    theft_location: 'FC Road, Pune',
+    police_station: 'Shivajinagar Police Station, Pune',
+    investigating_officer: 'PSI Patil',
+    status: 'RECOVERED',
+    priority: 'MEDIUM',
+    created_at: '2026-07-25T11:00:00Z',
+    updated_at: '2026-07-28T16:00:00Z'
+  }
+];
+
+const devMockStolenAlerts: any[] = [
+  {
+    id: 'sta-001',
+    stolen_vehicle_id: 'sv-001',
+    vehicle_number: 'HR26DQ5519',
+    owner_name: 'Vikram Singh',
+    fir_number: 'FIR-2026-HR-8821',
+    camera_id: 'cam-001',
+    camera_name: 'NH-48 Sirhaul Toll Plaza - Gateway Cam 01',
+    camera_location: 'NH-48 Sirhaul Gateway, Delhi-Gurugram Border',
+    latitude: 28.5080,
+    longitude: 77.1020,
+    timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'HR26DQ5519',
+    confidence: 0.98,
+    status: 'ACTIVE',
+    remarks: 'Real-time ANPR match by numberplate-yolo-v26n.pt. Highway Intercept Patrol Unit 7 dispatched.',
+    created_at: new Date(Date.now() - 12 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 12 * 60000).toISOString()
+  },
+  {
+    id: 'sta-002',
+    stolen_vehicle_id: 'sv-002',
+    vehicle_number: 'DL01AB1234',
+    owner_name: 'Rajesh Sharma',
+    fir_number: 'FIR-2026-DEL-1092',
+    camera_id: 'cam-002',
+    camera_name: 'NH-48 Cyber City Gateway - ANPR Cam 02',
+    camera_location: 'NH-48 Cyber City Interchange, Gurugram',
+    latitude: 28.4900,
+    longitude: 77.0880,
+    timestamp: new Date(Date.now() - 75 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'DL01AB1234',
+    confidence: 0.96,
+    status: 'INVESTIGATING',
+    remarks: 'Traffic police squad deployed at Shankar Chowk.',
+    created_at: new Date(Date.now() - 75 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 75 * 60000).toISOString()
+  }
+];
+
 function parseJsonBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let body = '';
@@ -447,88 +635,7 @@ export function devApiPlugin(): Plugin {
           const search = (urlParams.get('search') || '').toLowerCase();
           const vtype = urlParams.get('violation_type');
 
-          let items = [
-            {
-              id: 'v1',
-              challan_number: 'ECH-2026-892401',
-              violation_type: 'NO_HELMET',
-              license_plate_number: 'HR26DQ5519',
-              confidence: 0.96,
-              rider_confidence: 0.94,
-              fine_amount: 1000.0,
-              fine_status: 'ISSUED',
-              frame_number: 42,
-              timestamp_seconds: 2.8,
-              vehicle_type: 'MOTORCYCLE',
-              latitude: 28.4595,
-              longitude: 77.0266,
-              location_name: 'NH-48 Sector 14 Link A',
-              notes: 'Rider detected without helmet on Honda CB Shine. ANPR verified via numberplate-yolo-v26n.pt.',
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              created_at: new Date(Date.now() - 45 * 60000).toISOString()
-            },
-            {
-              id: 'v2',
-              challan_number: 'ECH-2026-892402',
-              violation_type: 'NO_HELMET',
-              license_plate_number: 'MH12DE1432',
-              confidence: 0.93,
-              rider_confidence: 0.91,
-              fine_amount: 1000.0,
-              fine_status: 'PENDING',
-              frame_number: 88,
-              timestamp_seconds: 5.9,
-              vehicle_type: 'SCOOTER',
-              latitude: 28.4612,
-              longitude: 77.0285,
-              location_name: 'NH-48 Sector 14 Link B',
-              notes: 'Two-wheeler rider without headgear. Captured via CCTV.',
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              created_at: new Date(Date.now() - 135 * 60000).toISOString()
-            },
-            {
-              id: 'v3',
-              challan_number: 'ECH-2026-892403',
-              violation_type: 'NO_HELMET',
-              license_plate_number: 'KA05MK9821',
-              confidence: 0.95,
-              rider_confidence: 0.96,
-              fine_amount: 1000.0,
-              fine_status: 'PAID',
-              frame_number: 135,
-              timestamp_seconds: 9.0,
-              vehicle_type: 'MOTORCYCLE',
-              latitude: 28.4720,
-              longitude: 77.0515,
-              location_name: 'NH-48 IFFCO Chowk Flyover',
-              notes: 'Paid online via citizen portal payment gateway.',
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              created_at: new Date(Date.now() - 330 * 60000).toISOString()
-            },
-            {
-              id: 'v4',
-              challan_number: 'ECH-2026-892404',
-              violation_type: 'NO_HELMET',
-              license_plate_number: 'HR26DQ5519',
-              confidence: 0.94,
-              rider_confidence: 0.89,
-              fine_amount: 1000.0,
-              fine_status: 'ISSUED',
-              frame_number: 190,
-              timestamp_seconds: 12.7,
-              vehicle_type: 'MOTORCYCLE',
-              latitude: 28.4900,
-              longitude: 77.0880,
-              location_name: 'NH-48 Cyber City Interchange',
-              notes: 'Automatic citation dispatched via SMS/Vahan registry notification.',
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              created_at: new Date(Date.now() - 490 * 60000).toISOString()
-            }
-          ];
+          let items = [...devMockViolations];
 
           if (status && status !== 'ALL') {
             items = items.filter(v => v.fine_status === status);
@@ -540,7 +647,7 @@ export function devApiPlugin(): Plugin {
             items = items.filter(v => 
               v.license_plate_number.toLowerCase().includes(search) ||
               v.challan_number.toLowerCase().includes(search) ||
-              v.location_name.toLowerCase().includes(search)
+              (v.location_name && v.location_name.toLowerCase().includes(search))
             );
           }
 
@@ -548,137 +655,188 @@ export function devApiPlugin(): Plugin {
         }
 
         if (normalized === '/violations/stats' && method === 'GET') {
+          const totalViolations = devMockViolations.length;
+          const helmetCount = devMockViolations.filter(v => v.violation_type === 'NO_HELMET').length;
+          const totalFines = devMockViolations.reduce((sum, v) => sum + (v.fine_amount || 0), 0);
+          const paidFines = devMockViolations.filter(v => v.fine_status === 'PAID').reduce((sum, v) => sum + (v.fine_amount || 0), 0);
+          const unpaidFines = devMockViolations.filter(v => v.fine_status !== 'PAID').reduce((sum, v) => sum + (v.fine_amount || 0), 0);
+          const issuedCount = devMockViolations.filter(v => v.fine_status === 'ISSUED').length;
+          const pendingCount = devMockViolations.filter(v => v.fine_status === 'PENDING').length;
+          const paidCount = devMockViolations.filter(v => v.fine_status === 'PAID').length;
+          const uniquePlates = new Set(devMockViolations.map(v => v.license_plate_number)).size;
+
           return sendJson(res, 200, {
-            total_violations: 4,
-            helmet_violations_count: 4,
-            total_fines_amount: 4000.0,
-            paid_fines_amount: 1000.0,
-            unpaid_fines_amount: 3000.0,
-            issued_count: 2,
-            pending_count: 1,
-            paid_count: 1,
-            unique_plates_count: 3
+            total_violations: totalViolations,
+            helmet_violations_count: helmetCount,
+            total_fines_amount: totalFines,
+            paid_fines_amount: paidFines,
+            unpaid_fines_amount: unpaidFines,
+            issued_count: issuedCount,
+            pending_count: pendingCount,
+            paid_count: paidCount,
+            unique_plates_count: uniquePlates
           });
+        }
+
+        if (normalized === '/violations/manual' && method === 'POST') {
+          const body = await parseJsonBody(req);
+          const newId = body.id || `viol-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const challanNumber = body.challan_number || `ECH-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+          const newRecord = {
+            id: newId,
+            challan_number: challanNumber,
+            violation_type: body.violation_type || 'NO_HELMET',
+            license_plate_number: (body.license_plate_number || 'UNKNOWN').toUpperCase().trim(),
+            confidence: 0.95,
+            rider_confidence: 0.93,
+            fine_amount: body.fine_amount ?? 1000.0,
+            fine_status: 'ISSUED',
+            vehicle_type: body.vehicle_type || 'MOTORCYCLE',
+            latitude: body.latitude ?? 28.4595,
+            longitude: body.longitude ?? 77.0266,
+            location_name: body.location_name || 'NH-48 Sector 14 Link A',
+            notes: body.notes || 'Manually issued citation by officer.',
+            vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+            plate_crop_url: '/processed/violations/sample_plate.jpg',
+            created_at: new Date().toISOString()
+          };
+          devMockViolations.unshift(newRecord);
+          return sendJson(res, 200, { success: true, challan_number: challanNumber, id: newId });
+        }
+
+        // Violations by ID routes (GET, PATCH/PUT status, DELETE)
+        if (normalized.startsWith('/violations/') && !normalized.startsWith('/violations/stats') && !normalized.startsWith('/violations/manual')) {
+          const subPath = normalized.replace('/violations/', '');
+          const isStatusUpdate = subPath.endsWith('/status');
+          const violId = isStatusUpdate ? subPath.replace('/status', '') : subPath;
+
+          if (method === 'GET') {
+            const found = devMockViolations.find(v => v.id === violId);
+            if (found) return sendJson(res, 200, found);
+            return sendJson(res, 404, { error: 'Violation not found' });
+          }
+
+          if ((method === 'PUT' || method === 'PATCH') && isStatusUpdate) {
+            const body = await parseJsonBody(req);
+            const found = devMockViolations.find(v => v.id === violId);
+            if (found) {
+              found.fine_status = body.status || body.fine_status || found.fine_status;
+              return sendJson(res, 200, { success: true, message: 'Status updated' });
+            }
+            return sendJson(res, 404, { error: 'Violation not found' });
+          }
+
+          if (method === 'DELETE') {
+            const idx = devMockViolations.findIndex(v => v.id === violId);
+            if (idx !== -1) {
+              devMockViolations.splice(idx, 1);
+              return sendJson(res, 200, { success: true, message: 'Violation removed' });
+            }
+            return sendJson(res, 200, { success: true, message: 'Violation not found or already removed' });
+          }
         }
 
         // Stolen Vehicles Registry Endpoints
         if (normalized === '/stolen-vehicles' && method === 'GET') {
-          return sendJson(res, 200, [
-            {
-              id: 'sv-001',
-              vehicle_number: 'HR26DQ5519',
-              fir_number: 'FIR-2026-HR-8821',
-              owner_name: 'Vikram Singh',
-              owner_contact: '+91 98112 34567',
-              vehicle_type: 'MOTORCYCLE',
-              brand_model: 'Honda CB Shine 125',
-              color: 'Black/Red',
-              registration_date: '2022-04-15',
-              theft_date: '2026-07-28',
-              theft_location: 'Sector 29 Market Parking, Gurugram',
-              police_station: 'DLF Phase 2 Police Station, Gurugram',
-              investigating_officer: 'SI Rajesh Kumar',
-              status: 'ACTIVE',
-              priority: 'CRITICAL',
-              created_at: '2026-07-28T09:00:00Z',
-              updated_at: '2026-07-28T09:00:00Z'
-            },
-            {
-              id: 'sv-002',
-              vehicle_number: 'DL01AB1234',
-              fir_number: 'FIR-2026-DEL-1092',
-              owner_name: 'Rajesh Sharma',
-              owner_contact: '+91 98765 43210',
-              vehicle_type: 'SEDAN',
-              brand_model: 'Maruti Suzuki Dzire',
-              color: 'White',
-              registration_date: '2021-08-20',
-              theft_date: '2026-07-27',
-              theft_location: 'Hauz Khas Market, New Delhi',
-              police_station: 'Hauz Khas Police Station, Delhi',
-              investigating_officer: 'Inspector R. K. Nair',
-              status: 'INVESTIGATING',
-              priority: 'HIGH',
-              created_at: '2026-07-27T14:30:00Z',
-              updated_at: '2026-07-27T14:30:00Z'
-            },
-            {
-              id: 'sv-003',
-              vehicle_number: 'MH12DE1432',
-              fir_number: 'FIR-2026-MH-4401',
-              owner_name: 'Amitabh Deshmukh',
-              owner_contact: '+91 99220 12345',
-              vehicle_type: 'SCOOTER',
-              brand_model: 'TVS Jupiter 110',
-              color: 'Grey',
-              registration_date: '2020-01-10',
-              theft_date: '2026-07-25',
-              theft_location: 'FC Road, Pune',
-              police_station: 'Shivajinagar Police Station, Pune',
-              investigating_officer: 'PSI Patil',
-              status: 'RECOVERED',
-              priority: 'MEDIUM',
-              created_at: '2026-07-25T11:00:00Z',
-              updated_at: '2026-07-28T16:00:00Z'
-            }
-          ]);
+          return sendJson(res, 200, devMockStolenVehicles);
         }
 
-        if (normalized === '/stolen-vehicles/alerts' && method === 'GET') {
-          return sendJson(res, 200, [
-            {
-              id: 'sta-001',
-              stolen_vehicle_id: 'sv-001',
-              vehicle_number: 'HR26DQ5519',
-              owner_name: 'Vikram Singh',
-              fir_number: 'FIR-2026-HR-8821',
-              camera_id: 'cam-001',
-              camera_name: 'NH-48 Sirhaul Toll Plaza - Gateway Cam 01',
-              camera_location: 'NH-48 Sirhaul Gateway, Delhi-Gurugram Border',
-              latitude: 28.5080,
-              longitude: 77.1020,
-              timestamp: new Date(Date.now() - 12 * 60000).toISOString(),
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              ocr_text: 'HR26DQ5519',
-              confidence: 0.98,
-              status: 'ACTIVE',
-              remarks: 'Real-time ANPR match by numberplate-yolo-v26n.pt. Highway Intercept Patrol Unit 7 dispatched.',
-              created_at: new Date(Date.now() - 12 * 60000).toISOString(),
-              updated_at: new Date(Date.now() - 12 * 60000).toISOString()
-            },
-            {
-              id: 'sta-002',
-              stolen_vehicle_id: 'sv-002',
-              vehicle_number: 'DL01AB1234',
-              owner_name: 'Rajesh Sharma',
-              fir_number: 'FIR-2026-DEL-1092',
-              camera_id: 'cam-002',
-              camera_name: 'NH-48 Cyber City Gateway - ANPR Cam 02',
-              camera_location: 'NH-48 Cyber City Interchange, Gurugram',
-              latitude: 28.4900,
-              longitude: 77.0880,
-              timestamp: new Date(Date.now() - 75 * 60000).toISOString(),
-              vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
-              plate_crop_url: '/processed/violations/sample_plate.jpg',
-              ocr_text: 'DL01AB1234',
-              confidence: 0.96,
-              status: 'INVESTIGATING',
-              remarks: 'Traffic police squad deployed at Shankar Chowk.',
-              created_at: new Date(Date.now() - 75 * 60000).toISOString(),
-              updated_at: new Date(Date.now() - 75 * 60000).toISOString()
+        if (normalized === '/stolen-vehicles' && method === 'POST') {
+          const body = await parseJsonBody(req);
+          const newId = `sv-${Date.now().toString(36)}`;
+          const newVehicle = {
+            id: newId,
+            vehicle_number: (body.vehicle_number || '').toUpperCase().trim(),
+            fir_number: body.fir_number || `FIR-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+            owner_name: body.owner_name || 'Vehicle Owner',
+            owner_contact: body.owner_contact || '+91 98000 00000',
+            vehicle_type: body.vehicle_type || 'CAR',
+            brand_model: body.brand_model || 'Vehicle',
+            color: body.color || 'White',
+            registration_date: body.registration_date || '2022-01-01',
+            theft_date: body.theft_date || new Date().toISOString().slice(0, 10),
+            theft_location: body.theft_location || 'City Central',
+            police_station: body.police_station || 'Central Police Station',
+            investigating_officer: body.investigating_officer || 'Inspector In-Charge',
+            status: body.status || 'ACTIVE',
+            priority: body.priority || 'HIGH',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          devMockStolenVehicles.unshift(newVehicle);
+          return sendJson(res, 200, newVehicle);
+        }
+
+        if (normalized.startsWith('/stolen-vehicles/') && !normalized.startsWith('/stolen-vehicles/alerts') && !normalized.startsWith('/stolen-vehicles/stats')) {
+          const id = normalized.replace('/stolen-vehicles/', '');
+          if (method === 'GET') {
+            const found = devMockStolenVehicles.find(v => v.id === id);
+            if (found) return sendJson(res, 200, found);
+            return sendJson(res, 404, { error: 'Stolen vehicle not found' });
+          }
+          if (method === 'PUT') {
+            const body = await parseJsonBody(req);
+            const idx = devMockStolenVehicles.findIndex(v => v.id === id);
+            if (idx !== -1) {
+              devMockStolenVehicles[idx] = { ...devMockStolenVehicles[idx], ...body, updated_at: new Date().toISOString() };
+              return sendJson(res, 200, devMockStolenVehicles[idx]);
             }
-          ]);
+            return sendJson(res, 404, { error: 'Stolen vehicle not found' });
+          }
+          if (method === 'DELETE') {
+            const idx = devMockStolenVehicles.findIndex(v => v.id === id);
+            if (idx !== -1) {
+              devMockStolenVehicles.splice(idx, 1);
+            }
+            return sendJson(res, 200, { status: 'success', message: 'Vehicle deleted from registry' });
+          }
+        }
+
+        // Stolen Vehicles Alerts Endpoints
+        if ((normalized === '/stolen-vehicles/alerts' || normalized === '/stolen-alerts') && method === 'GET') {
+          return sendJson(res, 200, devMockStolenAlerts);
+        }
+
+        if ((normalized === '/stolen-vehicles/alerts' || normalized === '/stolen-alerts') && method === 'POST') {
+          const body = await parseJsonBody(req);
+          const newAlert = {
+            id: `sta-${Date.now().toString(36)}`,
+            stolen_vehicle_id: body.stolen_vehicle_id || 'sv-001',
+            vehicle_number: (body.vehicle_number || '').toUpperCase().trim(),
+            owner_name: body.owner_name || 'Vehicle Owner',
+            fir_number: body.fir_number || 'FIR-2026-UNKNOWN',
+            camera_id: body.camera_id || 'cam-001',
+            camera_name: body.camera_name || 'Highway ANPR Gateway',
+            camera_location: body.camera_location || 'NH-48 Corridor',
+            latitude: body.latitude || 28.4595,
+            longitude: body.longitude || 77.0266,
+            timestamp: new Date().toISOString(),
+            vehicle_snapshot_url: body.vehicle_snapshot_url || '/processed/violations/sample_vehicle.jpg',
+            plate_crop_url: body.plate_crop_url || '/processed/violations/sample_plate.jpg',
+            ocr_text: body.ocr_text || body.vehicle_number,
+            confidence: body.confidence || 0.95,
+            status: body.status || 'ACTIVE',
+            remarks: body.remarks || 'Stolen vehicle ANPR match.',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          devMockStolenAlerts.unshift(newAlert);
+          return sendJson(res, 200, newAlert);
         }
 
         if (normalized === '/stolen-vehicles/stats' && method === 'GET') {
+          const totalVehicles = devMockStolenVehicles.length;
+          const activeAlerts = devMockStolenAlerts.filter(a => a.status === 'ACTIVE').length;
+          const recovered = devMockStolenVehicles.filter(v => v.status === 'RECOVERED').length;
+          const critical = devMockStolenVehicles.filter(v => v.priority === 'CRITICAL').length;
+
           return sendJson(res, 200, {
-            total_stolen_vehicles: 3,
-            active_alerts: 1,
-            alerts_today: 2,
-            recovered_vehicles: 1,
-            total_alerts_all_time: 2,
-            critical_alerts_count: 1
+            total_stolen_vehicles: totalVehicles,
+            active_alerts: activeAlerts,
+            alerts_today: devMockStolenAlerts.length,
+            recovered_vehicles: recovered,
+            total_alerts_all_time: devMockStolenAlerts.length,
+            critical_alerts_count: critical
           });
         }
 

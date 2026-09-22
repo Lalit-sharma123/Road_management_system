@@ -25,9 +25,168 @@ try {
   }
 } catch (e) {}
 
-const INITIAL_STOLEN_VEHICLES: StolenVehicle[] = [];
+const INITIAL_STOLEN_VEHICLES: StolenVehicle[] = [
+  {
+    id: 'sv-001',
+    vehicle_number: 'HR26DQ5519',
+    fir_number: 'FIR-2026-HR-8821',
+    owner_name: 'Vikram Singh',
+    vehicle_type: 'MOTORCYCLE',
+    police_station: 'DLF Phase 2 Police Station, Gurugram',
+    date_reported: '2026-07-28',
+    reason: 'Theft reported from Sector 29 Market Parking. Brand: Honda CB Shine 125, Black/Red.',
+    priority: 'CRITICAL',
+    status: 'ACTIVE',
+    notes: 'Investigating Officer: SI Rajesh Kumar. Phone on file: +91 98112 34567.',
+    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 3 * 86400000).toISOString()
+  },
+  {
+    id: 'sv-002',
+    vehicle_number: 'DL01AB1234',
+    fir_number: 'FIR-2026-DEL-1092',
+    owner_name: 'Rajesh Sharma',
+    vehicle_type: 'CAR',
+    police_station: 'Hauz Khas Police Station, Delhi',
+    date_reported: '2026-07-27',
+    reason: 'Vehicle stolen outside market complex. Pearl White Maruti Dzire.',
+    priority: 'HIGH',
+    status: 'ACTIVE',
+    notes: 'Inspector R. K. Nair assigned. Contact: +91 98765 43210.',
+    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 5 * 86400000).toISOString()
+  },
+  {
+    id: 'sv-003',
+    vehicle_number: 'UP16AX9921',
+    fir_number: 'FIR-2026-UP-7104',
+    owner_name: 'Priya Verma',
+    vehicle_type: 'SUV',
+    police_station: 'Sector 20 Police Station, Gautam Buddha Nagar',
+    date_reported: '2026-07-29',
+    reason: 'Carjacked at Sector 18 Atta Market. Phantom Black Hyundai Creta SX.',
+    priority: 'CRITICAL',
+    status: 'ACTIVE',
+    notes: 'SI Ankit Tyagi assigned. Highway intercept alert issued.',
+    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86400000).toISOString()
+  },
+  {
+    id: 'sv-004',
+    vehicle_number: 'MH12DE1432',
+    fir_number: 'FIR-2026-MH-4401',
+    owner_name: 'Amitabh Deshmukh',
+    vehicle_type: 'SCOOTER',
+    police_station: 'Shivajinagar Police Station, Pune',
+    date_reported: '2026-07-25',
+    reason: 'Stolen from FC Road parking. TVS Jupiter 110 Grey.',
+    priority: 'MEDIUM',
+    status: 'RECOVERED',
+    notes: 'Recovered at Kherki Daula Toll Plaza by Highway Patrol 08.',
+    created_at: new Date(Date.now() - 7 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString()
+  }
+];
 
-const INITIAL_ALERTS: StolenVehicleAlert[] = [];
+const INITIAL_ALERTS: StolenVehicleAlert[] = [
+  {
+    id: 'sta-001',
+    stolen_vehicle_id: 'sv-001',
+    vehicle_number: 'HR26DQ5519',
+    owner_name: 'Vikram Singh',
+    fir_number: 'FIR-2026-HR-8821',
+    camera_id: 'cam-001',
+    camera_name: 'NH-48 Sirhaul Toll Plaza - Gateway Cam 01',
+    camera_location: 'NH-48 Sirhaul Gateway, Delhi-Gurugram Border',
+    latitude: 28.5080,
+    longitude: 77.1020,
+    timestamp: new Date(Date.now() - 14 * 60000).toISOString(),
+    first_detected_at: new Date(Date.now() - 25 * 60000).toISOString(),
+    last_detected_at: new Date(Date.now() - 14 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'HR26DQ5519',
+    confidence: 0.985,
+    status: 'ACTIVE',
+    detection_count: 3,
+    remarks: 'Real-time ANPR match by YOLO11x-ANPR. Intercept alert broadcast to PCR Unit 07.',
+    created_at: new Date(Date.now() - 25 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 14 * 60000).toISOString()
+  },
+  {
+    id: 'sta-002',
+    stolen_vehicle_id: 'sv-002',
+    vehicle_number: 'DL01AB1234',
+    owner_name: 'Rajesh Sharma',
+    fir_number: 'FIR-2026-DEL-1092',
+    camera_id: 'cam-002',
+    camera_name: 'NH-48 Cyber City Interchange - ANPR Cam 02',
+    camera_location: 'NH-48 Cyber City Interchange, Gurugram',
+    latitude: 28.4900,
+    longitude: 77.0880,
+    timestamp: new Date(Date.now() - 48 * 60000).toISOString(),
+    first_detected_at: new Date(Date.now() - 65 * 60000).toISOString(),
+    last_detected_at: new Date(Date.now() - 48 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'DL01AB1234',
+    confidence: 0.962,
+    status: 'INVESTIGATING',
+    detection_count: 2,
+    remarks: 'Traffic police intercept squad deployed at Shankar Chowk exit.',
+    created_at: new Date(Date.now() - 65 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 48 * 60000).toISOString()
+  },
+  {
+    id: 'sta-003',
+    stolen_vehicle_id: 'sv-003',
+    vehicle_number: 'UP16AX9921',
+    owner_name: 'Priya Verma',
+    fir_number: 'FIR-2026-UP-7104',
+    camera_id: 'cam-003',
+    camera_name: 'NH-48 Rajiv Chowk Underpass - Cam 03',
+    camera_location: 'Rajiv Chowk Flyover Southbound, Gurugram',
+    latitude: 28.4635,
+    longitude: 77.0305,
+    timestamp: new Date(Date.now() - 92 * 60000).toISOString(),
+    first_detected_at: new Date(Date.now() - 110 * 60000).toISOString(),
+    last_detected_at: new Date(Date.now() - 92 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'UP16AX9921',
+    confidence: 0.974,
+    status: 'ACTIVE',
+    detection_count: 4,
+    remarks: 'Flagged by Corridor Surveillance. Heading toward Sohna Elevated Highway.',
+    created_at: new Date(Date.now() - 110 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 92 * 60000).toISOString()
+  },
+  {
+    id: 'sta-004',
+    stolen_vehicle_id: 'sv-004',
+    vehicle_number: 'MH12DE1432',
+    owner_name: 'Amitabh Deshmukh',
+    fir_number: 'FIR-2026-MH-4401',
+    camera_id: 'cam-004',
+    camera_name: 'Kherki Daula Toll Plaza - Lane 04 Cam',
+    camera_location: 'Kherki Daula Toll Plaza, NH-48 Express Corridor',
+    latitude: 28.4350,
+    longitude: 76.9950,
+    timestamp: new Date(Date.now() - 180 * 60000).toISOString(),
+    first_detected_at: new Date(Date.now() - 200 * 60000).toISOString(),
+    last_detected_at: new Date(Date.now() - 180 * 60000).toISOString(),
+    vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+    plate_crop_url: '/processed/violations/sample_plate.jpg',
+    ocr_text: 'MH12DE1432',
+    confidence: 0.945,
+    status: 'INTERCEPTED',
+    resolved_by: 'Inspector Rameshwar (Patrol Unit 08)',
+    detection_count: 1,
+    remarks: 'Successfully stopped and verified by highway patrol at Toll Booth 04.',
+    created_at: new Date(Date.now() - 200 * 60000).toISOString(),
+    updated_at: new Date(Date.now() - 180 * 60000).toISOString()
+  }
+];
 
 const INITIAL_SETTINGS: StolenVehicleSettings = {
   enabled: true,
@@ -45,12 +204,16 @@ function getStoredVehicles(): StolenVehicle[] {
   try {
     const raw = localStorage.getItem(STORAGE_VEHICLES_KEY);
     if (!raw) {
-      return [];
+      saveStoredVehicles(INITIAL_STOLEN_VEHICLES);
+      return INITIAL_STOLEN_VEHICLES;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_STOLEN_VEHICLES;
   } catch {
-    return [];
+    return INITIAL_STOLEN_VEHICLES;
   }
 }
 
@@ -66,12 +229,16 @@ function getStoredAlerts(): StolenVehicleAlert[] {
   try {
     const raw = localStorage.getItem(STORAGE_ALERTS_KEY);
     if (!raw) {
-      return [];
+      saveStoredAlerts(INITIAL_ALERTS);
+      return INITIAL_ALERTS;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    return INITIAL_ALERTS;
   } catch {
-    return [];
+    return INITIAL_ALERTS;
   }
 }
 
