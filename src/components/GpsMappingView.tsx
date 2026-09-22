@@ -43,10 +43,8 @@ import {
   Sparkles
 } from 'lucide-react';
 import { InspectionVideo, GPSPoint, SeverityLevel, DamageCategory, PotholeHeatmapPoint, HeatmapHotspot, CameraDevice, TrafficViolation } from '../types/inspection';
-import { StolenVehicleAlert } from '../types/stolenVehicle';
 import { cameraService } from '../services/systemService';
 import { violationService } from '../services/violationService';
-import { stolenVehicleService } from '../services/stolenVehicleService';
 import { heatmapService } from '../services/heatmapService';
 import { apiClient } from '../services/apiClient';
 
@@ -312,14 +310,13 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
   const [hotspotsList, setHotspotsList] = useState<HeatmapHotspot[]>([]);
   const [dbPotholes, setDbPotholes] = useState<GPSDamageMarker[]>([]);
 
-  // Highway Cameras, Traffic Violations & Stolen Vehicle alerts state
+  // Highway Cameras & Traffic Violations layer state
   const camerasLayerRef = useRef<L.LayerGroup | null>(null);
   const violationsLayerRef = useRef<L.LayerGroup | null>(null);
   const [showCameras, setShowCameras] = useState<boolean>(true);
   const [showViolations, setShowViolations] = useState<boolean>(true);
   const [highwayCameras, setHighwayCameras] = useState<CameraDevice[]>(propsCameras || []);
   const [highwayViolations, setHighwayViolations] = useState<TrafficViolation[]>([]);
-  const [stolenAlerts, setStolenAlerts] = useState<StolenVehicleAlert[]>([]);
 
   // Save data mode preference
   const handleToggleDataMode = (mode: 'real' | 'all') => {
@@ -652,12 +649,6 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     violationService.getViolations({ limit: 25 })
       .then((res) => {
         if (Array.isArray(res?.items)) setHighwayViolations(res.items);
-      })
-      .catch(() => {});
-
-    stolenVehicleService.getLiveAlerts(20)
-      .then((alerts) => {
-        if (Array.isArray(alerts)) setStolenAlerts(alerts);
       })
       .catch(() => {});
   }, [propsCameras]);
@@ -1236,72 +1227,12 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
     });
   }, [highwayCameras, showCameras, onNavigate]);
 
-  // 6. Render Traffic Violations & Stolen Alerts on Leaflet map
+  // 6. Render Traffic Violations on Leaflet map
   useEffect(() => {
     if (!violationsLayerRef.current || !mapInstanceRef.current) return;
     violationsLayerRef.current.clearLayers();
 
     if (!showViolations) return;
-
-    // Stolen vehicle alerts (Priority Red Flashing)
-    stolenAlerts.forEach((alert) => {
-      if (!alert.latitude || !alert.longitude) return;
-      const alertIcon = L.divIcon({
-        className: 'custom-stolen-marker',
-        html: `
-          <div style="
-            width: 30px;
-            height: 30px;
-            background: #DC2626;
-            border: 2px solid #F87171;
-            border-radius: 50%;
-            box-shadow: 0 0 16px rgba(239, 68, 68, 0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            color: #FFFFFF;
-            font-size: 14px;
-          ">
-            🚨
-          </div>
-        `,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
-      });
-
-      const popupHTML = `
-        <div style="font-family: ui-monospace, SFMono-Regular, monospace; color: #E0E0E0; background: #1C0505; padding: 12px; border: 1px solid #DC2626; border-radius: 6px; min-width: 250px;">
-          <div style="font-size: 10px; font-weight: bold; color: #F87171; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
-            🚨 STOLEN VEHICLE ALERT (FIR ACTIVE)
-          </div>
-          <div style="font-size: 14px; font-weight: 900; color: #FFF; letter-spacing: 1px; margin-bottom: 4px;">
-            ${alert.vehicle_number}
-          </div>
-          <div style="font-size: 10px; color: #E2E8F0; margin-bottom: 6px;">
-            📄 <b>FIR:</b> ${alert.fir_number || 'FIR-2026-HR-8821'}<br/>
-            🚘 <b>Owner:</b> ${alert.owner_name || 'Reported Stolen'}<br/>
-            🤖 <b>ANPR Model:</b> <span style="color:#FBBF24;">numberplate-yolo-v26n.pt</span><br/>
-            📍 <b>Location:</b> ${alert.camera_location || alert.camera_name || 'NH-48 Sirhaul Gateway'}
-          </div>
-          <button id="view-alert-${alert.id}" style="width: 100%; padding: 6px 10px; background: #DC2626; color: white; border: none; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; text-transform: uppercase;">
-            Open Stolen Alerts Desk
-          </button>
-        </div>
-      `;
-
-      const marker = L.marker([alert.latitude, alert.longitude], { icon: alertIcon })
-        .bindPopup(popupHTML, { className: 'custom-leaflet-popup' });
-
-      marker.on('popupopen', () => {
-        const btn = document.getElementById(`view-alert-${alert.id}`);
-        if (btn) {
-          btn.onclick = () => onNavigate?.('stolen-alerts');
-        }
-      });
-
-      violationsLayerRef.current?.addLayer(marker);
-    });
 
     // Traffic violations (Helmet / Speed / ANPR)
     highwayViolations.forEach((v) => {
@@ -1369,7 +1300,7 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
 
       violationsLayerRef.current?.addLayer(marker);
     });
-  }, [highwayViolations, stolenAlerts, showViolations, onNavigate]);
+  }, [highwayViolations, showViolations, onNavigate]);
 
   const handleCenterOnVehicle = () => {
     if (currentVehiclePosition && mapInstanceRef.current) {
@@ -1682,10 +1613,10 @@ export const GpsMappingView: React.FC<GpsMappingViewProps> = ({
                   ? 'bg-amber-600/20 text-amber-400 border-amber-500/50'
                   : 'bg-[#1A1A1A] text-[#777] border-[#333] hover:text-white'
               }`}
-              title="Toggle Traffic Violations & Stolen Vehicle Alerts"
+              title="Toggle Traffic Violations"
             >
               <ShieldAlert className="w-3.5 h-3.5" />
-              <span>ALERTS ({highwayViolations.length + stolenAlerts.length})</span>
+              <span>VIOLATIONS ({highwayViolations.length})</span>
             </button>
 
             <button

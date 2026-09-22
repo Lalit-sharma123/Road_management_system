@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   AlertOctagon,
   ShieldAlert,
-  MapPin,
+  Radio,
   Camera,
   Clock,
   User,
@@ -130,7 +130,7 @@ export const StolenVehicleAlertModal: React.FC<StolenVehicleAlertModalProps> = (
 
               <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
                 <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
-                  <MapPin className="w-3.5 h-3.5 text-emerald-400" /> Intercept Location
+                  <Radio className="w-3.5 h-3.5 text-emerald-400" /> Intercept Location
                 </div>
                 <div className="font-semibold text-slate-200 truncate">
                   {alert.camera_location || 'National Highway 48'}
@@ -173,7 +173,7 @@ export const StolenVehicleAlertModal: React.FC<StolenVehicleAlertModalProps> = (
             <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span>
-                Detected at: {new Date(alert.timestamp).toLocaleString()} • Live GPS: ({alert.latitude.toFixed(4)}, {alert.longitude.toFixed(4)})
+                Detected at: {new Date(alert.timestamp).toLocaleString()} • Intercept Gate: {alert.camera_location || 'Highway Corridor'}
               </span>
             </div>
           </div>
