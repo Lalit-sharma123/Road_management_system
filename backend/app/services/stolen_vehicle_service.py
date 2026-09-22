@@ -667,7 +667,16 @@ class StolenVehicleService:
                     logger.warning(f"Note on encounter re-hydration: {dbe}")
 
             # Check if encounter is active or was already alerted in this session/scope
-            already_alerted_in_scope = norm_plate in cls._alerted_plates.get(scope_key, set())
+            stolen_id = stolen_record.get("id")
+            canonical_plate = cls.normalize_vehicle_number(stolen_record.get("vehicle_number", norm_plate))
+            already_alerted_in_scope = (
+                norm_plate in cls._alerted_plates.get(scope_key, set()) or
+                norm_plate in cls._alerted_plates.get("global", set()) or
+                canonical_plate in cls._alerted_plates.get(scope_key, set()) or
+                canonical_plate in cls._alerted_plates.get("global", set()) or
+                (stolen_id and stolen_id in cls._alerted_plates.get(scope_key, set())) or
+                (stolen_id and stolen_id in cls._alerted_plates.get("global", set()))
+            )
             is_same_session_encounter = (existing_encounter is not None) or already_alerted_in_scope
             if not is_same_session_encounter and norm_plate in cls._cooldown_tracker:
                 if (now_sec - cls._cooldown_tracker[norm_plate]) < 3600:
@@ -799,8 +808,15 @@ class StolenVehicleService:
                 }
 
             # 🚨 NEW ENCOUNTER: Vehicle detected for the first time or re-entered after cooldown
-            # Record in single-time alert tracker for this session/stream
+            # Record in single-time alert tracker for this session/stream and globally
             cls._alerted_plates.setdefault(scope_key, set()).add(norm_plate)
+            cls._alerted_plates.setdefault("global", set()).add(norm_plate)
+            if canonical_plate:
+                cls._alerted_plates.setdefault(scope_key, set()).add(canonical_plate)
+                cls._alerted_plates.setdefault("global", set()).add(canonical_plate)
+            if stolen_id:
+                cls._alerted_plates.setdefault(scope_key, set()).add(stolen_id)
+                cls._alerted_plates.setdefault("global", set()).add(stolen_id)
             cls._cooldown_tracker[norm_plate] = now_sec
 
             alert_id = str(uuid.uuid4())

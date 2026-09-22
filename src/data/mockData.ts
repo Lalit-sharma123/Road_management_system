@@ -249,14 +249,14 @@ export const sampleVideos: InspectionVideo[] = [
     ],
     frames: [
       {
-        id: 'frm-004',
+        id: 'frm-007',
         frame_number: 180,
         timestamp_sec: 6.0,
         image_url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80',
         has_damage: true,
         detections: [
           {
-            id: 'det-005',
+            id: 'det-008',
             video_id: 'vid-002',
             frame_number: 180,
             timestamp_sec: 6.0,

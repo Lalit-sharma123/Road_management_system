@@ -171,7 +171,7 @@ export const DetectionTable: React.FC<DetectionTableProps> = ({
             ) : (
               sorted.map((item, idx) => (
                 <tr 
-                  key={item.id || `det-${idx}`} 
+                  key={`${item.video_id || 'vid'}-${item.id || 'det'}-${idx}`} 
                   onClick={() => onSelectFrame && onSelectFrame(item.frame_number)}
                   className="hover:bg-[#1A1A1A] transition-colors cursor-pointer"
                 >

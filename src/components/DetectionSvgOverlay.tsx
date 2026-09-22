@@ -331,7 +331,7 @@ export const DetectionSvgOverlay: React.FC<DetectionSvgOverlayProps> = ({
 
         return (
           <g
-            key={det.id || `svg-bbox-${index}-${Math.round(x1)}-${Math.round(y1)}`}
+            key={`${det.id || 'det'}-${index}-${Math.round(x1)}-${Math.round(y1)}`}
             id={`svg-det-group-${index}`}
             className="pointer-events-auto cursor-pointer transition-all duration-150"
             onMouseEnter={() => setHoveredIdx(index)}

@@ -412,12 +412,12 @@ export const DetectionTimeline: React.FC<DetectionTimelineProps> = ({
                 </td>
               </tr>
             ) : (
-              filteredEvents.map((ev) => {
+              filteredEvents.map((ev, index) => {
                 const isSelected = selectedId === ev.id || (frames[selectedFrameIdx] && ev.frameIdx === selectedFrameIdx);
 
                 return (
                   <tr
-                    key={ev.id}
+                    key={`${ev.id}-${index}`}
                     onClick={() => handleItemClick(ev)}
                     className={`cursor-pointer transition-all ${
                       isSelected

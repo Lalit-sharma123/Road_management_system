@@ -663,7 +663,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   const isPlate = cat.includes('plate');
 
                   return (
-                    <tr key={det.id || idx} className="hover:bg-slate-800/30 transition-colors">
+                    <tr key={`${det.id || 'det'}-${idx}`} className="hover:bg-slate-800/30 transition-colors">
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
                           isDamage ? 'bg-rose-500/10 text-rose-300 border-rose-500/20' :
@@ -749,11 +749,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   </td>
                 </tr>
               ) : (
-                summaryData.recent_violations.map((viol: any) => {
+                summaryData.recent_violations.map((viol: any, idx: number) => {
                   const isPaid = viol.fine_status === 'PAID';
                   const isPending = viol.fine_status === 'PENDING';
                   return (
-                    <tr key={viol.id} className="hover:bg-slate-800/30 transition-colors">
+                    <tr key={`${viol.id || 'viol'}-${idx}`} className="hover:bg-slate-800/30 transition-colors">
                       {/* License Plate Badge */}
                       <td className="px-4 py-3">
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-400/10 border border-amber-400/25 text-amber-300 font-mono font-semibold text-xs tracking-wider">

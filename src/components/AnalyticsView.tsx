@@ -210,9 +210,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
   };
 
   const mobilityTel = telemetry?.traffic_mobility || {
-    total_vehicles: video.analytics?.vehicle_count || 0,
+    total_vehicles: 0,
     vehicles_by_type: {
-      car: video.analytics?.vehicle_count || 0,
+      car: 0,
       truck: 0,
       bus: 0,
       motorcycle: 0,
@@ -720,7 +720,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ video, onNavigate 
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {stolenTel.recent_intercepts && stolenTel.recent_intercepts.length > 0 ? (
                 stolenTel.recent_intercepts.map((item, idx) => (
-                  <div key={item.id || idx} className="p-2.5 bg-[#141414] border border-[#222] hover:border-rose-500/50 transition flex items-center justify-between gap-3 text-xs">
+                  <div key={`${item.id || 'intercept'}-${idx}`} className="p-2.5 bg-[#141414] border border-[#222] hover:border-rose-500/50 transition flex items-center justify-between gap-3 text-xs">
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-rose-400 font-mono text-sm tracking-wider">{item.vehicle_number}</span>

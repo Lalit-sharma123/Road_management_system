@@ -443,7 +443,7 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({
               />
 
               {/* Dynamic Bounding Box Overlays */}
-              {showOverlays && filteredDetections.map((det) => {
+              {showOverlays && filteredDetections.map((det, idx) => {
                 const color = getCategoryColor(det.category);
                 const isSelected = selectedDetectionId === det.id;
                 const isHovered = hoveredDetectionId === det.id;
@@ -451,7 +451,7 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({
 
                 return (
                   <div 
-                    key={det.id}
+                    key={`${det.video_id || 'v'}-${det.id || 'det'}-${idx}`}
                     onClick={() => setSelectedDetectionId(isSelected ? null : det.id)}
                     onMouseEnter={() => setHoveredDetectionId(det.id)}
                     onMouseLeave={() => setHoveredDetectionId(null)}
@@ -798,7 +798,7 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({
 
                   return (
                     <div 
-                      key={det.id || idx}
+                      key={`${det.video_id || 'v'}-${det.id || 'det'}-${idx}`}
                       onClick={() => setSelectedDetectionId(isSelected ? null : det.id)}
                       onMouseEnter={() => setHoveredDetectionId(det.id)}
                       onMouseLeave={() => setHoveredDetectionId(null)}
