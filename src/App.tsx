@@ -319,7 +319,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>('llama3.1');
   const [yoloModel, setYoloModel] = useState<string>(initialModels[4].weight_path);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.35);
-  const [frameSkip, setFrameSkip] = useState<number>(5);
+  const [frameSkip, setFrameSkip] = useState<number>(1);
 
   const showToast = (title: string, desc: string, type: 'success' | 'warning' = 'success') => {
     setToastMessage({ title, desc, type });

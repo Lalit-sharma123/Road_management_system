@@ -90,7 +90,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
   
   // Acceleration & Speed Profile: 'turbo' (60+ FPS, ~3s), 'fast' (30 FPS, ~8s), 'precision' (15 FPS, deep)
   const [speedProfile, setSpeedProfile] = useState<'turbo' | 'fast' | 'precision'>('turbo');
-  const [frameSkip, setFrameSkip] = useState(5);
+  const [frameSkip, setFrameSkip] = useState(1);
   const [confThreshold, setConfThreshold] = useState(0.35);
   const [enableClahe, setEnableClahe] = useState(false);
   const [enableGaussianBlur, setEnableGaussianBlur] = useState(false);
@@ -99,16 +99,15 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
 
   const handleSelectSpeedProfile = (profile: 'turbo' | 'fast' | 'precision') => {
     setSpeedProfile(profile);
+    // Never skip frames: 100% frame-by-frame inspection fidelity
+    setFrameSkip(1);
     if (profile === 'turbo') {
-      setFrameSkip(5);
       setEnableClahe(false);
       setEnableGaussianBlur(false);
     } else if (profile === 'fast') {
-      setFrameSkip(3);
       setEnableClahe(false);
       setEnableGaussianBlur(false);
     } else {
-      setFrameSkip(2);
       setEnableClahe(true);
       setEnableGaussianBlur(true);
     }
@@ -930,7 +929,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     }
   };
 
-  const handleSingleFileSelected = (file: File, autoStart = autoLaunchRealtime) => {
+  const handleSingleFileSelected = (file: File, autoStart = true) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!['mp4', 'avi', 'mov', 'mkv'].includes(ext || '')) {
       setProcessingError('Unsupported file format. Please upload MP4, AVI, MOV, or MKV.');
@@ -948,7 +947,7 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     setPreviewUrl(objUrl);
     setIsSampleVideo(false);
 
-    if (autoStart && currentRole !== 'viewer') {
+    if (autoStart) {
       handleLaunchInstantRealtime(file, title, objUrl);
     }
   };
@@ -960,41 +959,57 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
     setProcessingError(null);
 
     const safeTitle = title || file.name.replace(/\.[^/.]+$/, '');
+    const tempId = `vid_${Date.now()}`;
 
+    // 1. Immediately create inspection video object with local blob URL so real-time detection starts IMMEDIATELY
+    const initialVideo: InspectionVideo = {
+      id: tempId,
+      title: safeTitle,
+      filename: file.name,
+      file_size_bytes: file.size,
+      duration_seconds: 45.0,
+      total_frames: 1350,
+      fps: 30.0,
+      resolution: '1920x1080',
+      status: 'processing',
+      thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
+      video_url: objUrl,
+      local_video_url: objUrl,
+      created_at: new Date().toISOString(),
+      analytics: {
+        road_health_score: 95.0,
+        total_detections: 0,
+        pothole_count: 0,
+        crack_count: 0,
+        critical_count: 0,
+        damage_density_per_km: 0,
+        overall_severity: 'low'
+      }
+    };
+
+    // Configure preferred client engine and speed preset for instant start
     try {
-      // 1. Upload video file to backend FastAPI server to obtain real DB video ID
-      const uploadedVideo = await videoService.uploadVideo(
-        file,
-        safeTitle,
-        (pct) => {
-          setProcessProgress(Math.min(95, Math.round(pct)));
-        }
-      );
+      sessionStorage.setItem('preferred_inference_engine', 'client');
+      sessionStorage.setItem('preferred_speed_preset', speedProfile || 'precision');
+    } catch {}
 
-      setProcessProgress(100);
+    // 2. Set this video as active in the application state and route user immediately to Live Stream Monitor
+    onAddVideo(initialVideo);
+    onNavigate('live_processing');
+    setIsProcessing(false);
 
-      const enrichedVideo: InspectionVideo = {
-        ...uploadedVideo,
-        video_url: objUrl,
-        local_video_url: objUrl,
-        status: 'processing'
-      };
-
-      // 2. Set this video as active in the application state
-      onAddVideo(enrichedVideo);
-
-      try {
-        sessionStorage.setItem('preferred_speed_preset', speedProfile || 'turbo');
-      } catch {}
-
-      // 3. Immediately route user to Live Stream Monitor
-      onNavigate('live_processing');
-
-      // 4. Trigger the YOLO detection pipeline using the real backend video ID
+    // 3. Asynchronously upload to backend and trigger pipeline in background without blocking user playback
+    videoService.uploadVideo(
+      file,
+      safeTitle,
+      (pct) => {
+        setProcessProgress(Math.min(95, Math.round(pct)));
+      }
+    ).then((uploadedVideo) => {
       videoService.runProcessingPipeline({
         video_id: uploadedVideo.id,
         confidence_threshold: confThreshold,
-        frame_skip: frameSkip,
+        frame_skip: 1, // 1 = Never skip frames
         enable_histogram_equalization: enableClahe,
         enable_gaussian_blur: enableGaussianBlur,
         fast_mode: speedProfile === 'turbo' || speedProfile === 'fast',
@@ -1002,39 +1017,9 @@ export const VideoUploadAndProcessor: React.FC<VideoUploadAndProcessorProps> = (
       }).catch((err) => {
         console.warn('Background processing pipeline notice:', err);
       });
-    } catch (uploadErr: any) {
-      console.warn('Upload encountered error, proceeding with local stream context:', uploadErr);
-      // Resilient fallback: ensure Live Stream Monitor still opens with local video playback
-      const fallbackId = `vid_${Date.now()}`;
-      const fallbackVideo: InspectionVideo = {
-        id: fallbackId,
-        title: safeTitle,
-        filename: file.name,
-        file_size_bytes: file.size,
-        duration_seconds: 45.0,
-        total_frames: 1350,
-        fps: 30.0,
-        resolution: '1920x1080',
-        status: 'processing',
-        thumbnail_url: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=600&q=80',
-        video_url: objUrl,
-        local_video_url: objUrl,
-        created_at: new Date().toISOString(),
-        analytics: {
-          road_health_score: 84.5,
-          total_detections: 0,
-          pothole_count: 0,
-          crack_count: 0,
-          critical_count: 0,
-          damage_density_per_km: 0,
-          overall_severity: 'medium'
-        }
-      };
-      onAddVideo(fallbackVideo);
-      onNavigate('live_processing');
-    } finally {
-      setIsProcessing(false);
-    }
+    }).catch((uploadErr) => {
+      console.warn('Background backend upload notice (client real-time detection active):', uploadErr);
+    });
   };
 
   const addLog = (stage: PipelineStage, progress: number, message: string) => {
