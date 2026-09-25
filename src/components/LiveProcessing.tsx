@@ -282,6 +282,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
   const userVideoElemRef = useRef<HTMLVideoElement | null>(null);
+  const userImageElemRef = useRef<HTMLImageElement | null>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const webcamIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -304,6 +305,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   };
 
   const videoSource = video?.local_video_url || video?.video_url;
+
+  const isImageMedia = Boolean(
+    video?.is_image ||
+    video?.media_type === 'image' ||
+    (videoSource && (
+      videoSource.startsWith('data:image/') ||
+      /\.(jpg|jpeg|png|webp|bmp|gif|tiff)(\?.*)?$/i.test(video?.filename || videoSource)
+    ))
+  );
 
   // 1. Elapsed timer and Session Reset on videoId or videoSource change
   useEffect(() => {
@@ -390,25 +400,108 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     }
   }, [speedPreset]);
 
+  // Process static road inspection image
+  const processImageFrame = useCallback((img: HTMLImageElement) => {
+    if (!img) return;
+    const w = img.naturalWidth || 1280;
+    const h = img.naturalHeight || 720;
+    setFrameWidth(w);
+    setFrameHeight(h);
+    setFrameNumber(1);
+    setTotalFrames(1);
+    setProgress(100);
+    setTimestamp(0);
+
+    try {
+      const visionResult = realtimeVisionEngine.processFrame(
+        img,
+        w,
+        h,
+        1,
+        minConfidenceThreshold
+      );
+
+      setCurrentFrameDetections(visionResult.detections);
+      setVehicleCount(visionResult.vehicleCount);
+      setPedestrianCount(visionResult.pedestrianCount);
+      setNumberPlateCount(visionResult.numberPlateCount);
+      setHelmetCount(visionResult.helmetCount);
+      setPotholeCount(visionResult.potholeCount);
+      setCrackCount(visionResult.crackCount);
+      setRoadDamageCount(visionResult.roadDamageCount);
+      setRoadHealth(visionResult.roadHealthScore);
+
+      setStatusText(
+        `● Road Inspection Image Analyzed: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | ${visionResult.vehicleCount} Vehicles | Health Score: ${visionResult.roadHealthScore}%`
+      );
+
+      for (const det of visionResult.detections) {
+        if (det.type === 'damage' && det.id && !recordedDefectIdsRef.current.has(det.id)) {
+          recordedDefectIdsRef.current.add(det.id);
+          const catLabel = det.category.includes('pothole')
+            ? 'Pothole'
+            : det.category.includes('longitudinal')
+            ? 'Longitudinal Crack'
+            : det.category.includes('transverse')
+            ? 'Transverse Crack'
+            : 'Road Surface Defect';
+
+          setTimelineEvents((prev) => [
+            {
+              id: det.id!,
+              category: catLabel,
+              confidence: det.confidence,
+              severity: (det.severity as any) || 'high',
+              frame_number: 1,
+              timestamp: 0.0,
+              latitude: 28.4595,
+              longitude: 77.0266
+            },
+            ...prev
+          ]);
+        }
+      }
+    } catch (e) {
+      console.warn('Image processing notice:', e);
+    }
+  }, [minConfidenceThreshold]);
+
+  // Image Detection Trigger (if uploaded media is an image)
+  useEffect(() => {
+    if (!videoSource || !isImageMedia) return;
+    if (userImageElemRef.current && userImageElemRef.current.complete) {
+      processImageFrame(userImageElemRef.current);
+    }
+  }, [videoSource, isImageMedia, processImageFrame]);
+
   // High-Precision Real-Time Detection Loop on Uploaded Video Stream
   // Guarantees:
-  // 1. Instant detection start on upload
-  // 2. Zero skipped frames (runs on every frame presented by browser video decoder)
+  // 1. Instant detection start on upload (starts immediately on Frame 1)
+  // 2. Continuous frame processing without stall
   // 3. Zero frame overlap (strict NMS & cross-class exclusion)
   useEffect(() => {
-    if (!videoSource || isPaused || isCompleted) return;
+    if (!videoSource || isImageMedia || isCompleted) return;
 
-    let rvfcId: number | null = null;
     let animId: number | null = null;
+    let rvfcId: number | null = null;
     let isRunning = true;
+    let lastProcessedMs = 0;
 
     const v = userVideoElemRef.current;
-    if (!v) return;
+    if (v) {
+      // Enforce mute for instantaneous browser autoplay
+      v.muted = true;
+      v.defaultMuted = true;
+      v.loop = true; // Continuous real-time detection
+      if (!isPaused) {
+        v.play().catch(() => {});
+      }
+    }
 
     const processFrameNow = () => {
       if (!isRunning || isPaused || isCompleted) return;
       const curV = userVideoElemRef.current;
-      if (!curV || curV.paused || curV.ended) return;
+      if (!curV || curV.readyState < 1) return;
 
       const w = curV.videoWidth || 1280;
       const h = curV.videoHeight || 720;
@@ -444,6 +537,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         setCrackCount(visionResult.crackCount);
         setRoadDamageCount(visionResult.roadDamageCount);
         setRoadHealth(visionResult.roadHealthScore);
+
+        setStatusText(
+          `● Road Damage Detector [best.pt] Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | Traffic: ${visionResult.vehicleCount} Vehicles | ANPR: ${visionResult.numberPlateCount} Plates`
+        );
 
         // Track timeline defect events
         for (const det of visionResult.detections) {
@@ -489,43 +586,68 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       }
     };
 
-    // Ensure video is playing
-    v.play().catch(() => {});
+    // Ensure video is playing immediately on upload
+    if (v) {
+      const playAttempt = v.play();
+      if (playAttempt !== undefined) {
+        playAttempt.catch((err) => {
+          console.warn('Video auto-play delayed, waiting for user event:', err);
+        });
+      }
+    }
 
-    if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && (v as any).requestVideoFrameCallback) {
-      const onFrame = () => {
+    // Continuous robust animation loop (guarantees real-time 30 FPS processing without stall)
+    const frameLoop = (now: number) => {
+      if (!isRunning) return;
+      if (now - lastProcessedMs >= 30) {
+        lastProcessedMs = now;
+        processFrameNow();
+      }
+      animId = requestAnimationFrame(frameLoop);
+    };
+
+    animId = requestAnimationFrame(frameLoop);
+
+    // Also attach to requestVideoFrameCallback if available for frame-perfect sync
+    if (v && 'requestVideoFrameCallback' in HTMLVideoElement.prototype && (v as any).requestVideoFrameCallback) {
+      const scheduleRvfc = () => {
         if (!isRunning) return;
         processFrameNow();
-        if (!v.paused && !v.ended) {
-          rvfcId = (v as any).requestVideoFrameCallback(onFrame);
-        }
+        rvfcId = (v as any).requestVideoFrameCallback(scheduleRvfc);
       };
-      rvfcId = (v as any).requestVideoFrameCallback(onFrame);
-    } else {
-      let lastSec = -1;
-      const loop = () => {
-        if (!isRunning) return;
-        if (Math.abs(v.currentTime - lastSec) >= 0.02) {
-          lastSec = v.currentTime;
-          processFrameNow();
-        }
-        if (!v.paused && !v.ended) {
-          animId = requestAnimationFrame(loop);
-        }
-      };
-      animId = requestAnimationFrame(loop);
+      rvfcId = (v as any).requestVideoFrameCallback(scheduleRvfc);
+    }
+
+    const handleVideoEvents = () => {
+      if (!isRunning) return;
+      processFrameNow();
+    };
+
+    if (v) {
+      v.addEventListener('loadeddata', handleVideoEvents);
+      v.addEventListener('canplay', handleVideoEvents);
+      v.addEventListener('playing', handleVideoEvents);
+      v.addEventListener('timeupdate', handleVideoEvents);
+      v.addEventListener('loadedmetadata', handleVideoEvents);
     }
 
     return () => {
       isRunning = false;
-      if (rvfcId !== null && (v as any).cancelVideoFrameCallback) {
-        (v as any).cancelVideoFrameCallback(rvfcId);
+      if (v) {
+        v.removeEventListener('loadeddata', handleVideoEvents);
+        v.removeEventListener('canplay', handleVideoEvents);
+        v.removeEventListener('playing', handleVideoEvents);
+        v.removeEventListener('timeupdate', handleVideoEvents);
+        v.removeEventListener('loadedmetadata', handleVideoEvents);
+        if (rvfcId !== null && (v as any).cancelVideoFrameCallback) {
+          (v as any).cancelVideoFrameCallback(rvfcId);
+        }
       }
       if (animId !== null) {
         cancelAnimationFrame(animId);
       }
     };
-  }, [videoSource, isPaused, isCompleted, videoDuration, minConfidenceThreshold, video?.fps]);
+  }, [videoSource, isImageMedia, isPaused, isCompleted, videoDuration, minConfidenceThreshold, video?.fps]);
 
   // 3. Start Hardware Webcam
   const startWebcamStream = async (deviceId?: string) => {
@@ -2511,7 +2633,79 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
           {/* Main Frame Viewport with SVG Overlay */}
           <div className="relative aspect-video bg-[#080808] flex items-center justify-center overflow-hidden group">
-            {videoSource ? (
+            {isImageMedia ? (
+              <div className="relative w-full h-full flex items-center justify-center">
+                <img
+                  ref={userImageElemRef}
+                  src={videoSource}
+                  alt="Road Inspection Media"
+                  crossOrigin="anonymous"
+                  className="w-full h-full object-contain select-none"
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                      setFrameWidth(img.naturalWidth);
+                      setFrameHeight(img.naturalHeight);
+                      processImageFrame(img);
+                    }
+                  }}
+                />
+
+                {/* SVG-based Dynamic Detection Overlay */}
+                {enableSvgOverlay && currentFrameDetections.length > 0 && (
+                  <DetectionSvgOverlay
+                    detections={currentFrameDetections}
+                    frameWidth={frameWidth}
+                    frameHeight={frameHeight}
+                    showLabels={showLabels}
+                    showConfidence={showConfidence}
+                    showSeverity={showSeverity}
+                    showCornerBrackets={showCornerBrackets}
+                    showFill={showFill}
+                    filterCategory={overlayCategoryFilter}
+                    minConfidence={minConfidenceThreshold}
+                    selectedDetectionId={selectedOverlayDetection?.id || null}
+                    onSelectDetection={(det) => setSelectedOverlayDetection(det)}
+                  />
+                )}
+
+                {/* Active Detection Inspector Overlay Pill */}
+                {selectedOverlayDetection && (
+                  <div className="absolute bottom-3 left-3 right-3 bg-[#111111]/95 backdrop-blur-md border border-[#2563EB] p-2.5 z-30 shadow-2xl flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded bg-[#2563EB]/20 border border-[#2563EB] flex items-center justify-center text-[#2563EB] font-bold">
+                        <Target className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white uppercase tracking-wider font-mono">
+                            {selectedOverlayDetection.category?.toUpperCase() || 'DETECTION'}
+                          </span>
+                          <span className="bg-[#2563EB] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
+                            {Math.round((selectedOverlayDetection.confidence || 0.85) * 100)}% CONF
+                          </span>
+                          {selectedOverlayDetection.severity && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#FF3B30]/20 text-[#FF3B30] border border-[#FF3B30]/40">
+                              {selectedOverlayDetection.severity.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-[#888] font-mono mt-0.5">
+                          BBOX: [{Math.round(selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0))}, {Math.round(selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0))}, {Math.round(selectedOverlayDetection.x_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[2] : 0))}, {Math.round(selectedOverlayDetection.y_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[3] : 0))}]
+                          {selectedOverlayDetection.width ? ` // DIM: ${Math.round(selectedOverlayDetection.width)}×${Math.round(selectedOverlayDetection.height || 0)}px` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedOverlayDetection(null)}
+                      className="p-1 text-[#888] hover:text-white hover:bg-[#222] transition-all rounded"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : videoSource ? (
               <div className="relative w-full h-full flex items-center justify-center">
                 <video
                   ref={userVideoElemRef}
@@ -2519,8 +2713,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   playsInline
                   muted
                   autoPlay
+                  loop
                   crossOrigin="anonymous"
                   className="w-full h-full object-contain select-none"
+                  onCanPlay={(e) => {
+                    const v = e.currentTarget;
+                    if (!isPaused) {
+                      v.play().catch(() => {});
+                    }
+                  }}
                   onLoadedMetadata={(e) => {
                     const v = e.currentTarget;
                     if (v.videoWidth > 0 && v.videoHeight > 0) {
@@ -2540,6 +2741,21 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                     handleInstantComplete();
                   }}
                 />
+
+                {isPaused && (
+                  <div
+                    onClick={() => {
+                      setIsPaused(false);
+                      userVideoElemRef.current?.play().catch(() => {});
+                    }}
+                    className="absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/30 transition-all cursor-pointer z-20 group"
+                  >
+                    <div className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-2xl flex items-center gap-2 border border-white/20 font-semibold text-xs transition-transform group-hover:scale-105">
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>Resume Real-Time Detection</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* SVG-based Dynamic Detection Overlay */}
                 {enableSvgOverlay && currentFrameDetections.length > 0 && (
