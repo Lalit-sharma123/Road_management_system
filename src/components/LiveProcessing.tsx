@@ -296,6 +296,12 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const recordedDefectIdsRef = useRef<Set<string>>(new Set());
 
+  // Pipeline Sequential Frame Tracking & Duplicate Prevention Refs
+  const lastProcessedFrameRef = useRef<number>(-1);
+  const lastProcessedTimeRef = useRef<number>(-1);
+  const lastSentDetectionSignatureRef = useRef<string>('');
+  const lastSentDetectionTimeRef = useRef<number>(-1);
+
   const getFullImageUrl = (path: string): string => {
     if (!path) return '';
     if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
@@ -347,6 +353,10 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     frameTimesRef.current = [];
     alertedStolenPlatesRef.current.clear();
     recordedDefectIdsRef.current.clear();
+    lastProcessedFrameRef.current = -1;
+    lastProcessedTimeRef.current = -1;
+    lastSentDetectionSignatureRef.current = '';
+    lastSentDetectionTimeRef.current = -1;
     realtimeVisionEngine.reset();
 
     if (damageLayerGroupRef.current) {
@@ -474,47 +484,74 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     }
   }, [videoSource, isImageMedia, processImageFrame]);
 
-  // High-Precision Real-Time Detection Loop on Uploaded Video Stream
-  // Guarantees:
-  // 1. Instant detection start on upload (starts immediately on Frame 1)
-  // 2. Continuous frame processing without stall
-  // 3. Zero frame overlap (strict NMS & cross-class exclusion)
+  // High-Precision Real-Time Sequential Detection Loop on Uploaded Video Stream
+  // Requirements:
+  // 1. Start detection immediately after video upload
+  // 2. Do not show duplicate/overlapping frames
+  // 3. Process frames sequentially with a proper frame-skip/interval strategy
+  // 4. Display only frames where at least one detection is found
+  // 5. If a frame has no detection, do not send/display that frame
+  // 6. Avoid sending consecutive duplicate detection results
+  // 7. Keep detection results synchronized with correct video timestamp/frame number
+  // 8. Optimize so unnecessary frames are not processed or transferred
   useEffect(() => {
     if (!videoSource || isImageMedia || isCompleted) return;
 
     let animId: number | null = null;
     let rvfcId: number | null = null;
     let isRunning = true;
-    let lastProcessedMs = 0;
+    let isProcessing = false;
+
+    // Frame-skip / interval strategy based on speed preset
+    // precision: sample at ~10-12 FPS (skip 1-2 frames between samples at 30fps)
+    // fast: sample at ~7-8 FPS (skip 3 frames between samples)
+    // turbo: sample at ~5 FPS (skip 5 frames between samples)
+    const minIntervalSec = speedPreset === 'turbo' ? 0.18 : speedPreset === 'fast' ? 0.12 : 0.08;
 
     const v = userVideoElemRef.current;
     if (v) {
-      // Enforce mute for instantaneous browser autoplay
       v.muted = true;
       v.defaultMuted = true;
-      v.loop = true; // Continuous real-time detection
+      v.playsInline = true;
+      v.loop = true;
       if (!isPaused) {
         v.play().catch(() => {});
       }
     }
 
-    const processFrameNow = () => {
-      if (!isRunning || isPaused || isCompleted) return;
+    const processFrameNow = (forceFirstFrame = false) => {
+      if (!isRunning || isPaused || isCompleted || isProcessing) return;
       const curV = userVideoElemRef.current;
-      if (!curV || curV.readyState < 1) return;
+      if (!curV || curV.readyState < 2 || curV.paused || curV.seeking) return;
 
-      const w = curV.videoWidth || 1280;
-      const h = curV.videoHeight || 720;
       const curTime = curV.currentTime || 0;
       const dur = curV.duration || videoDuration || 45;
-
       const fps = video?.fps || 30;
-      const currentFrame = Math.max(1, Math.floor(curTime * fps));
+      const currentFrame = Math.max(1, Math.round(curTime * fps));
 
+      // 3 & 8: Frame-skip / interval strategy and unnecessary frame optimization
+      if (!forceFirstFrame) {
+        if (lastProcessedTimeRef.current >= 0 && (curTime - lastProcessedTimeRef.current < minIntervalSec)) {
+          return; // Skip intermediate micro-frames to optimize CPU
+        }
+        // 2: Strict sequential order check: do not re-process duplicate or older frame
+        if (currentFrame <= lastProcessedFrameRef.current && curTime <= lastProcessedTimeRef.current) {
+          return;
+        }
+      }
+
+      isProcessing = true;
+      lastProcessedFrameRef.current = currentFrame;
+      lastProcessedTimeRef.current = curTime;
+
+      // 7: Keep detection results synchronized with correct video timestamp/frame number
       setFrameNumber(currentFrame);
       setTimestamp(parseFloat(curTime.toFixed(2)));
       const pct = dur > 0 ? Math.min(100, Math.round((curTime / dur) * 100)) : 0;
       setProgress(pct);
+
+      const w = curV.videoWidth || 1280;
+      const h = curV.videoHeight || 720;
 
       try {
         const visionResult = realtimeVisionEngine.processFrame(
@@ -525,7 +562,19 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           minConfidenceThreshold
         );
 
-        // Deduplicated clean detections (Zero Overlap Guaranteed)
+        const hasDetections = visionResult.detections && visionResult.detections.length > 0;
+
+        // 4 & 5: Display only frames where at least one detection is found.
+        // If a frame has no detection, do not send/display that frame.
+        if (!hasDetections) {
+          // Clear active overlay for frames with no detections
+          setCurrentFrameDetections([]);
+          // Do NOT generate frame snapshot, do NOT add to timeline, do NOT send over WebSocket
+          isProcessing = false;
+          return;
+        }
+
+        // Frame HAS at least one detection: display this frame
         setCurrentFrameDetections(visionResult.detections);
 
         // Update real-time counts
@@ -539,34 +588,69 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         setRoadHealth(visionResult.roadHealthScore);
 
         setStatusText(
-          `● Road Damage Detector [best.pt] Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | Traffic: ${visionResult.vehicleCount} Vehicles | ANPR: ${visionResult.numberPlateCount} Plates`
+          `● Detection Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | Traffic: ${visionResult.vehicleCount} Vehicles | ANPR: ${visionResult.numberPlateCount} Plates [Frame #${currentFrame}]`
         );
 
-        // Track timeline defect events
-        for (const det of visionResult.detections) {
-          if (det.type === 'damage' && det.id && !recordedDefectIdsRef.current.has(det.id)) {
-            recordedDefectIdsRef.current.add(det.id);
-            const catLabel = det.category.includes('pothole')
-              ? 'Pothole'
-              : det.category.includes('longitudinal')
-              ? 'Longitudinal Crack'
-              : det.category.includes('transverse')
-              ? 'Transverse Crack'
-              : 'Road Surface Defect';
+        // 6: Avoid sending consecutive duplicate detection results
+        // Generate spatial category signature to identify consecutive identical detections
+        const detectionSignature = visionResult.detections
+          .map((d) => {
+            const cat = (d.category || '').toLowerCase();
+            const x = Math.round((d.x_min ?? d.box?.[0] ?? 0) / 45);
+            const y = Math.round((d.y_min ?? d.box?.[1] ?? 0) / 45);
+            return `${cat}@${x},${y}`;
+          })
+          .sort()
+          .join(';');
 
-            setTimelineEvents((prev) => [
-              {
-                id: det.id!,
-                category: catLabel,
-                confidence: det.confidence,
-                severity: (det.severity as any) || 'high',
-                frame_number: currentFrame,
-                timestamp: parseFloat(curTime.toFixed(2)),
-                latitude: 28.4595 + (currentFrame * 0.00012),
-                longitude: 77.0266 + (currentFrame * 0.00015)
-              },
-              ...prev.slice(0, 49)
-            ]);
+        const isConsecutiveDuplicate =
+          detectionSignature === lastSentDetectionSignatureRef.current &&
+          Math.abs(curTime - lastSentDetectionTimeRef.current) < 2.0;
+
+        if (!isConsecutiveDuplicate) {
+          lastSentDetectionSignatureRef.current = detectionSignature;
+          lastSentDetectionTimeRef.current = curTime;
+
+          // 8: Optimize: only capture snapshot image data for newly detected frames
+          let snapshotUrl = '';
+          if (captureCanvasRef.current) {
+            const cap = captureCanvasRef.current;
+            cap.width = 640;
+            cap.height = 360;
+            const capCtx = cap.getContext('2d');
+            if (capCtx) {
+              capCtx.drawImage(curV, 0, 0, 640, 360);
+              snapshotUrl = cap.toDataURL('image/jpeg', 0.65);
+            }
+          }
+
+          // 7: Timestamp and frame number strictly synchronized
+          for (const det of visionResult.detections) {
+            if (det.type === 'damage' && det.id && !recordedDefectIdsRef.current.has(det.id)) {
+              recordedDefectIdsRef.current.add(det.id);
+              const catLabel = det.category.includes('pothole')
+                ? 'Pothole'
+                : det.category.includes('longitudinal')
+                ? 'Longitudinal Crack'
+                : det.category.includes('transverse')
+                ? 'Transverse Crack'
+                : 'Road Surface Defect';
+
+              setTimelineEvents((prev) => [
+                {
+                  id: det.id!,
+                  category: catLabel,
+                  confidence: det.confidence,
+                  severity: (det.severity as any) || 'high',
+                  frame_number: currentFrame,
+                  timestamp: parseFloat(curTime.toFixed(2)),
+                  latitude: 28.4595 + (currentFrame * 0.00012),
+                  longitude: 77.0266 + (currentFrame * 0.00015),
+                  image_url: snapshotUrl
+                },
+                ...prev.slice(0, 49)
+              ]);
+            }
           }
         }
 
@@ -583,62 +667,59 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         }
       } catch (e) {
         console.warn('Frame processing notice:', e);
+      } finally {
+        isProcessing = false;
       }
     };
 
-    // Ensure video is playing immediately on upload
+    // 1: Ensure video plays immediately on upload
     if (v) {
-      const playAttempt = v.play();
-      if (playAttempt !== undefined) {
-        playAttempt.catch((err) => {
-          console.warn('Video auto-play delayed, waiting for user event:', err);
-        });
-      }
+      v.play().catch((err) => {
+        console.warn('Video auto-play waiting for ready event:', err);
+      });
     }
 
-    // Continuous robust animation loop (guarantees real-time 30 FPS processing without stall)
-    const frameLoop = (now: number) => {
-      if (!isRunning) return;
-      if (now - lastProcessedMs >= 30) {
-        lastProcessedMs = now;
-        processFrameNow();
-      }
-      animId = requestAnimationFrame(frameLoop);
-    };
+    // 2: Single unified scheduler pump (avoid duplicate overlapping callbacks)
+    const hasRvfc = v && 'requestVideoFrameCallback' in HTMLVideoElement.prototype && (v as any).requestVideoFrameCallback;
 
-    animId = requestAnimationFrame(frameLoop);
-
-    // Also attach to requestVideoFrameCallback if available for frame-perfect sync
-    if (v && 'requestVideoFrameCallback' in HTMLVideoElement.prototype && (v as any).requestVideoFrameCallback) {
-      const scheduleRvfc = () => {
+    if (hasRvfc) {
+      const onVideoFrame = () => {
         if (!isRunning) return;
         processFrameNow();
-        rvfcId = (v as any).requestVideoFrameCallback(scheduleRvfc);
+        if (isRunning && v) {
+          rvfcId = (v as any).requestVideoFrameCallback(onVideoFrame);
+        }
       };
-      rvfcId = (v as any).requestVideoFrameCallback(scheduleRvfc);
+      rvfcId = (v as any).requestVideoFrameCallback(onVideoFrame);
+    } else {
+      // Fallback RAF loop when RVFC is unavailable
+      const frameLoop = () => {
+        if (!isRunning) return;
+        processFrameNow();
+        animId = requestAnimationFrame(frameLoop);
+      };
+      animId = requestAnimationFrame(frameLoop);
     }
 
-    const handleVideoEvents = () => {
+    // 1: Trigger immediate detection as soon as video media is ready
+    const handleImmediateStart = () => {
       if (!isRunning) return;
-      processFrameNow();
+      if (v && !isPaused && v.paused) {
+        v.play().catch(() => {});
+      }
+      processFrameNow(true);
     };
 
     if (v) {
-      v.addEventListener('loadeddata', handleVideoEvents);
-      v.addEventListener('canplay', handleVideoEvents);
-      v.addEventListener('playing', handleVideoEvents);
-      v.addEventListener('timeupdate', handleVideoEvents);
-      v.addEventListener('loadedmetadata', handleVideoEvents);
+      v.addEventListener('loadeddata', handleImmediateStart, { once: true });
+      v.addEventListener('canplay', handleImmediateStart, { once: true });
     }
 
     return () => {
       isRunning = false;
       if (v) {
-        v.removeEventListener('loadeddata', handleVideoEvents);
-        v.removeEventListener('canplay', handleVideoEvents);
-        v.removeEventListener('playing', handleVideoEvents);
-        v.removeEventListener('timeupdate', handleVideoEvents);
-        v.removeEventListener('loadedmetadata', handleVideoEvents);
+        v.removeEventListener('loadeddata', handleImmediateStart);
+        v.removeEventListener('canplay', handleImmediateStart);
         if (rvfcId !== null && (v as any).cancelVideoFrameCallback) {
           (v as any).cancelVideoFrameCallback(rvfcId);
         }
@@ -647,7 +728,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         cancelAnimationFrame(animId);
       }
     };
-  }, [videoSource, isImageMedia, isPaused, isCompleted, videoDuration, minConfidenceThreshold, video?.fps]);
+  }, [videoSource, isImageMedia, isPaused, isCompleted, videoDuration, minConfidenceThreshold, video?.fps, speedPreset]);
 
   // 3. Start Hardware Webcam
   const startWebcamStream = async (deviceId?: string) => {
@@ -1017,11 +1098,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               frameImgUrl = getFullImageUrl(msg.image_url);
             }
 
-            if (frameImgUrl) {
-              setCurrentFrameUrl(frameImgUrl);
-              // Frontend Console Log: Frame rendered
-              console.log(`[Frontend] Frame rendered: #${msg.frame_number || 1}`);
-            }
+            const hasDetections = Array.isArray(msg.detections) && msg.detections.length > 0;
+
             if (msg.frame_number) {
               setFrameNumber(msg.frame_number);
             }
@@ -1034,8 +1112,15 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             if (msg.frame_height) {
               setFrameHeight(msg.frame_height);
             }
-            if (Array.isArray(msg.detections)) {
+
+            // 4 & 5: Display only frames where at least one detection is found
+            if (hasDetections) {
+              if (frameImgUrl) {
+                setCurrentFrameUrl(frameImgUrl);
+              }
               setCurrentFrameDetections(msg.detections);
+            } else {
+              setCurrentFrameDetections([]);
             }
 
             // Live GPS update
@@ -1073,19 +1158,31 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               if (typeof msg.counts.helmet_violations === 'number') setHelmetViolationsCount(msg.counts.helmet_violations);
             }
 
-            // Handle incoming detections on frame & update timeline
-            if (Array.isArray(msg.detections) && msg.detections.length > 0) {
-              const newItems: LiveDetectionItem[] = msg.detections.map((d: any, idx: number) => {
-                const cat = (d.category || 'damage').toLowerCase();
-                if (!msg.counts) {
-                  if (cat.includes('pothole')) setPotholeCount((c) => c + 1);
-                  else if (cat.includes('crack')) setCrackCount((c) => c + 1);
-                  else if (cat.includes('broken')) setBrokenRoadCount((c) => c + 1);
-                  else if (cat.includes('asphalt')) setMissingAsphaltCount((c) => c + 1);
-                  if (cat.includes('car') || cat.includes('truck') || cat.includes('vehicle')) setVehicleCount((c) => c + 1);
-                  if (cat.includes('helmet')) setHelmetCount((c) => c + 1);
-                  if (cat.includes('plate')) setNumberPlateCount((c) => c + 1);
-                }
+            // 6: Avoid sending consecutive duplicate detection results
+            if (hasDetections) {
+              const wsSig = msg.detections
+                .map((d: any) => `${(d.category || '').toLowerCase()}@${Math.round((d.x_min ?? d.box?.[0] ?? 0) / 45)},${Math.round((d.y_min ?? d.box?.[1] ?? 0) / 45)}`)
+                .sort()
+                .join(';');
+
+              const msgTime = msg.timestamp ?? (msg.frame_number ? msg.frame_number / 30 : 0);
+              const isDup = wsSig === lastSentDetectionSignatureRef.current && Math.abs(msgTime - lastSentDetectionTimeRef.current) < 2.0;
+
+              if (!isDup) {
+                lastSentDetectionSignatureRef.current = wsSig;
+                lastSentDetectionTimeRef.current = msgTime;
+
+                const newItems: LiveDetectionItem[] = msg.detections.map((d: any, idx: number) => {
+                  const cat = (d.category || 'damage').toLowerCase();
+                  if (!msg.counts) {
+                    if (cat.includes('pothole')) setPotholeCount((c) => c + 1);
+                    else if (cat.includes('crack')) setCrackCount((c) => c + 1);
+                    else if (cat.includes('broken')) setBrokenRoadCount((c) => c + 1);
+                    else if (cat.includes('asphalt')) setMissingAsphaltCount((c) => c + 1);
+                    if (cat.includes('car') || cat.includes('truck') || cat.includes('vehicle')) setVehicleCount((c) => c + 1);
+                    if (cat.includes('helmet')) setHelmetCount((c) => c + 1);
+                    if (cat.includes('plate')) setNumberPlateCount((c) => c + 1);
+                  }
 
                 const sev = d.severity || 'HIGH';
                 const markerColor = getSeverityColor(sev);
@@ -1126,6 +1223,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
               setTimelineEvents((prev) => [...newItems, ...prev.slice(0, 49)]);
             }
+          }
 
             // Update live traffic violations from frame payload
             if (Array.isArray(msg.violations) && msg.violations.length > 0) {
@@ -2037,7 +2135,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
         accelIntervalRef.current = null;
       }
     };
-  }, [isCompleted, isPaused, streamSource, speedPreset, totalFrames, inferenceEngine, backendStatus, backendConnected]);
+  }, [videoSource, isCompleted, isPaused, streamSource, speedPreset, totalFrames, inferenceEngine, backendStatus, backendConnected]);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);

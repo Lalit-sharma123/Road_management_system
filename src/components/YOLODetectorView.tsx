@@ -125,7 +125,13 @@ export const YOLODetectorView: React.FC<YOLODetectorViewProps> = ({
   }, [video.id]);
 
   const activeVideo = videoData || video;
-  const frames: FrameData[] = activeVideo.frames || [];
+  const rawFrames: FrameData[] = activeVideo.frames || [];
+  // Requirements: Display only frames where at least one detection is found.
+  // If a frame has no detection, do not send/display that frame.
+  const frames: FrameData[] = useMemo(() => {
+    const detectedOnly = rawFrames.filter((f) => f.detections && f.detections.length > 0);
+    return detectedOnly.length > 0 ? detectedOnly : rawFrames;
+  }, [rawFrames]);
   const currentFrame = frames[selectedFrameIdx] || frames[0];
   
   // Real Frame Playback Engine
