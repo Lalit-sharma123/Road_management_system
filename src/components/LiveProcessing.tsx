@@ -3218,6 +3218,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           <span className="bg-[#2563EB] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
                             {Math.round((selectedOverlayDetection.confidence || 0.85) * 100)}% CONF
                           </span>
+                          {selectedOverlayDetection.model && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#8B5CF6]/20 text-[#A78BFA] border border-[#8B5CF6]/40">
+                              {selectedOverlayDetection.model}
+                            </span>
+                          )}
                           {selectedOverlayDetection.severity && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#FF3B30]/20 text-[#FF3B30] border border-[#FF3B30]/40">
                               {selectedOverlayDetection.severity.toUpperCase()}
@@ -3225,8 +3230,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           )}
                         </div>
                         <p className="text-[10px] text-[#888] font-mono mt-0.5">
-                          BBOX: [{Math.round(selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0))}, {Math.round(selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0))}, {Math.round(selectedOverlayDetection.x_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[2] : 0))}, {Math.round(selectedOverlayDetection.y_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[3] : 0))}]
-                          {selectedOverlayDetection.width ? ` // DIM: ${Math.round(selectedOverlayDetection.width)}×${Math.round(selectedOverlayDetection.height || 0)}px` : ''}
+                          BBOX: [{Math.round(selectedOverlayDetection.bbox?.x ?? (selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.y ?? (selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.width ?? ((selectedOverlayDetection.x_max ?? 0) - (selectedOverlayDetection.x_min ?? 0)))}, {Math.round(selectedOverlayDetection.bbox?.height ?? ((selectedOverlayDetection.y_max ?? 0) - (selectedOverlayDetection.y_min ?? 0)))}]
+                          {selectedOverlayDetection.parentVehicleId ? ` • ↳ VEHICLE: ${selectedOverlayDetection.parentVehicleId}` : ''}
+                          {selectedOverlayDetection.plateNumber ? ` • ↳ PLATE: ${selectedOverlayDetection.plateNumber}` : ''}
                         </p>
                       </div>
                     </div>
@@ -3324,6 +3330,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           <span className="bg-[#2563EB] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
                             {Math.round((selectedOverlayDetection.confidence || 0.85) * 100)}% CONF
                           </span>
+                          {selectedOverlayDetection.model && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#8B5CF6]/20 text-[#A78BFA] border border-[#8B5CF6]/40">
+                              {selectedOverlayDetection.model}
+                            </span>
+                          )}
                           {selectedOverlayDetection.severity && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#FF3B30]/20 text-[#FF3B30] border border-[#FF3B30]/40">
                               {selectedOverlayDetection.severity.toUpperCase()}
@@ -3331,8 +3342,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           )}
                         </div>
                         <p className="text-[10px] text-[#888] font-mono mt-0.5">
-                          BBOX: [{Math.round(selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0))}, {Math.round(selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0))}, {Math.round(selectedOverlayDetection.x_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[2] : 0))}, {Math.round(selectedOverlayDetection.y_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[3] : 0))}]
-                          {selectedOverlayDetection.width ? ` // DIM: ${Math.round(selectedOverlayDetection.width)}×${Math.round(selectedOverlayDetection.height || 0)}px` : ''}
+                          BBOX: [{Math.round(selectedOverlayDetection.bbox?.x ?? (selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.y ?? (selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.width ?? ((selectedOverlayDetection.x_max ?? 0) - (selectedOverlayDetection.x_min ?? 0)))}, {Math.round(selectedOverlayDetection.bbox?.height ?? ((selectedOverlayDetection.y_max ?? 0) - (selectedOverlayDetection.y_min ?? 0)))}]
+                          {selectedOverlayDetection.parentVehicleId ? ` • ↳ VEHICLE: ${selectedOverlayDetection.parentVehicleId}` : ''}
+                          {selectedOverlayDetection.plateNumber ? ` • ↳ PLATE: ${selectedOverlayDetection.plateNumber}` : ''}
                         </p>
                       </div>
                     </div>
@@ -3422,6 +3434,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           <span className="bg-[#2563EB] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
                             {Math.round((selectedOverlayDetection.confidence || 0.85) * 100)}% CONF
                           </span>
+                          {selectedOverlayDetection.model && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#8B5CF6]/20 text-[#A78BFA] border border-[#8B5CF6]/40">
+                              {selectedOverlayDetection.model}
+                            </span>
+                          )}
                           {selectedOverlayDetection.severity && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-[#FF3B30]/20 text-[#FF3B30] border border-[#FF3B30]/40">
                               {selectedOverlayDetection.severity.toUpperCase()}
@@ -3429,8 +3446,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                           )}
                         </div>
                         <p className="text-[10px] text-[#888] font-mono mt-0.5">
-                          BBOX: [{Math.round(selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0))}, {Math.round(selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0))}, {Math.round(selectedOverlayDetection.x_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[2] : 0))}, {Math.round(selectedOverlayDetection.y_max ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[3] : 0))}]
-                          {selectedOverlayDetection.width ? ` // DIM: ${Math.round(selectedOverlayDetection.width)}×${Math.round(selectedOverlayDetection.height || 0)}px` : ''}
+                          BBOX: [{Math.round(selectedOverlayDetection.bbox?.x ?? (selectedOverlayDetection.x_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[0] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.y ?? (selectedOverlayDetection.y_min ?? (selectedOverlayDetection.box ? selectedOverlayDetection.box[1] : 0)))}, {Math.round(selectedOverlayDetection.bbox?.width ?? ((selectedOverlayDetection.x_max ?? 0) - (selectedOverlayDetection.x_min ?? 0)))}, {Math.round(selectedOverlayDetection.bbox?.height ?? ((selectedOverlayDetection.y_max ?? 0) - (selectedOverlayDetection.y_min ?? 0)))}]
+                          {selectedOverlayDetection.parentVehicleId ? ` • ↳ VEHICLE: ${selectedOverlayDetection.parentVehicleId}` : ''}
+                          {selectedOverlayDetection.plateNumber ? ` • ↳ PLATE: ${selectedOverlayDetection.plateNumber}` : ''}
                         </p>
                       </div>
                     </div>

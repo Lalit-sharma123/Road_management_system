@@ -249,10 +249,23 @@ export class RealtimeVisionEngine {
 
       frameDetections.push({
         id: 'det-person-main',
+        model: 'yolov8n.pt',
+        className: 'person',
         category: 'person',
         type: 'pedestrian',
         confidence: 0.94,
         severity: 'low',
+        bbox: {
+          x: personTrack.x_min,
+          y: personTrack.y_min,
+          width: personTrack.x_max - personTrack.x_min,
+          height: personTrack.y_max - personTrack.y_min,
+          x_min: personTrack.x_min,
+          y_min: personTrack.y_min,
+          x_max: personTrack.x_max,
+          y_max: personTrack.y_max
+        },
+        parentVehicleId: null,
         x_min: personTrack.x_min,
         y_min: personTrack.y_min,
         x_max: personTrack.x_max,
@@ -471,10 +484,25 @@ export class RealtimeVisionEngine {
 
       frameDetections.push({
         id: `det-${matchedTrack.id}`,
+        model: 'yolov8n.pt',
+        className: matchedTrack.category,
         category: matchedTrack.category,
         type: 'vehicle',
         confidence: matchedTrack.confidence,
         severity: 'low',
+        bbox: {
+          x: matchedTrack.x_min,
+          y: matchedTrack.y_min,
+          width: matchedTrack.x_max - matchedTrack.x_min,
+          height: matchedTrack.y_max - matchedTrack.y_min,
+          x_min: matchedTrack.x_min,
+          y_min: matchedTrack.y_min,
+          x_max: matchedTrack.x_max,
+          y_max: matchedTrack.y_max
+        },
+        parentVehicleId: null,
+        plateNumber: matchedTrack.plateNumber,
+        plateConfidence: matchedTrack.plateConfidence,
         x_min: matchedTrack.x_min,
         y_min: matchedTrack.y_min,
         x_max: matchedTrack.x_max,
@@ -490,7 +518,7 @@ export class RealtimeVisionEngine {
         y2: matchedTrack.y_max
       });
 
-      // ANPR Number Plate strictly positioned on vehicle bumper
+      // ANPR Number Plate strictly positioned on vehicle bumper with parentVehicleId association
       if (matchedTrack.plateNumber) {
         const vW = matchedTrack.x_max - matchedTrack.x_min;
         const vH = matchedTrack.y_max - matchedTrack.y_min;
@@ -502,10 +530,25 @@ export class RealtimeVisionEngine {
 
         frameDetections.push({
           id: `det-plate-${matchedTrack.id}`,
+          model: 'numberplate-yolo-v26n.pt',
+          className: 'number_plate',
           category: 'number_plate',
           type: 'anpr',
           confidence: matchedTrack.plateConfidence || 0.96,
           severity: 'low',
+          bbox: {
+            x: pX,
+            y: pY,
+            width: pW,
+            height: pH,
+            x_min: pX,
+            y_min: pY,
+            x_max: pX + pW,
+            y_max: pY + pH
+          },
+          parentVehicleId: `det-${matchedTrack.id}`,
+          plateNumber: matchedTrack.plateNumber,
+          plateConfidence: matchedTrack.plateConfidence || 0.96,
           x_min: pX,
           y_min: pY,
           x_max: pX + pW,
@@ -525,10 +568,23 @@ export class RealtimeVisionEngine {
 
         frameDetections.push({
           id: `det-helmet-${matchedTrack.id}`,
+          model: 'helmet.pt',
+          className: 'helmet',
           category: 'helmet',
           type: 'helmet',
           confidence: 0.94,
           severity: 'low',
+          bbox: {
+            x: hX,
+            y: hY,
+            width: hW,
+            height: hH,
+            x_min: hX,
+            y_min: hY,
+            x_max: hX + hW,
+            y_max: hY + hH
+          },
+          parentVehicleId: `det-${matchedTrack.id}`,
           x_min: hX,
           y_min: hY,
           x_max: hX + hW,
@@ -846,19 +902,19 @@ export class RealtimeVisionEngine {
       }
     }
 
-    // Sort by confidence & filter overlapping defect boxes
+    // Sort by confidence & filter duplicate defect boxes using proper NMS
     candidates.sort((a, b) => b.conf - a.conf);
     const mergedDefects: DefectCandidate[] = [];
 
     for (const cand of candidates) {
-      if (mergedDefects.length >= 3) break;
       let overlaps = false;
       for (const ex of mergedDefects) {
         const iou = this.calculateIoU(
           { x1: cand.x, y1: cand.y, x2: cand.x + cand.w, y2: cand.y + cand.h },
           { x1: ex.x, y1: ex.y, x2: ex.x + ex.w, y2: ex.y + ex.h }
         );
-        if (iou > 0.12) {
+        // Only suppress if genuine duplicate box of same defect (IoU > 0.40)
+        if (iou > 0.40) {
           overlaps = true;
           break;
         }
@@ -926,10 +982,23 @@ export class RealtimeVisionEngine {
 
       outDetections.push({
         id: defectId,
+        model: 'best.pt',
+        className: def.type === 'pothole' ? 'pothole' : def.subType,
         category: def.type === 'pothole' ? 'pothole' : def.subType,
         type: 'damage',
         confidence: def.conf,
         severity: def.severity,
+        bbox: {
+          x: def.x,
+          y: def.y,
+          width: def.w,
+          height: def.h,
+          x_min: def.x,
+          y_min: def.y,
+          x_max: def.x + def.w,
+          y_max: def.y + def.h
+        },
+        parentVehicleId: null,
         x_min: def.x,
         y_min: def.y,
         x_max: def.x + def.w,
@@ -1004,7 +1073,7 @@ export class RealtimeVisionEngine {
           const iArea = this.intersectionArea(bA, bB);
           const minArea = Math.min((bA.x2 - bA.x1) * (bA.y2 - bA.y1), (bB.x2 - bB.x1) * (bB.y2 - bB.y1));
 
-          if (iou > iouThresh || (minArea > 0 && iArea / minArea > 0.35)) {
+          if (iou > iouThresh || (minArea > 0 && iArea / minArea > 0.75)) {
             isDuplicate = true;
             break;
           }
@@ -1018,11 +1087,11 @@ export class RealtimeVisionEngine {
       return kept;
     };
 
-    const cleanVehicles = nmsGroup(vehicles, 0.18);
-    const cleanPersons = nmsGroup(persons, 0.18);
-    const cleanDefects = nmsGroup(defects, 0.14);
-    const cleanPlates = nmsGroup(plates, 0.20);
-    const cleanHelmets = nmsGroup(helmets, 0.20);
+    const cleanVehicles = nmsGroup(vehicles, 0.45);
+    const cleanPersons = nmsGroup(persons, 0.45);
+    const cleanDefects = nmsGroup(defects, 0.40);
+    const cleanPlates = nmsGroup(plates, 0.45);
+    const cleanHelmets = nmsGroup(helmets, 0.45);
 
     // Cross-Class Disambiguation: Road Defects CANNOT exist on top of a car or a person
     const filteredDefects: OverlayDetection[] = [];

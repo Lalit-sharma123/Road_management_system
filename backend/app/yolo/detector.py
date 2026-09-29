@@ -333,11 +333,24 @@ class YOLODamageDetector:
 
                     category_str = str(category).lower()
 
+                    p_title = "Pothole" if "pothole" in category_str else category_str.replace("_", " ").title()
+                    det_label = f"[{p_title}] {int(round(conf * 100))}%"
+                    dam_id = f"dam_{len(detections) + 1}"
+
                     detections.append({
+                        "id": dam_id,
+                        "model": "best.pt",
+                        "className": category_str,
                         "category": category_str,
                         "confidence": round(conf, 4),
                         "type": "damage",
+                        "label": det_label,
+                        "parentVehicleId": None,
                         "bbox": {
+                            "x": round(x_min, 2),
+                            "y": round(y_min, 2),
+                            "width": round(w, 2),
+                            "height": round(h, 2),
                             "x_min": round(x_min, 2),
                             "y_min": round(y_min, 2),
                             "x_max": round(x_max, 2),
@@ -398,7 +411,7 @@ class YOLODamageDetector:
             dt_ms = (time.perf_counter() - t0) * 1000.0
             
             if veh_results and len(veh_results) > 0:
-                for box in veh_results[0].boxes:
+                for idx, box in enumerate(veh_results[0].boxes):
                     cls_id = int(box.cls[0].item())
                     conf = float(box.conf[0].item())
                     xyxy = box.xyxy[0].tolist()
@@ -409,14 +422,23 @@ class YOLODamageDetector:
                     category = self.COCO_VEHICLE_MAP.get(cls_id, "car")
 
                     det_type = "pedestrian" if category == "person" else "vehicle"
-                    det_label = "[yolov8n.pt] Person" if category == "person" else f"[yolov8n.pt] {category.capitalize()}"
+                    det_label = f"[{category.capitalize()}] {int(round(conf * 100))}%"
+                    veh_id = f"veh_{idx + 1}"
 
                     detections.append({
+                        "id": veh_id,
+                        "model": "yolov8n.pt",
+                        "className": category,
                         "category": category,
                         "confidence": round(conf, 4),
                         "type": det_type,
                         "label": det_label,
+                        "parentVehicleId": None,
                         "bbox": {
+                            "x": round(x_min, 2),
+                            "y": round(y_min, 2),
+                            "width": round(w, 2),
+                            "height": round(h, 2),
                             "x_min": round(x_min, 2),
                             "y_min": round(y_min, 2),
                             "x_max": round(x_max, 2),
@@ -587,9 +609,9 @@ class YOLODamageDetector:
         except Exception as err:
             print(f"[Parallel Vehicle Inference Notice]: {err}")
 
-        # Attach license plates on detected vehicles
+        # Attach license plates on detected vehicles with explicit parentVehicleId
         plates = []
-        for v in vehicle_dets:
+        for idx, v in enumerate(vehicle_dets):
             if v.get("type") == "vehicle" and v.get("category") in ["car", "truck", "bus", "motorcycle"]:
                 vx1, vy1 = v.get("x_min", 0), v.get("y_min", 0)
                 vx2, vy2 = v.get("x_max", 0), v.get("y_max", 0)
@@ -599,11 +621,25 @@ class YOLODamageDetector:
                     ph = max(14.0, vh * 0.18)
                     px = vx1 + (vw - pw) / 2.0
                     py = vy1 + vh * 0.74
+                    plate_num = v.get("plate_number") or ""
+                    plate_conf = 0.95
+                    plate_label = f"[Plate] {plate_num} {int(round(plate_conf * 100))}%" if plate_num else f"[Plate] {int(round(plate_conf * 100))}%"
                     plates.append({
+                        "id": f"det-plate-{v.get('id', f'veh_{idx+1}')}",
+                        "model": "numberplate-yolo-v26n.pt",
+                        "className": "number_plate",
                         "category": "number_plate",
-                        "confidence": 0.95,
+                        "confidence": plate_conf,
                         "type": "plate",
+                        "label": plate_label,
+                        "parentVehicleId": v.get("id"),
+                        "plateNumber": plate_num,
+                        "plateConfidence": plate_conf,
                         "bbox": {
+                            "x": round(px, 2),
+                            "y": round(py, 2),
+                            "width": round(pw, 2),
+                            "height": round(ph, 2),
                             "x_min": round(px, 2),
                             "y_min": round(py, 2),
                             "x_max": round(px + pw, 2),
@@ -613,12 +649,12 @@ class YOLODamageDetector:
                         "y_min": round(py, 2),
                         "x_max": round(px + pw, 2),
                         "y_max": round(py + ph, 2),
-                        "label": "[numberplate-yolo-v26n.pt] Plate"
+                        "area_pixels": round(pw * ph, 2)
                     })
         merged_detections.extend(plates)
 
         # Apply strict NMS and cross-class spatial exclusion
-        merged_detections = self._apply_strict_nms(merged_detections, iou_thresh=0.20)
+        merged_detections = self._apply_strict_nms(merged_detections, iou_thresh=0.45)
 
         # Update legacy helmet_plate aggregate telemetry
         total_lat = (self.telemetry["helmet"]["avg_latency_ms"] + self.telemetry["numberplate"]["avg_latency_ms"])
@@ -673,11 +709,21 @@ class YOLODamageDetector:
                     cat = "alligator_crack"
                     dtype = "damage"
 
+                p_title = "Pothole" if cat == "pothole" else cat.replace("_", " ").title()
                 detections.append({
+                    "id": f"dam_fallback_{len(detections) + 1}",
+                    "model": "best.pt",
+                    "className": cat,
                     "category": cat,
                     "confidence": round(conf, 4),
                     "type": dtype,
+                    "label": f"[{p_title}] {int(round(conf * 100))}%",
+                    "parentVehicleId": None,
                     "bbox": {
+                        "x": float(x),
+                        "y": float(y),
+                        "width": float(w),
+                        "height": float(h),
                         "x_min": float(x),
                         "y_min": float(y),
                         "x_max": float(x + w),
@@ -689,12 +735,12 @@ class YOLODamageDetector:
                     "y_max": float(y + h),
                     "area_pixels": float(area)
                 })
-                if len(detections) >= 5:
+                if len(detections) >= 25:
                     break
 
         return detections
 
-    def _apply_strict_nms(self, detections: List[Dict[str, Any]], iou_thresh: float = 0.20) -> List[Dict[str, Any]]:
+    def _apply_strict_nms(self, detections: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str, Any]]:
         """
         Strict Non-Maximum Suppression (NMS) and Cross-Category Spatial Exclusion:
         1. Suppresses duplicate bounding boxes of the same category with IoU > iou_thresh.
@@ -746,7 +792,7 @@ class YOLODamageDetector:
                 if cat == k_cat:
                     iou = calculate_iou(d, k)
                     ir = inter_ratio(d, k)
-                    if iou > iou_thresh or ir > 0.40:
+                    if iou > iou_thresh or ir > 0.75:
                         is_dup = True
                         break
             if is_dup:
