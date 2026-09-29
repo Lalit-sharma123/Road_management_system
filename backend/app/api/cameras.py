@@ -439,6 +439,86 @@ async def patch_camera_stream(
     return camera
 
 
+class CameraTestRequest(BaseModel):
+    stream_url: str
+    camera_type: Optional[str] = "rtsp"
+    timeout_seconds: Optional[float] = 6.0
+
+
+class CameraConnectRequest(BaseModel):
+    camera_id: Optional[str] = None
+    camera_name: Optional[str] = "Live CCTV Camera"
+    camera_type: Optional[str] = "rtsp"
+    stream_url: str
+
+
+class CameraDisconnectRequest(BaseModel):
+    camera_id: str
+
+
+@router.post("/test-connection")
+async def test_camera_connection_endpoint(payload: CameraTestRequest):
+    """
+    POST /api/v1/cameras/test-connection
+    Tests connectivity to an RTSP, CCTV, HTTP stream, or local webcam device.
+    Verifies that the stream is reachable, credentials are valid, and initial video frame decodes.
+    """
+    if not payload.stream_url or not payload.stream_url.strip():
+        raise HTTPException(status_code=400, detail="stream_url is required to test camera connection.")
+
+    result = await camera_manager.test_camera_connection(
+        stream_url=payload.stream_url,
+        timeout_seconds=payload.timeout_seconds or 6.0
+    )
+    return result
+
+
+@router.post("/connect")
+async def connect_camera_stream_endpoint(payload: CameraConnectRequest):
+    """
+    POST /api/v1/cameras/connect
+    Connects to an RTSP/CCTV/Webcam stream and initiates background real-time detection.
+    Returns session and stream details for WebSocket subscription.
+    """
+    if not payload.stream_url or not payload.stream_url.strip():
+        raise HTTPException(status_code=400, detail="stream_url is required to connect camera.")
+
+    cam_id = payload.camera_id or f"rtsp_{int(time.time())}"
+    cam_name = payload.camera_name or f"CCTV Stream ({cam_id})"
+    cam_type = payload.camera_type or "rtsp"
+
+    await camera_manager.start_camera_stream(
+        camera_id=cam_id,
+        camera_name=cam_name,
+        camera_type=cam_type,
+        stream_url=payload.stream_url
+    )
+
+    return {
+        "status": "connecting",
+        "camera_id": cam_id,
+        "camera_name": cam_name,
+        "camera_type": cam_type,
+        "stream_url": payload.stream_url,
+        "websocket_url": f"/api/v1/cameras/ws/live/{cam_id}",
+        "message": f"Camera stream initiated for {cam_name}. Real-time detection worker started."
+    }
+
+
+@router.post("/disconnect")
+async def disconnect_camera_stream_endpoint(payload: CameraDisconnectRequest):
+    """
+    POST /api/v1/cameras/disconnect
+    Stops real-time detection and cleanly closes the camera connection.
+    """
+    await camera_manager.stop_camera_stream(payload.camera_id)
+    return {
+        "status": "stopped",
+        "camera_id": payload.camera_id,
+        "message": f"Camera {payload.camera_id} stream stopped cleanly."
+    }
+
+
 # WebSockets for live video streams
 @router.websocket("/ws/camera/{camera_id}")
 @router.websocket("/ws/live/{camera_id}")
@@ -457,3 +537,4 @@ async def camera_websocket_endpoint(websocket: WebSocket, camera_id: str):
         camera_manager.disconnect_websocket(camera_id, websocket)
     except Exception:
         camera_manager.disconnect_websocket(camera_id, websocket)
+

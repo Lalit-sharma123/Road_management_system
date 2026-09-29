@@ -77,6 +77,7 @@
 - [File Reference](#file-reference)
 - [Configuration](#configuration)
 - [Installation & Setup](#installation--setup)
+- [CCTV & IP Camera Real-Time Setup](#cctv--ip-camera-real-time-setup)
 - [Deployment](#deployment)
 - [Future Improvements & Roadmap](#future-improvements--roadmap)
 - [License & Acknowledgments](#license--acknowledgments)
@@ -1223,6 +1224,153 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 npm run dev
 ```
 *Frontend application will be accessible at `http://localhost:3000`.*
+
+---
+
+## CCTV & IP Camera Real-Time Setup
+
+The system provides native, enterprise-grade integration for live CCTV and IP surveillance cameras streaming over RTSP (Real-Time Streaming Protocol) or HTTP. The CCTV pipeline directly reuses the existing 4-model YOLO detection pipeline (`best.pt`, `yolov8n.pt`, `helmet.pt`, `numberplate-yolo-v26n.pt`) without creating a separate duplicate system, while ensuring that existing uploaded video processing remains completely intact.
+
+### 1. Required Dependencies
+
+To run RTSP streaming and real-time camera inference:
+
+- **OpenCV with FFmpeg Support**:
+  ```bash
+  pip install opencv-python>=4.8.0
+  ```
+  Ensure FFmpeg is installed on your host system:
+  - Ubuntu/Debian: `sudo apt-get update && sudo apt-get install -y ffmpeg libsm6 libxext6`
+  - macOS: `brew install ffmpeg`
+  - Windows: Pre-packaged with standard `opencv-python` wheels
+- **FastAPI, Starlette & WebSockets** (Backend real-time stream broadcaster):
+  ```bash
+  pip install fastapi uvicorn[standard] websockets pydantic-settings
+  ```
+- **React Frontend**:
+  - `ws` / browser WebSocket API
+  - `lucide-react` icons
+
+### 2. How to Configure the RTSP URL
+
+Camera configurations are never hardcoded. You can configure the RTSP URL in two ways:
+
+#### Option A: Via Environment / Config File
+Add optional defaults to your `.env` file (see `.env.example`):
+```env
+# Default RTSP URL (placeholder format)
+DEFAULT_RTSP_URL=rtsp://<username>:<password>@<ip_address>:<port>/<stream_path>
+VITE_DEFAULT_RTSP_URL=rtsp://<username>:<password>@<ip_address>:<port>/<stream_path>
+
+# RTSP transport protocol: "tcp" (recommended for firewalls/unreliable networks) or "udp"
+RTSP_TRANSPORT=tcp
+
+# Connection & reconnection parameters
+CAMERA_CONNECT_TIMEOUT_SECONDS=10
+CAMERA_RECONNECT_DELAY_SECONDS=3
+CAMERA_MAX_RECONNECT_ATTEMPTS=10
+CAMERA_FRAME_SKIP=2
+CAMERA_DISPLAY_ONLY_DETECTIONS=true
+```
+
+#### Option B: Directly in the UI
+In the web application:
+1. Navigate to the **Live Processing** tab.
+2. Select the **Live CCTV / RTSP Camera** source toggle.
+3. Choose a preset camera or select **Custom RTSP Camera Stream**.
+4. Type or paste your RTSP stream endpoint in the input field.
+
+### 3. RTSP URL Format & Examples (Placeholder Credentials)
+
+RTSP stream endpoints follow standard RFC 2326 URI syntax. Replace the placeholders `<username>`, `<password>`, `<ip_address>`, `<port>`, and `<stream_path>` with your camera's actual parameters:
+
+- **Standard Authenticated RTSP URL**:
+  ```text
+  rtsp://<username>:<password>@<ip_address>:<port>/<stream_path>
+  ```
+  *Example (with placeholder credentials):*
+  ```text
+  rtsp://admin:CameraPass123@192.168.1.100:554/h264Preview_01_main
+  ```
+
+- **Hikvision IP Camera Example**:
+  ```text
+  rtsp://<username>:<password>@<camera_ip>:554/Streaming/Channels/101
+  ```
+
+- **Dahua IP Camera Example**:
+  ```text
+  rtsp://<username>:<password>@<camera_ip>:554/cam/realmonitor?channel=1&subtype=0
+  ```
+
+- **Unauthenticated / Public RTSP Example**:
+  ```text
+  rtsp://<ip_address>:<port>/live/ch0
+  ```
+
+### 4. How to Connect the Camera
+
+1. In the **Live CCTV / RTSP Camera** panel, enter your RTSP endpoint.
+2. *(Optional but Recommended)* Click **Test Conn** to probe the camera stream.
+   - The system checks port 554 reachability, validates authentication, and decodes the initial keyframe.
+   - It will display stream resolution (e.g. `1920x1080`), latency (ms), and FPS.
+3. Click the **Start AI** (or **Connect & Start Detection**) button.
+4. The system opens the camera stream in the background, spins up a dedicated non-blocking ingestion task, and establishes a real-time WebSocket channel.
+
+### 5. How to Start Real-Time Detection
+
+Once connected, real-time detection starts automatically:
+1. Frames are captured sequentially using an adaptive frame-skip strategy (e.g. process every 2nd or 3rd frame) to ensure ultra-low latency without CPU/GPU thrashing.
+2. The existing multi-model YOLO detector evaluates each frame concurrently:
+   - **`best.pt`**: Road surface defects (potholes, longitudinal/transverse cracks, broken pavement, missing asphalt).
+   - **`yolov8n.pt`**: Traffic volume & vehicles (cars, trucks, buses, motorcycles, bicycles, pedestrians).
+   - **`helmet.pt`**: Two-wheeler rider helmet compliance (`helmet` vs `no_helmet`).
+   - **`numberplate-yolo-v26n.pt`**: License plate localization and ANPR OCR.
+3. **Detected-Only Display Filter**:
+   - Frames where **no detections** are present are automatically omitted from display and network transfer to conserve bandwidth and avoid screen clutter.
+   - Periodic lightweight heartbeats maintain connection health.
+4. **Consecutive Duplicate Suppression**:
+   - Consecutive duplicate detections (spatial position and class signature match within 2.0s) are suppressed to prevent timeline event flooding.
+5. The live viewport displays bounding boxes, defect tags, confidence scores, and updates real-time analytics KPI cards in synchronization with the stream timestamp.
+
+### 6. How to Stop Detection
+
+To cleanly terminate detection:
+1. Click the red **Stop Stream** button in the Live CCTV control panel.
+2. The system sends a disconnect signal to the server, releases the OpenCV `cv2.VideoCapture` hardware handle, terminates the background worker thread, closes the WebSocket connection, and resets UI states.
+
+### 7. How to Test with a Local / Webcam Camera
+
+If you do not have a physical RTSP IP camera available, you can easily test the entire CCTV flow locally:
+
+- **Local Video Device Index**:
+  In the stream URL input, enter:
+  ```text
+  0
+  ```
+  *(or `1`, `2` for external USB webcams)*. OpenCV will open the local camera hardware device through the exact same capture and multi-model YOLO pipeline.
+- **In-Browser Hardware Webcam Option**:
+  Switch the source toggle to **USB Webcam / Local Device**. The browser will request camera permissions and run real-time multi-model YOLO inference directly on your webcam video frames.
+- **Local RTSP Simulator (via Docker or MediaMTX / RTSP-Simple-Server)**:
+  Run a local RTSP rebroadcaster:
+  ```bash
+  docker run --rm -it -e MTX_PROTOCOLS=tcp -p 8554:8554 bluenviron/mediamtx
+  ```
+  Stream a test video to it using FFmpeg:
+  ```bash
+  ffmpeg -re -stream_loop -1 -i sample_road.mp4 -c copy -f rtsp rtsp://localhost:8554/live
+  ```
+  Then enter `rtsp://localhost:8554/live` in the application UI.
+
+### 8. Troubleshooting
+
+| Issue | Likely Cause | Solution |
+| :--- | :--- | :--- |
+| **Connection Failure (`Could not open stream`)** | Incorrect IP address, camera powered off, or port 554 blocked | 1. Ping the camera IP to ensure network reachability.<br>2. Verify port `554` is open using `telnet <camera_ip> 554` or `nmap -p 554 <camera_ip>`.<br>3. Check that camera is on the same subnet/VLAN or VPN. |
+| **Authentication Failure (`401 Unauthorized`)** | Wrong username or password | 1. Check RTSP credentials in the URL format `rtsp://<user>:<pass>@<ip>:554/...`.<br>2. If your password contains special characters (e.g., `@`, `:`, `/`, `?`), URL-encode them (e.g., `@` becomes `%40`).<br>3. Verify ONVIF/RTSP authentication settings in camera web UI (Digest vs Basic auth). |
+| **Connection Timeout (`Timed out after 6.0s`)** | Firewall blocking packets or slow handshake | 1. Ensure `RTSP_TRANSPORT=tcp` is set (TCP is much more resilient through firewalls and NAT than UDP).<br>2. Increase `CAMERA_CONNECT_TIMEOUT_SECONDS=15` in `.env`.<br>3. Verify router port forwarding if accessing remote cameras. |
+| **Unsupported RTSP Stream / Decoding Error** | Unsupported video codec or invalid stream path | 1. Ensure camera video encoding is set to **H.264** or **H.265 (HEVC)** in the camera admin panel.<br>2. Avoid unsupported proprietary codecs or MJPEG-only RTSP streams.<br>3. Double-check your camera manufacturer's exact RTSP path (e.g. `/h264Preview_01_main` for Reolink, `/Streaming/Channels/101` for Hikvision, `/cam/realmonitor` for Dahua). |
+| **Stream Interrupted / Reconnecting** | Network packet loss or Wi-Fi jitter | 1. The system has built-in auto-reconnection with backoff.<br>2. Prefer wired Ethernet over Wi-Fi for IP CCTV cameras.<br>3. Lower the camera sub-stream bitrate or FPS (e.g. 15–20 FPS) if bandwidth is constrained. |
 
 ---
 

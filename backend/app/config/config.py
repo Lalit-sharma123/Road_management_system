@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     WEIGHT_DENSITY: float = 0.25
     WEIGHT_CLASS_SEVERITY: float = 0.15
 
+    # CCTV & RTSP Camera Configuration (Configured via env or UI, never hardcoded)
+    DEFAULT_RTSP_URL: Optional[str] = None
+    RTSP_TRANSPORT: str = "tcp"  # "tcp" or "udp" for OpenCV ffmpeg backend
+    CAMERA_CONNECT_TIMEOUT_SECONDS: int = 10
+    CAMERA_RECONNECT_DELAY_SECONDS: int = 3
+    CAMERA_MAX_RECONNECT_ATTEMPTS: int = 10
+    CAMERA_FRAME_SKIP: int = 2  # Sample every Nth frame for efficiency
+    CAMERA_DISPLAY_ONLY_DETECTIONS: bool = True  # Display/broadcast only frames with detections
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

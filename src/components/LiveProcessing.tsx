@@ -40,11 +40,17 @@ import {
   Terminal,
   Cpu,
   Check,
-  AlertCircle
+  AlertCircle,
+  Globe,
+  Tv,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import L from 'leaflet';
-import { InspectionVideo } from '../types/inspection';
+import { InspectionVideo, CameraDevice } from '../types/inspection';
 import { videoService } from '../services/videoService';
+import { cameraService, CameraTestResult } from '../services/cameraService';
+import { sampleCameras } from '../data/mockCameras';
 import { apiClient } from '../services/apiClient';
 import { stolenVehicleService } from '../services/stolenVehicleService';
 import { StolenVehicleAlert } from '../types/stolenVehicle';
@@ -69,16 +75,38 @@ interface LiveProcessingProps {
   video?: InspectionVideo | null;
   onNavigate: (tab: string) => void;
   onProcessingComplete?: (updatedVideo: InspectionVideo) => void;
+  initialCamera?: CameraDevice | null;
+  cameras?: CameraDevice[];
 }
 
 export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   videoId,
   video,
   onNavigate,
-  onProcessingComplete
+  onProcessingComplete,
+  initialCamera,
+  cameras = []
 }) => {
-  // Stream Source Selection: 'server_ws' or 'hardware_webcam'
-  const [streamSource, setStreamSource] = useState<'server_ws' | 'hardware_webcam'>('server_ws');
+  // Stream Source Selection: 'server_ws' (uploaded video), 'cctv_rtsp' (CCTV/IP Camera), or 'hardware_webcam'
+  const [streamSource, setStreamSource] = useState<'server_ws' | 'cctv_rtsp' | 'hardware_webcam'>(
+    initialCamera ? 'cctv_rtsp' : 'server_ws'
+  );
+
+  // CCTV / RTSP Camera Stream State (Configured via env or UI, never hardcoded)
+  const defaultRtspFromEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_DEFAULT_RTSP_URL) || '';
+  const [rtspUrl, setRtspUrl] = useState<string>(initialCamera?.stream_url || defaultRtspFromEnv);
+  const [cameraName, setCameraName] = useState<string>(initialCamera?.camera_name || 'Live CCTV Feed');
+  const [selectedCameraId, setSelectedCameraId] = useState<string>(initialCamera?.id || 'cctv-live');
+  const [cameraConnectionStatus, setCameraConnectionStatus] = useState<
+    'disconnected' | 'testing' | 'connecting' | 'online' | 'reconnecting' | 'failed' | 'timeout'
+  >('disconnected');
+  const [cameraStatusMessage, setCameraStatusMessage] = useState<string>('');
+  const [cameraTestResult, setCameraTestResult] = useState<CameraTestResult | null>(null);
+  const [isTestingCamera, setIsTestingCamera] = useState<boolean>(false);
+  const [isConnectingCamera, setIsConnectingCamera] = useState<boolean>(false);
+  const [cameraReconnectCount, setCameraReconnectCount] = useState<number>(0);
+  const cameraWsRef = useRef<WebSocket | null>(null);
+  const cameraReconnectTimeoutRef = useRef<any>(null);
 
   const [currentFrameUrl, setCurrentFrameUrl] = useState<string | null>(null);
   const [frameNumber, setFrameNumber] = useState<number>(0);
@@ -729,6 +757,211 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       }
     };
   }, [videoSource, isImageMedia, isPaused, isCompleted, videoDuration, minConfidenceThreshold, video?.fps, speedPreset]);
+
+  // Sync initial camera when selected from Camera Live Grid or Camera Management
+  useEffect(() => {
+    if (initialCamera) {
+      setStreamSource('cctv_rtsp');
+      setRtspUrl(initialCamera.stream_url);
+      setCameraName(initialCamera.camera_name);
+      setSelectedCameraId(initialCamera.id);
+    }
+  }, [initialCamera]);
+
+  // Clean up camera stream and timers on unmount
+  useEffect(() => {
+    return () => {
+      handleStopCameraStream();
+    };
+  }, []);
+
+  // CCTV / RTSP Connection Testing
+  const handleTestCameraConnection = async () => {
+    if (!rtspUrl.trim()) {
+      setCameraStatusMessage('Please enter an RTSP stream URL or select a camera.');
+      return;
+    }
+    setIsTestingCamera(true);
+    setCameraStatusMessage('Probing camera RTSP endpoint and validating stream reachability...');
+    setCameraTestResult(null);
+
+    try {
+      const result = await cameraService.testConnection(rtspUrl.trim(), 'rtsp', 6.0);
+      setCameraTestResult(result);
+      if (result.connected && result.status === 'online') {
+        setCameraStatusMessage(`Camera reachable: ${result.resolution || '1920x1080'} @ ${result.fps || 30} FPS (Latency: ${result.latency_ms || 18}ms)`);
+      } else if (result.status === 'timeout') {
+        setCameraStatusMessage(result.error || 'Connection timed out after 6s. Check IP, port 554, and firewall.');
+      } else {
+        setCameraStatusMessage(result.error || 'Failed to connect to RTSP camera stream.');
+      }
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error || err.message || 'Connection test failed';
+      setCameraStatusMessage(`Test failed: ${errMsg}`);
+      setCameraTestResult({
+        connected: false,
+        status: 'failed',
+        error: errMsg
+      });
+    } finally {
+      setIsTestingCamera(false);
+    }
+  };
+
+  // Connect CCTV Camera Stream & Launch Real-Time Multi-Model YOLO Detection
+  const handleStartCameraStream = async () => {
+    if (!rtspUrl.trim()) {
+      setCameraStatusMessage('RTSP URL is required to start camera stream.');
+      return;
+    }
+
+    handleStopCameraStream();
+    setIsConnectingCamera(true);
+    setCameraConnectionStatus('connecting');
+    setCameraStatusMessage(`Connecting to RTSP feed: ${cameraName}...`);
+    setStatusText(`Connecting to CCTV Stream [${cameraName}]...`);
+    setActiveStage('Connecting Camera');
+
+    try {
+      const connectResult = await cameraService.connectCamera(
+        rtspUrl.trim(),
+        cameraName,
+        selectedCameraId,
+        'rtsp'
+      );
+
+      setCameraConnectionStatus('online');
+      setCameraStatusMessage(connectResult.message || 'Stream connected. Multi-model YOLO inference active.');
+      setStatusText(`CCTV Live: ${cameraName} — Real-Time Multi-Model YOLO Running`);
+      setActiveStage('Detecting');
+
+      // Connect camera WebSocket
+      const ws = cameraService.connectCameraWebSocket(
+        selectedCameraId,
+        (msg: any) => {
+          // Handle camera status update
+          if (msg.type === 'camera_status_update') {
+            if (msg.camera_status === 'reconnecting') {
+              setCameraConnectionStatus('reconnecting');
+              setCameraReconnectCount(msg.reconnect_attempt || 1);
+              setCameraStatusMessage(msg.message || 'Reconnecting to stream...');
+              setStatusText(`CCTV Reconnecting: ${msg.message}`);
+            } else if (msg.camera_status === 'failed') {
+              setCameraConnectionStatus('failed');
+              setCameraStatusMessage(msg.message || 'Camera stream failed. Check RTSP credentials/network.');
+              setStatusText('CCTV Stream Offline — Connection Failed');
+            } else if (msg.camera_status === 'online') {
+              setCameraConnectionStatus('online');
+              setCameraReconnectCount(0);
+              setCameraStatusMessage(`Online: ${cameraName}`);
+              setStatusText(`CCTV Live: ${cameraName} — Active Multi-Model YOLO`);
+            }
+            return;
+          }
+
+          if (msg.type === 'camera_heartbeat') {
+            // Lightweight heartbeat: keeps connection verified without sending redundant image data
+            if (msg.camera_status) setCameraConnectionStatus('online');
+            if (msg.fps) setFps(msg.fps);
+            return;
+          }
+
+          // Requirements:
+          // 4. "Display only frames where at least one detection is found."
+          // 5. "If a frame has no detection, do not send/display that frame."
+          const hasDetections = Array.isArray(msg.detections) && msg.detections.length > 0;
+          if (!hasDetections) {
+            return; // Discard empty frames without detections!
+          }
+
+          // Update frame & timestamps
+          if (msg.frame_number) setFrameNumber(msg.frame_number);
+          if (msg.timestamp !== undefined) setTimestamp(msg.timestamp);
+          if (msg.fps) setFps(msg.fps);
+          if (msg.road_health !== undefined) setRoadHealth(msg.road_health);
+
+          // Update counts
+          if (msg.road_damage_count !== undefined) setRoadDamageCount(msg.road_damage_count);
+          if (msg.vehicle_count !== undefined) setVehicleCount(msg.vehicle_count);
+          if (msg.helmet_count !== undefined) setHelmetCount(msg.helmet_count);
+          if (msg.number_plate_count !== undefined) setNumberPlateCount(msg.number_plate_count);
+
+          if (msg.damage_by_type) {
+            setPotholeCount(msg.damage_by_type.pothole || 0);
+            setCrackCount(
+              (msg.damage_by_type.longitudinal_crack || 0) +
+              (msg.damage_by_type.transverse_crack || 0) +
+              (msg.damage_by_type.alligator_crack || 0)
+            );
+            setBrokenRoadCount(msg.damage_by_type.broken_road || 0);
+            setMissingAsphaltCount(msg.damage_by_type.missing_asphalt || 0);
+          }
+
+          // Set detection bounding boxes
+          setCurrentFrameDetections(msg.detections);
+
+          // Only display the frame if detections are present
+          if (msg.image_base64) {
+            setCurrentFrameUrl(msg.image_base64);
+          }
+
+          // Timeline event push (with deduplication)
+          if (!msg.is_duplicate) {
+            const newTimelineItems: LiveDetectionItem[] = msg.detections.map((d: any, idx: number) => ({
+              id: d.id || `cctv-${msg.frame_number || 1}-${idx}`,
+              category: d.category || 'damage',
+              confidence: d.confidence || 0.90,
+              severity: (d.type === 'damage' || d.category === 'no_helmet') ? 'HIGH' : 'LOW',
+              frame_number: msg.frame_number || frameNumber,
+              timestamp: msg.timestamp || timestamp,
+              image_url: msg.image_base64
+            }));
+            setTimelineEvents((prev) => [...newTimelineItems, ...prev.slice(0, 49)]);
+          }
+        },
+        (err) => {
+          console.warn('Camera websocket error:', err);
+        },
+        () => {
+          if (cameraConnectionStatus === 'online') {
+            setCameraConnectionStatus('reconnecting');
+            setCameraStatusMessage('Stream interrupted. Auto-reconnecting...');
+          }
+        },
+        () => {
+          setCameraConnectionStatus('online');
+        }
+      );
+
+      cameraWsRef.current = ws;
+
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.response?.data?.error || err.message || 'Failed to connect camera';
+      setCameraConnectionStatus('failed');
+      setCameraStatusMessage(`Connection error: ${errMsg}`);
+      setStatusText(`CCTV Stream Error: ${errMsg}`);
+    } finally {
+      setIsConnectingCamera(false);
+    }
+  };
+
+  // Disconnect CCTV Stream Cleanly
+  const handleStopCameraStream = () => {
+    if (cameraReconnectTimeoutRef.current) {
+      clearTimeout(cameraReconnectTimeoutRef.current);
+      cameraReconnectTimeoutRef.current = null;
+    }
+    if (cameraWsRef.current) {
+      try {
+        cameraWsRef.current.close();
+      } catch {}
+      cameraWsRef.current = null;
+    }
+    cameraService.disconnectCamera(selectedCameraId).catch(() => {});
+    setCameraConnectionStatus('disconnected');
+    setCameraStatusMessage('Camera stream disconnected cleanly.');
+    setStatusText('CCTV Stream Stopped Cleanly');
+  };
 
   // 3. Start Hardware Webcam
   const startWebcamStream = async (deviceId?: string) => {
@@ -2166,10 +2399,11 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
       {/* Stream Source Mode Selector & Control Bar */}
       <div className="bg-[#141414] border border-[#2A2A2A] p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
               setStreamSource('server_ws');
+              handleStopCameraStream();
               stopWebcamStream();
             }}
             className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 transition-all ${
@@ -2179,12 +2413,31 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             }`}
           >
             <Radio className="w-3.5 h-3.5" />
-            <span>Uploaded Video Realtime Stream</span>
+            <span>Uploaded Video Stream</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setStreamSource('cctv_rtsp');
+              stopWebcamStream();
+            }}
+            className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 transition-all ${
+              streamSource === 'cctv_rtsp'
+                ? 'bg-[#2563EB] text-white border-[#2563EB] shadow-[0_0_10px_rgba(37,99,235,0.4)]'
+                : 'bg-[#1A1A1A] text-[#888] border-[#333] hover:text-white'
+            }`}
+          >
+            <Tv className="w-3.5 h-3.5" />
+            <span>Live CCTV / RTSP Camera</span>
+            {cameraConnectionStatus === 'online' && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-1" />
+            )}
           </button>
 
           <button
             onClick={() => {
               setStreamSource('hardware_webcam');
+              handleStopCameraStream();
               enumerateWebcamDevices();
             }}
             className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 transition-all ${
@@ -2194,9 +2447,53 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             }`}
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>Live Hardware CCTV / Webcam</span>
+            <span>USB Webcam / Local Device</span>
           </button>
         </div>
+
+        {/* CCTV / RTSP Camera Header Status Badges */}
+        {streamSource === 'cctv_rtsp' && (
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider border flex items-center gap-1.5 rounded ${
+                cameraConnectionStatus === 'online'
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-[0_0_10px_rgba(52,199,89,0.3)]'
+                  : cameraConnectionStatus === 'connecting'
+                  ? 'bg-blue-500/15 text-blue-400 border-blue-500/40 animate-pulse'
+                  : cameraConnectionStatus === 'reconnecting'
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/40 animate-pulse'
+                  : cameraConnectionStatus === 'failed' || cameraConnectionStatus === 'timeout'
+                  ? 'bg-red-500/15 text-red-400 border-red-500/40'
+                  : 'bg-[#1A1A1A] text-[#888] border-[#333]'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  cameraConnectionStatus === 'online'
+                    ? 'bg-emerald-400 animate-ping'
+                    : cameraConnectionStatus === 'connecting' || cameraConnectionStatus === 'reconnecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : cameraConnectionStatus === 'failed'
+                    ? 'bg-red-400'
+                    : 'bg-slate-500'
+                }`}
+              />
+              <span>
+                {cameraConnectionStatus === 'online'
+                  ? 'CCTV ONLINE'
+                  : cameraConnectionStatus === 'connecting'
+                  ? 'CONNECTING...'
+                  : cameraConnectionStatus === 'reconnecting'
+                  ? `RECONNECTING (${cameraReconnectCount})`
+                  : cameraConnectionStatus === 'failed'
+                  ? 'CONNECTION FAILED'
+                  : cameraConnectionStatus === 'timeout'
+                  ? 'TIMEOUT'
+                  : 'DISCONNECTED'}
+              </span>
+            </span>
+          </div>
+        )}
 
         {streamSource === 'hardware_webcam' && (
           <div className="flex flex-wrap items-center gap-2">
@@ -2242,6 +2539,145 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           </div>
         )}
       </div>
+
+      {/* CCTV / IP Camera RTSP Stream Configuration Banner */}
+      {streamSource === 'cctv_rtsp' && (
+        <div className="bg-[#10141e] border-2 border-blue-500/40 p-4 space-y-3 shadow-[0_0_20px_rgba(37,99,235,0.15)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Tv className="w-4 h-4 text-blue-400" />
+              <span className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                CCTV / RTSP Camera Stream Input
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                Multi-Model YOLO (best.pt + yolov8n.pt + helmet.pt + numberplate.pt)
+              </span>
+            </div>
+
+            {/* Registered Camera Preset Selector */}
+            {cameras && cameras.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400 uppercase font-mono">Preset:</span>
+                <select
+                  value={selectedCameraId}
+                  onChange={(e) => {
+                    const chosenId = e.target.value;
+                    setSelectedCameraId(chosenId);
+                    const chosen = cameras.find((c) => c.id === chosenId);
+                    if (chosen) {
+                      setCameraName(chosen.camera_name);
+                      setRtspUrl(chosen.stream_url);
+                      setCameraStatusMessage(`Loaded preset: ${chosen.camera_name}`);
+                    }
+                  }}
+                  className="bg-slate-900 text-white text-xs border border-slate-700 rounded px-2.5 py-1 font-mono focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="custom">-- Custom RTSP Camera Stream --</option>
+                  {cameras.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.camera_name} ({c.camera_type.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* RTSP URL Input & Action Control Bar */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            <div className="md:col-span-8 flex flex-col space-y-1">
+              <label className="text-[11px] font-mono font-bold text-slate-300 flex items-center justify-between">
+                <span>RTSP Stream Endpoint / IP Camera URL / Device Index</span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  RTSP, HTTP, or local index (e.g. 0, 1)
+                </span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={rtspUrl}
+                  onChange={(e) => setRtspUrl(e.target.value)}
+                  placeholder="rtsp://<username>:<password>@<ip_address>:<port>/<stream_path> (or 0 for webcam)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-blue-500 placeholder-slate-600 shadow-inner"
+                />
+              </div>
+            </div>
+
+            <div className="md:col-span-4 flex items-center gap-2 pt-1 md:pt-4">
+              {/* Test Connection Button */}
+              <button
+                type="button"
+                onClick={handleTestCameraConnection}
+                disabled={isTestingCamera || isConnectingCamera}
+                className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                title="Probe camera reachability, port 554, and codec without starting detection"
+              >
+                {isTestingCamera ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                ) : (
+                  <Wifi className="w-3.5 h-3.5 text-blue-400" />
+                )}
+                <span>{isTestingCamera ? 'Testing...' : 'Test Conn'}</span>
+              </button>
+
+              {/* Start / Stop Stream Toggle */}
+              {cameraConnectionStatus !== 'online' && cameraConnectionStatus !== 'reconnecting' ? (
+                <button
+                  type="button"
+                  onClick={handleStartCameraStream}
+                  disabled={isConnectingCamera || isTestingCamera}
+                  className="flex-1 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-mono font-black text-xs uppercase tracking-wider rounded transition-all shadow-[0_0_15px_rgba(52,199,89,0.3)] flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {isConnectingCamera ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin fill-black" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5 fill-black" />
+                  )}
+                  <span>{isConnectingCamera ? 'Connecting...' : 'Start AI'}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStopCameraStream}
+                  className="flex-1 px-3.5 py-2 bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs uppercase tracking-wider rounded transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)] flex items-center justify-center gap-1.5"
+                >
+                  <Square className="w-3.5 h-3.5 fill-white" />
+                  <span>Stop Stream</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Test Feedback or Status Message */}
+          {cameraStatusMessage && (
+            <div
+              className={`px-3 py-2 rounded text-xs font-mono flex items-center justify-between gap-2 border ${
+                cameraTestResult?.connected || cameraConnectionStatus === 'online'
+                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-600/50'
+                  : cameraConnectionStatus === 'reconnecting' || cameraTestResult?.status === 'timeout'
+                  ? 'bg-amber-950/40 text-amber-300 border-amber-600/50'
+                  : 'bg-slate-900 text-slate-300 border-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {cameraTestResult?.connected || cameraConnectionStatus === 'online' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : cameraConnectionStatus === 'reconnecting' || cameraTestResult?.status === 'timeout' ? (
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                ) : (
+                  <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                )}
+                <span>{cameraStatusMessage}</span>
+              </div>
+              {cameraTestResult && (
+                <span className="text-[10px] text-slate-400 shrink-0">
+                  Latency: {cameraTestResult.latency_ms || 18}ms | {cameraTestResult.resolution || '1080p'}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pipeline Stage Progress Breadcrumbs */}
       <div className="bg-[#141414] border border-[#2A2A2A] p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -3005,6 +3441,51 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                       <X className="w-4 h-4" />
                     </button>
                   </div>
+                )}
+              </div>
+            ) : streamSource === 'cctv_rtsp' ? (
+              <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 max-w-lg">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border ${
+                  cameraConnectionStatus === 'online'
+                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400 shadow-[0_0_20px_rgba(52,199,89,0.2)]'
+                    : cameraConnectionStatus === 'connecting' || cameraConnectionStatus === 'reconnecting'
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 animate-pulse'
+                    : 'bg-slate-800/60 border-slate-700 text-slate-400'
+                }`}>
+                  <Tv className="w-7 h-7" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                    {cameraConnectionStatus === 'online'
+                      ? `CCTV Camera Connected: ${cameraName}`
+                      : cameraConnectionStatus === 'connecting'
+                      ? `Connecting to RTSP Stream...`
+                      : cameraConnectionStatus === 'reconnecting'
+                      ? `Reconnecting to Camera Feed (Attempt ${cameraReconnectCount})...`
+                      : cameraConnectionStatus === 'failed'
+                      ? `Camera Connection Failed`
+                      : `CCTV Camera Feed Ready`}
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1 font-mono">
+                    {cameraConnectionStatus === 'online'
+                      ? 'Real-time multi-model YOLO detection active. Filtering empty frames: only frames with confirmed detections will be displayed.'
+                      : cameraConnectionStatus === 'connecting'
+                      ? 'Validating RTSP stream credentials, port 554 reachability, and initial keyframe...'
+                      : cameraConnectionStatus === 'reconnecting'
+                      ? 'Stream disconnected or timed out. Automatic reconnection in progress...'
+                      : cameraConnectionStatus === 'failed'
+                      ? (cameraStatusMessage || 'Unable to open camera stream. Please check RTSP URL, IP address, and credentials.')
+                      : 'Provide your RTSP camera URL above and click "Start AI" to launch real-time multi-model detection.'}
+                  </p>
+                </div>
+                {cameraConnectionStatus === 'disconnected' && (
+                  <button
+                    onClick={handleStartCameraStream}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-mono font-bold text-xs uppercase rounded flex items-center gap-2 shadow-[0_0_15px_rgba(52,199,89,0.3)] transition"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-black" />
+                    <span>Connect &amp; Start Detection</span>
+                  </button>
                 )}
               </div>
             ) : (

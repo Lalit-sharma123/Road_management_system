@@ -44,6 +44,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [videos, setVideos] = useState<InspectionVideo[]>(sampleVideos);
   const [selectedVideo, setSelectedVideo] = useState<InspectionVideo>(sampleVideos[0]);
+  const [selectedCamera, setSelectedCamera] = useState<CameraDevice | null>(null);
 
   // App Shell Navigation State
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
@@ -556,6 +557,7 @@ export default function App() {
           <CameraLiveGridView
             cameras={cameras}
             onSelectCamera={(cam) => {
+              setSelectedCamera(cam);
               setActiveTab('live_processing');
               showToast('Feed Selected', `Focusing live vision stream for ${cam.camera_name}`);
             }}
@@ -571,6 +573,7 @@ export default function App() {
             onUpdateCamera={handleUpdateCamera}
             onDeleteCamera={handleDeleteCamera}
             onSelectCameraForLive={(cam) => {
+              setSelectedCamera(cam);
               setActiveTab('live_processing');
               showToast('Feed Selected', `Focusing live vision stream for ${cam.camera_name}`);
             }}
@@ -581,8 +584,14 @@ export default function App() {
         {activeTab === 'upload' && (
           <VideoUploadAndProcessor 
             videos={videos}
-            onAddVideo={handleAddVideo}
-            onNavigate={setActiveTab}
+            onAddVideo={(newVid) => {
+              setSelectedCamera(null);
+              handleAddVideo(newVid);
+            }}
+            onNavigate={(tab) => {
+              if (tab === 'live_processing') setSelectedCamera(null);
+              setActiveTab(tab);
+            }}
             currentRole={currentRole}
           />
         )}
@@ -591,6 +600,8 @@ export default function App() {
           <LiveProcessing 
             videoId={selectedVideo?.id || 'default-vid'}
             video={selectedVideo}
+            initialCamera={selectedCamera}
+            cameras={cameras}
             onNavigate={setActiveTab}
             onProcessingComplete={(completedVid) => {
               setSelectedVideo(completedVid);

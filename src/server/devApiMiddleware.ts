@@ -1,5 +1,6 @@
 import type { Plugin, Connect } from 'vite';
 import http, { IncomingMessage, ServerResponse } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import { sampleVideos } from '../data/mockData';
 import { sampleCameras } from '../data/mockCameras';
 
@@ -459,6 +460,266 @@ export function devApiPlugin(): Plugin {
   return {
     name: 'dev-api-middleware',
     configureServer(server) {
+      // Real-Time Camera & Detection WebSocket Server
+      const wss = new WebSocketServer({ noServer: true });
+
+      server.httpServer?.on('upgrade', (request, socket, head) => {
+        const url = request.url || '';
+        if (
+          url.includes('/cameras/ws/live/') || 
+          url.includes('/api/v1/cameras/ws/live/') ||
+          url.includes('/ws/live/')
+        ) {
+          wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request);
+          });
+        }
+      });
+
+      wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+        const url = req.url || '';
+        const match = url.match(/\/cameras\/ws\/live\/([^\/\?]+)/) || url.match(/\/ws\/live\/([^\/\?]+)/);
+        const camId = match ? match[1] : 'cam_live';
+        const cam = memoryCameras.find(c => c.id === camId) || { camera_name: 'Live CCTV Camera', stream_url: 'rtsp://nhai-traffic.in/live' };
+
+        // 1. Send initial connected status
+        ws.send(JSON.stringify({
+          type: 'camera_status_update',
+          camera_id: camId,
+          camera_status: 'online',
+          message: `Camera stream connected: ${cam.camera_name} [Real-time AI Active]`,
+          timestamp: Date.now() / 1000
+        }));
+
+        let frameNumber = 0;
+        let lastSignature = '';
+        let lastSignatureTime = 0;
+        let lastHeartbeatTime = Date.now();
+
+        // Sample detection pool with the 4 specialized YOLO models:
+        // Road damage (best.pt), Vehicles (yolov8n.pt), Helmet compliance (helmet.pt), Number Plate (numberplate-yolo-v26n.pt)
+        const detectionPool = [
+          {
+            detections: [
+              {
+                id: `det_pothole_1`,
+                category: 'pothole',
+                type: 'damage',
+                confidence: 0.94,
+                severity: 'critical',
+                model: 'best.pt',
+                bbox: { x_min: 240, y_min: 280, x_max: 390, y_max: 360 },
+                x_min: 240, y_min: 280, x_max: 390, y_max: 360,
+                label: 'Pothole (best.pt)'
+              }
+            ],
+            road_damage_count: 1,
+            vehicle_count: 0,
+            helmet_count: 0,
+            number_plate_count: 0,
+            damage_by_type: { pothole: 1, longitudinal_crack: 0, transverse_crack: 0, alligator_crack: 0, missing_asphalt: 0, broken_road: 0 },
+            vehicles_by_type: { car: 0, truck: 0, bus: 0, motorcycle: 0, bicycle: 0, person: 0 }
+          },
+          {
+            detections: [], // Empty frame (no detection) -> MUST NOT BE DISPLAYED OR SENT AS DETECTED FRAME
+            road_damage_count: 0,
+            vehicle_count: 0,
+            helmet_count: 0,
+            number_plate_count: 0,
+            damage_by_type: {},
+            vehicles_by_type: {}
+          },
+          {
+            detections: [
+              {
+                id: `det_crack_2`,
+                category: 'longitudinal_crack',
+                type: 'damage',
+                confidence: 0.88,
+                severity: 'medium',
+                model: 'best.pt',
+                bbox: { x_min: 310, y_min: 220, x_max: 420, y_max: 290 },
+                x_min: 310, y_min: 220, x_max: 420, y_max: 290,
+                label: 'Longitudinal Crack (best.pt)'
+              },
+              {
+                id: `det_car_1`,
+                category: 'car',
+                type: 'vehicle',
+                confidence: 0.96,
+                severity: 'low',
+                model: 'yolov8n.pt',
+                bbox: { x_min: 440, y_min: 180, x_max: 560, y_max: 280 },
+                x_min: 440, y_min: 180, x_max: 560, y_max: 280,
+                label: 'Car (yolov8n.pt)'
+              }
+            ],
+            road_damage_count: 1,
+            vehicle_count: 1,
+            helmet_count: 0,
+            number_plate_count: 0,
+            damage_by_type: { pothole: 0, longitudinal_crack: 1, transverse_crack: 0, alligator_crack: 0, missing_asphalt: 0, broken_road: 0 },
+            vehicles_by_type: { car: 1, truck: 0, bus: 0, motorcycle: 0, bicycle: 0, person: 0 }
+          },
+          {
+            detections: [], // Empty frame (no detection)
+            road_damage_count: 0,
+            vehicle_count: 0,
+            helmet_count: 0,
+            number_plate_count: 0,
+            damage_by_type: {},
+            vehicles_by_type: {}
+          },
+          {
+            detections: [
+              {
+                id: `det_motorcycle_1`,
+                category: 'motorcycle',
+                type: 'vehicle',
+                confidence: 0.93,
+                severity: 'medium',
+                model: 'yolov8n.pt',
+                bbox: { x_min: 210, y_min: 190, x_max: 320, y_max: 330 },
+                x_min: 210, y_min: 190, x_max: 320, y_max: 330,
+                label: 'Motorcycle (yolov8n.pt)'
+              },
+              {
+                id: `det_nohelmet_1`,
+                category: 'no_helmet',
+                type: 'safety',
+                confidence: 0.91,
+                severity: 'critical',
+                model: 'helmet.pt',
+                bbox: { x_min: 235, y_min: 190, x_max: 285, y_max: 245 },
+                x_min: 235, y_min: 190, x_max: 285, y_max: 245,
+                label: 'No Helmet (helmet.pt)'
+              },
+              {
+                id: `det_plate_1`,
+                category: 'number_plate',
+                type: 'plate',
+                confidence: 0.95,
+                severity: 'low',
+                model: 'numberplate-yolo-v26n.pt',
+                bbox: { x_min: 250, y_min: 300, x_max: 310, y_max: 325 },
+                x_min: 250, y_min: 300, x_max: 310, y_max: 325,
+                label: 'Plate [HR26DQ5519] (numberplate.pt)'
+              }
+            ],
+            road_damage_count: 0,
+            vehicle_count: 1,
+            helmet_count: 0,
+            number_plate_count: 1,
+            damage_by_type: {},
+            vehicles_by_type: { car: 0, truck: 0, bus: 0, motorcycle: 1, bicycle: 0, person: 0 }
+          }
+        ];
+
+        // Sequential frame processing with proper interval and frame-skip strategy
+        let poolIdx = 0;
+        const intervalId = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            clearInterval(intervalId);
+            return;
+          }
+
+          frameNumber += 2; // Frame-skip: sequential step by 2
+          const nowTs = Date.now() / 1000;
+          const currentPacket = detectionPool[poolIdx % detectionPool.length];
+          poolIdx++;
+
+          const hasDetections = currentPacket.detections.length > 0;
+
+          // Requirements:
+          // 4. "Display only frames where at least one detection is found."
+          // 5. "If a frame has no detection, do not send/display that frame."
+          // 8. "Optimize it so unnecessary frames are not processed or transferred."
+          if (!hasDetections) {
+            // Send periodic lightweight heartbeat every 1.5 seconds without heavy image data
+            if (Date.now() - lastHeartbeatTime >= 1500) {
+              lastHeartbeatTime = Date.now();
+              ws.send(JSON.stringify({
+                type: 'camera_heartbeat',
+                camera_id: camId,
+                camera_name: cam.camera_name,
+                camera_status: 'online',
+                frame_number: frameNumber,
+                timestamp: nowTs,
+                has_detections: false,
+                detections: [],
+                total_detections: 0,
+                fps: 30.0
+              }));
+            }
+            return;
+          }
+
+          // Requirement 6: "Avoid sending consecutive duplicate detection results."
+          const currentSig = currentPacket.detections.map(d => `${d.category}@${Math.round(d.x_min / 40)},${Math.round(d.y_min / 40)}`).sort().join(';');
+          if (currentSig === lastSignature && (nowTs - lastSignatureTime) < 2.0) {
+            return; // Consecutive duplicate detection: skip!
+          }
+
+          lastSignature = currentSig;
+          lastSignatureTime = nowTs;
+          lastHeartbeatTime = Date.now();
+
+          // Generate realistic SVG camera frame representation
+          const svgFrame = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+            <rect width="640" height="360" fill="#0f172a"/>
+            <!-- Road segment -->
+            <polygon points="60,360 220,150 420,150 580,360" fill="#1e293b" opacity="0.9"/>
+            <line x1="320" y1="150" x2="320" y2="360" stroke="#facc15" stroke-width="3" stroke-dasharray="16,14"/>
+            <!-- Camera Watermark Info -->
+            <rect x="15" y="15" width="230" height="28" fill="#000000" opacity="0.7" rx="4"/>
+            <circle cx="28" cy="29" r="5" fill="#ef4444"/>
+            <text x="40" y="33" font-family="monospace" font-size="11" font-weight="bold" fill="#ffffff">REC ● ${cam.camera_name.slice(0, 20)}</text>
+            <text x="500" y="32" font-family="monospace" font-size="11" fill="#94a3b8">FRAME #${frameNumber}</text>
+            <!-- Render detection boxes -->
+            ${currentPacket.detections.map(d => {
+              const color = d.type === 'damage' ? '#ef4444' : d.category === 'no_helmet' ? '#f59e0b' : d.type === 'plate' ? '#10b981' : '#3b82f6';
+              const w = d.x_max - d.x_min;
+              const h = d.y_max - d.y_min;
+              return `<rect x="${d.x_min}" y="${d.y_min}" width="${w}" height="${h}" fill="none" stroke="${color}" stroke-width="2.5" stroke-dasharray="4,2"/>
+              <rect x="${d.x_min}" y="${Math.max(10, d.y_min - 18)}" width="${Math.max(100, d.label.length * 7)}" height="18" fill="${color}" rx="3"/>
+              <text x="${d.x_min + 5}" y="${Math.max(22, d.y_min - 5)}" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff">${d.label}</text>`;
+            }).join('')}
+          </svg>`;
+          const frameBase64 = `data:image/svg+xml;utf8,${encodeURIComponent(svgFrame)}`;
+
+          const payload = {
+            camera_id: camId,
+            camera_name: cam.camera_name,
+            frame_number: frameNumber,
+            timestamp: nowTs,
+            has_detections: true,
+            is_duplicate: false,
+            image_base64: frameBase64,
+            detections: currentPacket.detections,
+            total_detections: currentPacket.detections.length,
+            road_damage_count: currentPacket.road_damage_count,
+            vehicle_count: currentPacket.vehicle_count,
+            helmet_count: currentPacket.helmet_count,
+            number_plate_count: currentPacket.number_plate_count,
+            damage_by_type: currentPacket.damage_by_type,
+            vehicles_by_type: currentPacket.vehicles_by_type,
+            road_health: Math.max(40, 100 - (currentPacket.road_damage_count * 8)),
+            camera_status: 'online',
+            fps: 30.0
+          };
+
+          ws.send(JSON.stringify(payload));
+        }, 350);
+
+        ws.on('close', () => {
+          clearInterval(intervalId);
+        });
+
+        ws.on('error', () => {
+          clearInterval(intervalId);
+        });
+      });
+
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
         const url = req.url || '';
         const method = req.method || 'GET';
@@ -615,6 +876,79 @@ export function devApiPlugin(): Plugin {
           };
           memoryCameras.push(newCam as any);
           return sendJson(res, 201, newCam);
+        }
+
+        if (normalized === '/cameras/test-connection' && method === 'POST') {
+          const body = await parseJsonBody(req).catch(() => ({}));
+          const streamUrl = String(body.stream_url || '').trim();
+          if (!streamUrl) {
+            return sendJson(res, 400, { error: 'stream_url is required' });
+          }
+
+          // Validate URL format
+          const isRtsp = streamUrl.toLowerCase().startsWith('rtsp://');
+          const isHttp = streamUrl.toLowerCase().startsWith('http://') || streamUrl.toLowerCase().startsWith('https://');
+          const isWebcam = streamUrl === '0' || streamUrl === '1' || streamUrl === '2' || body.camera_type === 'webcam';
+
+          if (!isRtsp && !isHttp && !isWebcam) {
+            return sendJson(res, 400, {
+              connected: false,
+              status: 'failed',
+              error: 'Invalid stream protocol. RTSP (rtsp://...), HTTP (http://...), or local device index (0, 1) required.'
+            });
+          }
+
+          if (streamUrl.toLowerCase().includes('timeout') || streamUrl.includes('192.0.2.') || streamUrl.includes('255.255')) {
+            return sendJson(res, 200, {
+              connected: false,
+              status: 'timeout',
+              error: 'Connection timed out after 6.0s. Verify IP address, port (default 554), and firewall rules.',
+              latency_ms: 6000
+            });
+          }
+
+          if (streamUrl.toLowerCase().includes('invalid') || streamUrl.toLowerCase().includes('badpass') || streamUrl.toLowerCase().includes('unauth')) {
+            return sendJson(res, 200, {
+              connected: false,
+              status: 'failed',
+              error: 'Authentication failed (401 Unauthorized). Verify camera username and password credentials.',
+              latency_ms: 120
+            });
+          }
+
+          return sendJson(res, 200, {
+            connected: true,
+            status: 'online',
+            resolution: '1920x1080',
+            fps: 30.0,
+            latency_ms: 18.5,
+            message: `Successfully probed camera stream (${isWebcam ? 'Local Video Device' : 'Network Video Stream'})`
+          });
+        }
+
+        if (normalized === '/cameras/connect' && method === 'POST') {
+          const body = await parseJsonBody(req).catch(() => ({}));
+          const streamUrl = String(body.stream_url || '').trim();
+          const camId = body.camera_id || `cam_${Date.now().toString(36)}`;
+          const camName = body.camera_name || 'Live CCTV Feed';
+
+          return sendJson(res, 200, {
+            status: 'connecting',
+            camera_id: camId,
+            camera_name: camName,
+            stream_url: streamUrl,
+            websocket_url: `/api/v1/cameras/ws/live/${camId}`,
+            message: `Camera stream worker launched for ${camName}. Real-time multi-model detection active.`
+          });
+        }
+
+        if (normalized === '/cameras/disconnect' && method === 'POST') {
+          const body = await parseJsonBody(req).catch(() => ({}));
+          return sendJson(res, 200, {
+            status: 'stopped',
+            camera_id: body.camera_id || 'active_camera',
+            message: 'Camera stream disconnected cleanly.'
+          });
         }
 
         if (cameraDetailMatch && (method === 'PUT' || method === 'PATCH')) {
