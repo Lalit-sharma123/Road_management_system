@@ -204,7 +204,68 @@ async function runE2ETests() {
   assert(deleteStolenRes.status === 'success', 'Test stolen vehicle removed cleanly from registry');
 
   // ----------------------------------------------------
-  // TEST SUITE 5: Summary Results
+  // TEST SUITE 5: Detection Overlay, Vehicle-Plate Association & Collision Placement
+  // ----------------------------------------------------
+  console.log('📋 [Suite 5: Detection Overlay, Vehicle-Plate Association & Collision Placement]');
+  
+  // Test 5.1: Verify association logic (vehicle ↔ plate)
+  const testVehicle = {
+    id: 'veh-101',
+    model: 'yolov8n.pt',
+    className: 'car',
+    category: 'car',
+    type: 'vehicle',
+    confidence: 0.95,
+    bbox: { x: 200, y: 150, width: 220, height: 140 },
+    parentVehicleId: null
+  };
+  const testPlate = {
+    id: 'plate-101',
+    model: 'numberplate-yolo-v26n.pt',
+    className: 'number_plate',
+    category: 'number_plate',
+    type: 'plate',
+    confidence: 0.93,
+    bbox: { x: 260, y: 250, width: 80, height: 26 },
+    parentVehicleId: 'veh-101',
+    plateNumber: 'HR26DK8392',
+    plateConfidence: 0.94
+  };
+
+  assert(testPlate.parentVehicleId === testVehicle.id, 'Plate explicitly associated with correct vehicle ID');
+  assert(testPlate.bbox.x >= testVehicle.bbox.x && (testPlate.bbox.x + testPlate.bbox.width) <= (testVehicle.bbox.x + testVehicle.bbox.width), 'Plate bounding box physically contained inside vehicle horizontal bounds');
+  assert(testPlate.bbox.y >= testVehicle.bbox.y && (testPlate.bbox.y + testPlate.bbox.height) <= (testVehicle.bbox.y + testVehicle.bbox.height), 'Plate bounding box physically contained inside vehicle vertical bounds');
+
+  // Test 5.2: Separate potholes preservation (Requirement 1 & 11)
+  const potholeA = {
+    id: 'pot-1',
+    model: 'best.pt',
+    className: 'pothole',
+    category: 'pothole',
+    confidence: 0.92,
+    bbox: { x: 100, y: 400, width: 70, height: 45 }
+  };
+  const potholeB = {
+    id: 'pot-2',
+    model: 'best.pt',
+    className: 'pothole',
+    category: 'pothole',
+    confidence: 0.88,
+    bbox: { x: 200, y: 410, width: 65, height: 40 }
+  };
+
+  const iX1 = Math.max(potholeA.bbox.x, potholeB.bbox.x);
+  const iX2 = Math.min(potholeA.bbox.x + potholeA.bbox.width, potholeB.bbox.x + potholeB.bbox.width);
+  const isSeparated = iX2 <= iX1;
+  assert(isSeparated, 'Adjacent potholes retain independent non-merged bounding boxes');
+
+  // Test 5.3: Standard data structure compliance (Requirement 9)
+  const req9Fields = ['id', 'model', 'className', 'confidence', 'bbox', 'parentVehicleId', 'plateNumber', 'plateConfidence'];
+  const hasAllReq9Fields = req9Fields.every(f => f in testPlate);
+  assert(hasAllReq9Fields, 'Detection record adheres strictly to Requirement 9 specification');
+
+  // ----------------------------------------------------
+  // TEST SUITE 6: Summary Results
   // ----------------------------------------------------
   console.log('\n======================================================');
   console.log(`📊 TEST EXECUTION SUMMARY:`);

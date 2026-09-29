@@ -210,13 +210,31 @@ class YOLODamageDetector:
                 try:
                     self.damage_model = YOLO(str(best_path))
                     self.damage_model.to(device)
-                    print(f"[YOLO Engine] Loaded Road Damage model ({best_path}) on {device}")
+                    # Inspect actual model classes from model.names (Requirement 4)
+                    if hasattr(self.damage_model, "names") and self.damage_model.names:
+                        self.road_damage_classes = self.damage_model.names
+                    else:
+                        self.road_damage_classes = self.ROAD_DAMAGE_CLASSES
+                    self.damage_model_source = "YOLO"
+                    print("========================================")
+                    print(f"DAMAGE MODEL:\n{best_path}")
+                    print("SOURCE:\nYOLO")
+                    print(f"CLASSES:\n{self.road_damage_classes}")
+                    print("========================================")
                 except Exception as e:
-                    print(f"[YOLO Engine] Notice loading damage model '{best_path}': {e}")
+                    print(f"[YOLO Engine] Error loading damage model '{best_path}': {e}")
                     self.damage_model = None
+                    self.damage_model_source = "MODEL_ERROR"
+                    self.road_damage_classes = self.ROAD_DAMAGE_CLASSES
             else:
-                print(f"[YOLO Engine] Damage model weights '{best_path}' not found on disk. Running in CV heuristic mode.")
                 self.damage_model = None
+                self.damage_model_source = "MODEL_UNAVAILABLE"
+                self.road_damage_classes = self.ROAD_DAMAGE_CLASSES
+                print("========================================")
+                print(f"DAMAGE MODEL:\n{best_path}")
+                print("SOURCE:\nMODEL_UNAVAILABLE (weights file not found on disk)")
+                print("CV HEURISTIC FALLBACK: DISABLED")
+                print("========================================")
 
             # 2. Vehicle Model (yolov8n.pt)
             veh_path = settings.resolve_model_path(settings.VEHICLE_MODEL_NAME)
@@ -278,91 +296,197 @@ class YOLODamageDetector:
         min_area: float,
         max_area: float
     ) -> List[Dict[str, Any]]:
-        """Run best.pt on full frame to detect road damage only."""
+        """
+        Run best.pt road damage detection with multi-scale tiled inference:
+        1. Full-frame inference
+        2. Tiled inference over road pavement (quadrants with overlap)
+        3. Class-specific NMS deduplication to preserve separate potholes
+        4. Structured per-frame logging
+        """
         detections: List[Dict[str, Any]] = []
         if self.damage_model is None or frame is None or frame.size == 0:
             return detections
 
+        conf_threshold = conf_threshold or getattr(settings, "DAMAGE_CONF_THRESHOLD", 0.25)
+        iou_threshold = iou_threshold or getattr(settings, "DAMAGE_IOU_THRESHOLD", 0.40)
+
+        raw_candidates: List[Dict[str, Any]] = []
+
         try:
             t0 = time.perf_counter()
+            height, width = frame.shape[:2]
+
             try:
                 import torch
                 inf_ctx = torch.inference_mode()
             except Exception:
                 inf_ctx = None
 
-            if inf_ctx is not None:
-                with inf_ctx:
-                    dmg_results = self.damage_model.predict(
-                        source=frame,
+            def run_predict(img_input: np.ndarray, offset_x: float = 0.0, offset_y: float = 0.0):
+                if inf_ctx is not None:
+                    with inf_ctx:
+                        res = self.damage_model.predict(
+                            source=img_input,
+                            conf=conf_threshold,
+                            iou=iou_threshold,
+                            imgsz=640,
+                            half=(getattr(self, "device", "cpu") != "cpu"),
+                            verbose=False
+                        )
+                else:
+                    res = self.damage_model.predict(
+                        source=img_input,
                         conf=conf_threshold,
                         iou=iou_threshold,
                         imgsz=640,
                         half=(getattr(self, "device", "cpu") != "cpu"),
                         verbose=False
                     )
-            else:
-                dmg_results = self.damage_model.predict(
-                    source=frame,
-                    conf=conf_threshold,
-                    iou=iou_threshold,
-                    imgsz=640,
-                    half=(getattr(self, "device", "cpu") != "cpu"),
-                    verbose=False
-                )
-            dt_ms = (time.perf_counter() - t0) * 1000.0
-            
-            if dmg_results and len(dmg_results) > 0:
-                for box in dmg_results[0].boxes:
-                    cls_id = int(box.cls[0].item())
-                    conf = float(box.conf[0].item())
-                    xyxy = box.xyxy[0].tolist()
-                    x_min, y_min, x_max, y_max = xyxy[0], xyxy[1], xyxy[2], xyxy[3]
-                    w, h = x_max - x_min, y_max - y_min
-                    area = w * h
 
-                    if y_min < horizon_y_limit and y_max < horizon_y_limit + 20:
-                        continue
-                    if area < min_area or area > max_area:
-                        continue
+                if res and len(res) > 0:
+                    for box in res[0].boxes:
+                        cls_id = int(box.cls[0].item())
+                        conf = float(box.conf[0].item())
+                        xyxy = box.xyxy[0].tolist()
+                        x_min = xyxy[0] + offset_x
+                        y_min = xyxy[1] + offset_y
+                        x_max = xyxy[2] + offset_x
+                        y_max = xyxy[3] + offset_y
+                        w = x_max - x_min
+                        h = y_max - y_min
+                        area = w * h
 
-                    if hasattr(self.damage_model, "names") and self.damage_model.names:
-                        category = self.damage_model.names.get(cls_id, self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole"))
-                    else:
-                        category = self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole")
+                        # Horizon & boundary bounds check
+                        if y_min < horizon_y_limit and y_max < horizon_y_limit + 15:
+                            continue
+                        if area < 30 or area > max_area:
+                            continue
 
-                    category_str = str(category).lower()
+                        # Resolve class name from model.names (Requirement 4)
+                        if hasattr(self, "road_damage_classes") and self.road_damage_classes:
+                            category = self.road_damage_classes.get(cls_id, self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole"))
+                        elif hasattr(self.damage_model, "names") and self.damage_model.names:
+                            category = self.damage_model.names.get(cls_id, self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole"))
+                        else:
+                            category = self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole")
 
-                    p_title = "Pothole" if "pothole" in category_str else category_str.replace("_", " ").title()
-                    det_label = f"[{p_title}] {int(round(conf * 100))}%"
-                    dam_id = f"dam_{len(detections) + 1}"
+                        category_str = str(category).lower()
+                        p_title = "Pothole" if "pothole" in category_str else category_str.replace("_", " ").title()
+                        det_label = f"[{p_title}] {int(round(conf * 100))}%"
 
-                    detections.append({
-                        "id": dam_id,
-                        "model": "best.pt",
-                        "className": category_str,
-                        "category": category_str,
-                        "confidence": round(conf, 4),
-                        "type": "damage",
-                        "label": det_label,
-                        "parentVehicleId": None,
-                        "bbox": {
-                            "x": round(x_min, 2),
-                            "y": round(y_min, 2),
-                            "width": round(w, 2),
-                            "height": round(h, 2),
+                        raw_candidates.append({
+                            "className": category_str,
+                            "category": category_str,
+                            "confidence": round(conf, 4),
+                            "type": "damage",
+                            "label": det_label,
+                            "parentVehicleId": None,
                             "x_min": round(x_min, 2),
                             "y_min": round(y_min, 2),
                             "x_max": round(x_max, 2),
-                            "y_max": round(y_max, 2)
-                        },
-                        "x_min": round(x_min, 2),
-                        "y_min": round(y_min, 2),
-                        "x_max": round(x_max, 2),
-                        "y_max": round(y_max, 2),
-                        "area_pixels": round(area, 2)
-                    })
+                            "y_max": round(y_max, 2),
+                            "w": round(w, 2),
+                            "h": round(h, 2),
+                            "area_pixels": round(area, 2)
+                        })
+
+            # 1. Full-frame inference
+            run_predict(frame, 0.0, 0.0)
+
+            # 2. Multi-Scale / Tiled inference across road pavement region (Requirement 7)
+            if getattr(settings, "USE_TILED_INFERENCE", True) and height >= 240 and width >= 320:
+                road_top = int(max(0, horizon_y_limit - 10))
+                road_h = height - road_top
+                if road_h > 120:
+                    mid_x = width // 2
+                    mid_y = road_top + road_h // 2
+                    overlap_x = int(width * getattr(settings, "TILE_OVERLAP", 0.20))
+                    overlap_y = int(road_h * getattr(settings, "TILE_OVERLAP", 0.20))
+
+                    tiles = [
+                        (0, road_top, min(width, mid_x + overlap_x), min(height, mid_y + overlap_y)),
+                        (max(0, mid_x - overlap_x), road_top, width, min(height, mid_y + overlap_y)),
+                        (0, max(road_top, mid_y - overlap_y), min(width, mid_x + overlap_x), height),
+                        (max(0, mid_x - overlap_x), max(road_top, mid_y - overlap_y), width, height),
+                    ]
+
+                    for (tx1, ty1, tx2, ty2) in tiles:
+                        crop = frame[ty1:ty2, tx1:tx2]
+                        if crop.size > 0:
+                            run_predict(crop, float(tx1), float(ty1))
+
+            # 3. Class-Specific NMS Deduplication (Requirement 9 & 10)
+            # Remove duplicate predictions from overlapping tiles while preserving distinct separate potholes
+            raw_candidates.sort(key=lambda d: d["confidence"], reverse=True)
+            kept: List[Dict[str, Any]] = []
+
+            for cand in raw_candidates:
+                is_dup = False
+                for existing in kept:
+                    if cand["className"] == existing["className"]:
+                        ix1 = max(cand["x_min"], existing["x_min"])
+                        iy1 = max(cand["y_min"], existing["y_min"])
+                        ix2 = min(cand["x_max"], existing["x_max"])
+                        iy2 = min(cand["y_max"], existing["y_max"])
+                        if ix2 > ix1 and iy2 > iy1:
+                            inter = (ix2 - ix1) * (iy2 - iy1)
+                            a1 = (cand["x_max"] - cand["x_min"]) * (cand["y_max"] - cand["y_min"])
+                            a2 = (existing["x_max"] - existing["x_min"]) * (existing["y_max"] - existing["y_min"])
+                            iou = inter / (a1 + a2 - inter) if (a1 + a2 - inter) > 0 else 0.0
+                            # Deduplicate only if IoU exceeds threshold or strong containment
+                            if iou > iou_threshold or (min(a1, a2) > 0 and inter / min(a1, a2) > 0.75):
+                                is_dup = True
+                                break
+                if not is_dup:
+                    kept.append(cand)
+
+            # Build final detection records conforming to standard schema
+            for idx, item in enumerate(kept):
+                dam_id = f"dam_{idx + 1}"
+                detections.append({
+                    "id": dam_id,
+                    "model": "best.pt",
+                    "className": item["className"],
+                    "category": item["category"],
+                    "confidence": item["confidence"],
+                    "type": item["type"],
+                    "label": item["label"],
+                    "parentVehicleId": None,
+                    "bbox": {
+                        "x": item["x_min"],
+                        "y": item["y_min"],
+                        "width": item["w"],
+                        "height": item["h"],
+                        "x_min": item["x_min"],
+                        "y_min": item["y_min"],
+                        "x_max": item["x_max"],
+                        "y_max": item["y_max"]
+                    },
+                    "x_min": item["x_min"],
+                    "y_min": item["y_min"],
+                    "x_max": item["x_max"],
+                    "y_max": item["y_max"],
+                    "area_pixels": item["area_pixels"]
+                })
+
+            dt_ms = (time.perf_counter() - t0) * 1000.0
             self._update_telemetry("damage", dt_ms, len(detections))
+
+            # Requirement 5: Structured Per-Frame Debug Logging
+            if getattr(settings, "DEBUG_YOLO_LOGGING", True):
+                raw_potholes = len([c for c in raw_candidates if "pothole" in c["className"]])
+                final_potholes = len([d for d in detections if "pothole" in d["className"]])
+                print(f"\n--- [YOLO INFERENCE FRAME] ---")
+                print(f"MODEL: best.pt")
+                print(f"SOURCE: {getattr(self, 'damage_model_source', 'YOLO')}")
+                print("RAW DETECTIONS:")
+                for d in detections:
+                    b = d["bbox"]
+                    print(f"  class={d['className']} confidence={d['confidence']:.2f} bbox=({b['x']:.1f}, {b['y']:.1f}, {b['x']+b['width']:.1f}, {b['y']+b['height']:.1f})")
+                print(f"RAW POTHOLES: {raw_potholes}")
+                print(f"FINAL POTHOLES: {final_potholes}")
+                print("------------------------------\n")
+
         except Exception as err:
             print(f"[Damage Model Inference Exception]: {err}")
 

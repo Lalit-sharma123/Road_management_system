@@ -2083,16 +2083,29 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
               detectionsThisFrame.push({
                 id: `det-pot-${localFrame}`,
+                model: 'best.pt',
+                className: 'pothole',
                 category: 'pothole',
                 type: 'damage',
                 confidence: 0.95,
                 severity: 'critical',
+                parentVehicleId: null,
+                bbox: {
+                  x: px,
+                  y: py,
+                  width: pw,
+                  height: ph,
+                  x_min: px,
+                  y_min: py,
+                  x_max: px + pw,
+                  y_max: py + ph
+                },
                 x_min: px,
                 y_min: py,
                 x_max: px + pw,
                 y_max: py + ph,
                 box: [px, py, px + pw, py + ph],
-                label: '[best.pt] Pothole (Water-filled)'
+                label: '[Pothole] 95%'
               });
 
               if (cycle === 12) {
@@ -2134,16 +2147,29 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
               detectionsThisFrame.push({
                 id: `det-crk-${localFrame}`,
+                model: 'best.pt',
+                className: 'longitudinal_crack',
                 category: 'longitudinal_crack',
                 type: 'damage',
                 confidence: 0.91,
                 severity: 'high',
+                parentVehicleId: null,
+                bbox: {
+                  x: cx - 10,
+                  y: cy - 10,
+                  width: cw + 10,
+                  height: ch + 10,
+                  x_min: cx - 10,
+                  y_min: cy - 10,
+                  x_max: cx + cw,
+                  y_max: cy + ch
+                },
                 x_min: cx - 10,
                 y_min: cy - 10,
                 x_max: cx + cw,
                 y_max: cy + ch,
                 box: [cx - 10, cy - 10, cx + cw, cy + ch],
-                label: '[best.pt] Longitudinal Crack'
+                label: '[Long. Crack] 91%'
               });
 
               if (cycle === 36) {
@@ -2178,16 +2204,29 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
             detectionsThisFrame.push({
               id: `det-ped-${localFrame}`,
+              model: 'yolov8n.pt',
+              className: 'person',
               category: 'person',
               type: 'pedestrian',
               confidence: 0.94,
               severity: 'low',
+              parentVehicleId: null,
+              bbox: {
+                x: pedX,
+                y: pedY,
+                width: pedW,
+                height: pedH,
+                x_min: pedX,
+                y_min: pedY,
+                x_max: pedX + pedW,
+                y_max: pedY + pedH
+              },
               x_min: pedX,
               y_min: pedY,
               x_max: pedX + pedW,
               y_max: pedY + pedH,
               box: [pedX, pedY, pedX + pedW, pedY + pedH],
-              label: '[yolov8n.pt] Person'
+              label: '[Person] 94%'
             });
 
             if (localFrame % 45 === 0) {
@@ -2226,13 +2265,27 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             ctx.fillRect(vx + 8, vy + vh - 22, 18, 10);
             ctx.fillRect(vx + vw - 26, vy + vh - 22, 18, 10);
 
-            // Vehicle Bounding Box
+            // Vehicle Bounding Box (Requirement 2 & 9)
+            const vehId = `det-veh-${localFrame}`;
             detectionsThisFrame.push({
-              id: `det-veh-${localFrame}`,
+              id: vehId,
+              model: 'yolov8n.pt',
+              className: 'car',
               category: 'car',
               type: 'vehicle',
               confidence: 0.97,
               severity: 'low',
+              parentVehicleId: null,
+              bbox: {
+                x: vx,
+                y: vy,
+                width: vw,
+                height: vh,
+                x_min: vx,
+                y_min: vy,
+                x_max: vx + vw,
+                y_max: vy + vh
+              },
               x_min: vx,
               y_min: vy,
               x_max: vx + vw,
@@ -2241,7 +2294,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               label: '[yolov8n.pt] Car (Sedan)'
             });
 
-            // License plate on vehicle rear bumper
+            // License plate on vehicle rear bumper (Requirement 3, 4, 9, 13)
             const plW = 54;
             const plH = 18;
             const plX = Math.round(vx + (vw - plW) / 2);
@@ -2256,19 +2309,34 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
             ctx.font = 'bold 9px monospace';
             ctx.fillText('HR26DQ', plX + 4, plY + 13);
 
-            // Plate Bounding Box (strictly contained inside vehicle bumper with zero overflow)
+            // Plate Bounding Box (strictly associated with parentVehicleId)
             detectionsThisFrame.push({
               id: `det-pl-${localFrame}`,
+              model: 'numberplate-yolo-v26n.pt',
+              className: 'number_plate',
               category: 'number_plate',
               type: 'plate',
               confidence: 0.95,
               severity: 'low',
+              parentVehicleId: vehId,
+              plateNumber: 'HR 26 DQ 5541',
+              plateConfidence: 0.95,
+              bbox: {
+                x: plX,
+                y: plY,
+                width: plW,
+                height: plH,
+                x_min: plX,
+                y_min: plY,
+                x_max: plX + plW,
+                y_max: plY + plH
+              },
               x_min: plX,
               y_min: plY,
               x_max: plX + plW,
               y_max: plY + plH,
               box: [plX, plY, plX + plW, plY + plH],
-              label: '[numberplate-yolo-v26n.pt] Plate - HR 26 DQ 5541'
+              label: '[Plate] HR 26 DQ 5541 95%'
             });
 
             if (localFrame % 40 === 0) {

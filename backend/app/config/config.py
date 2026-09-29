@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     NUM_INFERENCE_THREADS: int = 4
     CONFIDENCE_THRESHOLD: float = 0.35
     IOU_THRESHOLD: float = 0.45
+    DAMAGE_CONF_THRESHOLD: float = 0.25
+    DAMAGE_IOU_THRESHOLD: float = 0.40
+    USE_TILED_INFERENCE: bool = True
+    TILE_OVERLAP: float = 0.20
+    DEBUG_YOLO_LOGGING: bool = True
     FRAME_SKIP: int = 5  # Process every 5th frame for default batch performance
     ENABLE_DYNAMIC_FRAME_SKIP: bool = True
     MIN_FRAME_SKIP: int = 1
