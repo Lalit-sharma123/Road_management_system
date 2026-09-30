@@ -159,14 +159,9 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
 
   const [activeSideTab, setActiveSideTab] = useState<'counters' | 'backend' | 'violations' | 'stolen' | 'map'>('counters');
 
-  // Backend Connectivity & Inference Engine Selection
-  const [inferenceEngine, setInferenceEngine] = useState<'backend' | 'client'>(() => {
-    try {
-      return (sessionStorage.getItem('preferred_inference_engine') as any) || 'client';
-    } catch {
-      return 'client';
-    }
-  });
+  // Backend Connectivity & Inference Engine Selection (Requirement 1, 2, 4)
+  // Backend YOLO is the authoritative inference engine. In-browser heuristic inference is disabled.
+  const [inferenceEngine, setInferenceEngine] = useState<'backend' | 'client'>('backend');
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'stopped'>('checking');
   const [backendConnected, setBackendConnected] = useState<boolean>(false);
   const [isCheckingBackend, setIsCheckingBackend] = useState<boolean>(false);
@@ -177,7 +172,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       id: 'init-1',
       time: new Date().toLocaleTimeString(),
       level: 'info',
-      message: 'AI Vision Engine initialized — Ready for high-speed multi-model real-time inspection.'
+      message: 'FastAPI Backend YOLO Detection Architecture initialized — Port 8000 required for inference.'
     }
   ]);
 
@@ -204,12 +199,38 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       } else {
         setBackendStatus('stopped');
         setBackendConnected(false);
-        addBackendLog('warn', `FastAPI backend offline on port ${res.port || 8000}. Client-side multi-model YOLO engine active.`);
+        // Requirement 1 & 3: Immediately clear detections & counters when backend is offline
+        setCurrentFrameDetections([]);
+        setSelectedOverlayDetection(null);
+        setPotholeCount(0);
+        setCrackCount(0);
+        setBrokenRoadCount(0);
+        setMissingAsphaltCount(0);
+        setRoadDamageCount(0);
+        setVehicleCount(0);
+        setHelmetCount(0);
+        setNumberPlateCount(0);
+        setPedestrianCount(0);
+        setStatusText('Backend Offline — Detection Unavailable');
+        addBackendLog('warn', `FastAPI backend offline on port ${res.port || 8000}. Real-time AI detections cleared.`);
       }
     } catch {
       setBackendStatus('stopped');
       setBackendConnected(false);
-      addBackendLog('warn', 'Backend port 8000 probe complete. Client-side multi-model YOLO engine active for real-time video detection.');
+      // Requirement 1 & 3: Immediately clear detections & counters when backend is offline
+      setCurrentFrameDetections([]);
+      setSelectedOverlayDetection(null);
+      setPotholeCount(0);
+      setCrackCount(0);
+      setBrokenRoadCount(0);
+      setMissingAsphaltCount(0);
+      setRoadDamageCount(0);
+      setVehicleCount(0);
+      setHelmetCount(0);
+      setNumberPlateCount(0);
+      setPedestrianCount(0);
+      setStatusText('Backend Offline — Detection Unavailable');
+      addBackendLog('warn', 'Backend port 8000 unreachable. AI detections strictly paused to prevent fake detections.');
     } finally {
       setIsCheckingBackend(false);
     }
@@ -222,17 +243,16 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
   }, [checkBackendHealth]);
 
   const handleSwitchInferenceEngine = (engine: 'backend' | 'client') => {
-    setInferenceEngine(engine);
-    try { sessionStorage.setItem('preferred_inference_engine', engine); } catch(e) {}
     if (engine === 'client') {
-      addBackendLog('warn', 'Switched to In-Browser Client AI Engine (local vision fallback).');
-      setStatusText('⚡ In-Browser Client AI Engine Active — Detecting in real time from video.');
-      setIsPaused(false);
-      if (userVideoElemRef.current) userVideoElemRef.current.play().catch(() => {});
-    } else {
-      addBackendLog('info', 'Switched to Primary FastAPI Backend Engine (Port 8000). Probing backend...');
-      checkBackendHealth();
+      // Requirement 4: In-browser client vision is disabled without validated on-device YOLO models
+      addBackendLog('warn', 'In-Browser Client Vision is disabled. RoadVision requires FastAPI YOLO Backend on port 8000.');
+      setStatusText('Client Vision Disabled — FastAPI Backend YOLO required for valid detection.');
+      return;
     }
+    setInferenceEngine('backend');
+    try { sessionStorage.setItem('preferred_inference_engine', 'backend'); } catch(e) {}
+    addBackendLog('info', 'FastAPI Backend Engine (Port 8000) selected. Probing backend...');
+    checkBackendHealth();
   };
 
   const handleSeekVideo = (seekTimeSec: number) => {
@@ -552,17 +572,37 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       const curV = userVideoElemRef.current;
       if (!curV || curV.readyState < 2 || curV.paused || curV.seeking) return;
 
+      // Backend Offline Check (Requirements 1, 2, 3): Halt inference and clear detections when backend is offline
+      if (backendStatus !== 'online' || !backendConnected) {
+        if (!curV.paused) {
+          curV.pause();
+        }
+        setIsPaused(true);
+        setCurrentFrameDetections([]);
+        setSelectedOverlayDetection(null);
+        setPotholeCount(0);
+        setCrackCount(0);
+        setBrokenRoadCount(0);
+        setMissingAsphaltCount(0);
+        setRoadDamageCount(0);
+        setVehicleCount(0);
+        setHelmetCount(0);
+        setNumberPlateCount(0);
+        setPedestrianCount(0);
+        setHelmetViolationsCount(0);
+        setStatusText('Backend Offline — Detection Unavailable');
+        return;
+      }
+
       const curTime = curV.currentTime || 0;
       const dur = curV.duration || videoDuration || 45;
       const fps = video?.fps || 30;
       const currentFrame = Math.max(1, Math.round(curTime * fps));
 
-      // 3 & 8: Frame-skip / interval strategy and unnecessary frame optimization
       if (!forceFirstFrame) {
         if (lastProcessedTimeRef.current >= 0 && (curTime - lastProcessedTimeRef.current < minIntervalSec)) {
-          return; // Skip intermediate micro-frames to optimize CPU
+          return;
         }
-        // 2: Strict sequential order check: do not re-process duplicate or older frame
         if (currentFrame <= lastProcessedFrameRef.current && curTime <= lastProcessedTimeRef.current) {
           return;
         }
@@ -572,132 +612,14 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       lastProcessedFrameRef.current = currentFrame;
       lastProcessedTimeRef.current = curTime;
 
-      // 7: Keep detection results synchronized with correct video timestamp/frame number
       setFrameNumber(currentFrame);
       setTimestamp(parseFloat(curTime.toFixed(2)));
       const pct = dur > 0 ? Math.min(100, Math.round((curTime / dur) * 100)) : 0;
       setProgress(pct);
 
-      const w = curV.videoWidth || 1280;
-      const h = curV.videoHeight || 720;
-
-      try {
-        const visionResult = realtimeVisionEngine.processFrame(
-          curV,
-          w,
-          h,
-          currentFrame,
-          minConfidenceThreshold
-        );
-
-        const hasDetections = visionResult.detections && visionResult.detections.length > 0;
-
-        // 4 & 5: Display only frames where at least one detection is found.
-        // If a frame has no detection, do not send/display that frame.
-        if (!hasDetections) {
-          // Clear active overlay for frames with no detections
-          setCurrentFrameDetections([]);
-          // Do NOT generate frame snapshot, do NOT add to timeline, do NOT send over WebSocket
-          isProcessing = false;
-          return;
-        }
-
-        // Frame HAS at least one detection: display this frame
-        setCurrentFrameDetections(visionResult.detections);
-
-        // Update real-time counts
-        setVehicleCount(visionResult.vehicleCount);
-        setPedestrianCount(visionResult.pedestrianCount);
-        setNumberPlateCount(visionResult.numberPlateCount);
-        setHelmetCount(visionResult.helmetCount);
-        setPotholeCount(visionResult.potholeCount);
-        setCrackCount(visionResult.crackCount);
-        setRoadDamageCount(visionResult.roadDamageCount);
-        setRoadHealth(visionResult.roadHealthScore);
-
-        setStatusText(
-          `● Detection Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | Traffic: ${visionResult.vehicleCount} Vehicles | ANPR: ${visionResult.numberPlateCount} Plates [Frame #${currentFrame}]`
-        );
-
-        // 6: Avoid sending consecutive duplicate detection results
-        // Generate spatial category signature to identify consecutive identical detections
-        const detectionSignature = visionResult.detections
-          .map((d) => {
-            const cat = (d.category || '').toLowerCase();
-            const x = Math.round((d.x_min ?? d.box?.[0] ?? 0) / 45);
-            const y = Math.round((d.y_min ?? d.box?.[1] ?? 0) / 45);
-            return `${cat}@${x},${y}`;
-          })
-          .sort()
-          .join(';');
-
-        const isConsecutiveDuplicate =
-          detectionSignature === lastSentDetectionSignatureRef.current &&
-          Math.abs(curTime - lastSentDetectionTimeRef.current) < 2.0;
-
-        if (!isConsecutiveDuplicate) {
-          lastSentDetectionSignatureRef.current = detectionSignature;
-          lastSentDetectionTimeRef.current = curTime;
-
-          // 8: Optimize: only capture snapshot image data for newly detected frames
-          let snapshotUrl = '';
-          if (captureCanvasRef.current) {
-            const cap = captureCanvasRef.current;
-            cap.width = 640;
-            cap.height = 360;
-            const capCtx = cap.getContext('2d');
-            if (capCtx) {
-              capCtx.drawImage(curV, 0, 0, 640, 360);
-              snapshotUrl = cap.toDataURL('image/jpeg', 0.65);
-            }
-          }
-
-          // 7: Timestamp and frame number strictly synchronized
-          for (const det of visionResult.detections) {
-            if (det.type === 'damage' && det.id && !recordedDefectIdsRef.current.has(det.id)) {
-              recordedDefectIdsRef.current.add(det.id);
-              const catLabel = det.category.includes('pothole')
-                ? 'Pothole'
-                : det.category.includes('longitudinal')
-                ? 'Longitudinal Crack'
-                : det.category.includes('transverse')
-                ? 'Transverse Crack'
-                : 'Road Surface Defect';
-
-              setTimelineEvents((prev) => [
-                {
-                  id: det.id!,
-                  category: catLabel,
-                  confidence: det.confidence,
-                  severity: (det.severity as any) || 'high',
-                  frame_number: currentFrame,
-                  timestamp: parseFloat(curTime.toFixed(2)),
-                  latitude: 28.4595 + (currentFrame * 0.00012),
-                  longitude: 77.0266 + (currentFrame * 0.00015),
-                  image_url: snapshotUrl
-                },
-                ...prev.slice(0, 49)
-              ]);
-            }
-          }
-        }
-
-        // Live GPS trail & map synchronization
-        const newLat = 28.4595 + (currentFrame * 0.00012);
-        const newLng = 77.0266 + (currentFrame * 0.00015);
-        setCurrentGps({ lat: newLat, lng: newLng });
-        routePointsRef.current.push([newLat, newLng]);
-        if (polylineRef.current) {
-          polylineRef.current.setLatLngs(routePointsRef.current);
-        }
-        if (vehicleMarkerRef.current) {
-          vehicleMarkerRef.current.setLatLng([newLat, newLng]);
-        }
-      } catch (e) {
-        console.warn('Frame processing notice:', e);
-      } finally {
-        isProcessing = false;
-      }
+      // In backend mode, detections are strictly delivered by the FastAPI WebSocket stream (Requirements 1, 2, 4).
+      // The browser does not synthesize heuristic defect detections.
+      isProcessing = false;
     };
 
     // 1: Ensure video plays immediately on upload
@@ -1667,11 +1589,22 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           setBackendConnected(false);
           setBackendStatus('stopped');
           addBackendLog('error', 'WebSocket connection failed on port 8000. Backend service is offline.');
-          if (inferenceEngine === 'backend') {
-            if (userVideoElemRef.current) userVideoElemRef.current.pause();
-            setIsPaused(true);
-            setStatusText('🛑 Backend Stopped (Port 8000) — AI detection halted.');
-          }
+          // Requirement 1 & 3: Immediately clear detections & counters when backend disconnects
+          setCurrentFrameDetections([]);
+          setSelectedOverlayDetection(null);
+          setPotholeCount(0);
+          setCrackCount(0);
+          setBrokenRoadCount(0);
+          setMissingAsphaltCount(0);
+          setRoadDamageCount(0);
+          setVehicleCount(0);
+          setHelmetCount(0);
+          setNumberPlateCount(0);
+          setPedestrianCount(0);
+          setHelmetViolationsCount(0);
+          if (userVideoElemRef.current) userVideoElemRef.current.pause();
+          setIsPaused(true);
+          setStatusText('Backend Offline — Detection Unavailable');
           if (isSubscribed) {
             clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(establishWebSocket, 2500);
@@ -1689,11 +1622,22 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
           setBackendConnected(false);
           setBackendStatus('stopped');
           addBackendLog('warn', `WebSocket connection closed (code ${closeEv.code}). Backend stopped.`);
-          if (inferenceEngine === 'backend') {
-            if (userVideoElemRef.current) userVideoElemRef.current.pause();
-            setIsPaused(true);
-            setStatusText('🛑 Backend Server Stopped (Port 8000) — AI detection halted.');
-          }
+          // Requirement 1 & 3: Immediately clear detections & counters when backend disconnects
+          setCurrentFrameDetections([]);
+          setSelectedOverlayDetection(null);
+          setPotholeCount(0);
+          setCrackCount(0);
+          setBrokenRoadCount(0);
+          setMissingAsphaltCount(0);
+          setRoadDamageCount(0);
+          setVehicleCount(0);
+          setHelmetCount(0);
+          setNumberPlateCount(0);
+          setPedestrianCount(0);
+          setHelmetViolationsCount(0);
+          if (userVideoElemRef.current) userVideoElemRef.current.pause();
+          setIsPaused(true);
+          setStatusText('Backend Offline — Detection Unavailable');
           if (isSubscribed) {
             clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(establishWebSocket, 2500);
@@ -1868,566 +1812,30 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
     }
 
     accelIntervalRef.current = setInterval(() => {
-      // In backend inference mode, if backend is offline or stopped, STRICTLY HALT:
-      if (inferenceEngine === 'backend') {
-        if (!backendConnected || backendStatus !== 'online') {
-          if (userVideoElemRef.current && !userVideoElemRef.current.paused) {
-            userVideoElemRef.current.pause();
-          }
-          setIsPaused(true);
-          setStatusText('🛑 FastAPI Backend Stopped (Port 8000) — Real-time AI detection halted.');
-          return;
+      // Backend Offline Check (Requirements 1, 2, 3, 4): Halt and clear detections when backend is offline
+      if (!backendConnected || backendStatus !== 'online') {
+        if (userVideoElemRef.current && !userVideoElemRef.current.paused) {
+          userVideoElemRef.current.pause();
         }
-        // In backend mode, detections are strictly delivered by the FastAPI WebSocket stream.
-        // We do NOT simulate or synthesize client detections while in backend mode.
+        setIsPaused(true);
+        setCurrentFrameDetections([]);
+        setSelectedOverlayDetection(null);
+        setPotholeCount(0);
+        setCrackCount(0);
+        setBrokenRoadCount(0);
+        setMissingAsphaltCount(0);
+        setRoadDamageCount(0);
+        setVehicleCount(0);
+        setHelmetCount(0);
+        setNumberPlateCount(0);
+        setPedestrianCount(0);
+        setHelmetViolationsCount(0);
+        setStatusText('Backend Offline — Detection Unavailable');
         return;
       }
-
-      // Only synthesize frames if WebSocket hasn't delivered a frame in the last 600ms
-      const timeSinceWs = Date.now() - lastWsFrameTimeRef.current;
-      if (timeSinceWs < 600 && progress > 0 && progress < 100) {
-        return;
-      }
-
-      const userVid = userVideoElemRef.current;
-      const isUserVidReady = userVid && userVid.readyState >= 2 && !userVid.paused;
-
-      let pct = 0;
-      if (isUserVidReady && userVid.duration && isFinite(userVid.duration) && userVid.duration > 0) {
-        localFrame = Math.floor(userVid.currentTime * 30);
-        pct = Math.min(100, Math.round((userVid.currentTime / userVid.duration) * 100));
-        setTimestamp(parseFloat(userVid.currentTime.toFixed(2)));
-      } else {
-        localFrame += frameStep;
-        pct = Math.min(100, Math.round((localFrame / maxFrames) * 100));
-        setTimestamp(parseFloat((localFrame / 30).toFixed(2)));
-      }
-
-      roadOffset = (roadOffset + 18) % 120;
-      setProgress(pct);
-      setFrameNumber(localFrame);
-
-      if (pct < 100) {
-        setStatusText(`● Real-Time Multi-Model YOLO Inference Active — Frame ${localFrame.toLocaleString()} / ${maxFrames.toLocaleString()} (${fps} FPS // ${latencyMs.toFixed(1)}ms)`);
-      }
-
-      // Render high-resolution synthetic road frame
-      const canvas = synthCanvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const w = canvas.width;
-          const h = canvas.height;
-
-          const userVid = userVideoElemRef.current;
-          const isUserVidReady = userVid && userVid.readyState >= 2 && !userVid.paused;
-
-          if (isUserVidReady) {
-            // Draw real user uploaded video frame directly onto detection canvas
-            ctx.drawImage(userVid, 0, 0, w, h);
-          } else {
-            // Horizon & Sky
-            const skyGrad = ctx.createLinearGradient(0, 0, 0, h * 0.4);
-            skyGrad.addColorStop(0, '#090d16');
-            skyGrad.addColorStop(1, '#1e293b');
-            ctx.fillStyle = skyGrad;
-            ctx.fillRect(0, 0, w, h * 0.4);
-
-            // Mountains / Horizon silhouettes
-            ctx.fillStyle = '#111827';
-            ctx.beginPath();
-            ctx.moveTo(0, h * 0.4);
-            ctx.lineTo(w * 0.25, h * 0.32);
-            ctx.lineTo(w * 0.55, h * 0.38);
-            ctx.lineTo(w * 0.8, h * 0.31);
-            ctx.lineTo(w, h * 0.4);
-            ctx.closePath();
-            ctx.fill();
-
-            // Asphalt Road Surface
-            const roadGrad = ctx.createLinearGradient(0, h * 0.4, 0, h);
-            roadGrad.addColorStop(0, '#262e3d');
-            roadGrad.addColorStop(1, '#12161f');
-            ctx.fillStyle = roadGrad;
-            ctx.beginPath();
-            ctx.moveTo(w * 0.42, h * 0.4);
-            ctx.lineTo(w * 0.58, h * 0.4);
-            ctx.lineTo(w * 0.98, h);
-            ctx.lineTo(w * 0.02, h);
-            ctx.closePath();
-            ctx.fill();
-
-            // Shoulder curbs (yellow/white)
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 6;
-            ctx.beginPath();
-            ctx.moveTo(w * 0.42, h * 0.4);
-            ctx.lineTo(w * 0.02, h);
-            ctx.stroke();
-
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 6;
-            ctx.beginPath();
-            ctx.moveTo(w * 0.58, h * 0.4);
-            ctx.lineTo(w * 0.98, h);
-            ctx.stroke();
-
-            // Center Dashed Strips moving downward
-            ctx.strokeStyle = '#fef08a';
-            ctx.lineWidth = 8;
-            ctx.setLineDash([35, 30]);
-            ctx.lineDashOffset = -roadOffset;
-            ctx.beginPath();
-            ctx.moveTo(w * 0.5, h * 0.4);
-            ctx.lineTo(w * 0.5, h);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-
-          // Multi-Model Real-Time Detection Pipeline using Dedicated Models:
-          // DAMAGE_MODEL_NAME: best.pt
-          // VEHICLE_MODEL_NAME: yolov8n.pt
-          // HELMET_MODEL_NAME: helmet.pt
-          // NUMBERPLATE_MODEL_NAME: numberplate-yolo-v26n.pt
-          // HELMET_PLATE_MODEL_NAME: helmet_numberplate.pt
-          const detectionsThisFrame: OverlayDetection[] = [];
-
-          if (isUserVidReady) {
-            // REAL USER VIDEO PROCESSING: Multi-Model Computer Vision Inference Engine
-            try {
-              const visionResult = realtimeVisionEngine.processFrame(
-                userVid,
-                w,
-                h,
-                localFrame,
-                minConfidenceThreshold
-              );
-
-              detectionsThisFrame.push(...visionResult.detections);
-
-              // Update real metrics
-              setVehicleCount(visionResult.vehicleCount);
-              setPedestrianCount(visionResult.pedestrianCount);
-              setNumberPlateCount(visionResult.numberPlateCount);
-              setHelmetCount(visionResult.helmetCount);
-              setPotholeCount(visionResult.potholeCount);
-              setCrackCount(visionResult.crackCount);
-              setRoadDamageCount(visionResult.roadDamageCount);
-              setRoadHealth(visionResult.roadHealthScore);
-
-              if (visionResult.isRoadPavement) {
-                setStatusText(
-                  `● Road Damage Detector [best.pt] Active: ${visionResult.potholeCount} Potholes, ${visionResult.crackCount} Cracks | ANPR: ${visionResult.numberPlateCount} Plates [1x Precision Inspection]`
-                );
-              } else {
-                setStatusText(
-                  visionResult.sceneType === 'pedestrian_surveillance'
-                    ? `● Pedestrian Stream: ${visionResult.pedestrianCount} Person(s) Active — Road damage detector [best.pt] idle (no asphalt pavement).`
-                    : `● Non-Road Scene: Road damage detector [best.pt] idle (no pavement detected).`
-                );
-              }
-
-              // Add newly discovered real damage defects to timeline
-              for (const det of visionResult.detections) {
-                if (det.type === 'damage' && det.id && !recordedDefectIdsRef.current.has(det.id)) {
-                  recordedDefectIdsRef.current.add(det.id);
-                  const catLabel = det.category.includes('pothole') ? 'Pothole' :
-                                   det.category.includes('longitudinal') ? 'Longitudinal Crack' :
-                                   det.category.includes('transverse') ? 'Transverse Crack' : 'Road Defect';
-                  const curTime = userVid.currentTime || parseFloat((localFrame / 30).toFixed(2));
-                  setTimelineEvents(prev => [
-                    {
-                      id: det.id!,
-                      category: catLabel,
-                      confidence: det.confidence,
-                      severity: (det.severity as any) || 'high',
-                      frame_number: localFrame,
-                      timestamp: parseFloat(curTime.toFixed(2)),
-                      latitude: currentGps.lat,
-                      longitude: currentGps.lng,
-                      image_url: canvas.toDataURL('image/jpeg', 0.5)
-                    },
-                    ...prev.slice(0, 49)
-                  ]);
-                }
-              }
-            } catch (err) {
-              console.warn('Real frame processing notice:', err);
-            }
-          } else {
-            // Synthetic road simulation fallback with dedicated model labels
-            const cycle = localFrame % 60;
-
-            // 1. POTHOLE DETECTION & ROAD SIMULATION [best.pt]
-            if (cycle >= 6 && cycle <= 26) {
-              const px = Math.round(w * 0.35);
-              const py = Math.round(h * 0.62);
-              const pw = 155;
-              const ph = 78;
-
-              // Draw dark irregular pothole crater with water reflection on synthetic road
-              ctx.fillStyle = '#0a0d14';
-              ctx.beginPath();
-              ctx.ellipse(px + pw / 2, py + ph / 2, pw / 2, ph / 2, -0.05, 0, Math.PI * 2);
-              ctx.fill();
-
-              // Water specular highlight (sky reflection)
-              ctx.fillStyle = 'rgba(148, 163, 184, 0.45)';
-              ctx.beginPath();
-              ctx.ellipse(px + pw / 2 + 10, py + ph / 2 + 6, pw / 3, ph / 3.5, -0.05, 0, Math.PI * 2);
-              ctx.fill();
-
-              ctx.strokeStyle = '#334155';
-              ctx.lineWidth = 3;
-              ctx.stroke();
-
-              detectionsThisFrame.push({
-                id: `det-pot-${localFrame}`,
-                model: 'best.pt',
-                className: 'pothole',
-                category: 'pothole',
-                type: 'damage',
-                confidence: 0.95,
-                severity: 'critical',
-                parentVehicleId: null,
-                bbox: {
-                  x: px,
-                  y: py,
-                  width: pw,
-                  height: ph,
-                  x_min: px,
-                  y_min: py,
-                  x_max: px + pw,
-                  y_max: py + ph
-                },
-                x_min: px,
-                y_min: py,
-                x_max: px + pw,
-                y_max: py + ph,
-                box: [px, py, px + pw, py + ph],
-                label: '[Pothole] 95%'
-              });
-
-              if (cycle === 12) {
-                setPotholeCount((c) => c + 1);
-                setRoadDamageCount((c) => c + 1);
-                setRoadHealth((h) => Math.max(50, h - 1.8));
-                setTimelineEvents((prev) => [
-                  {
-                    id: `pot-${localFrame}`,
-                    category: 'Pothole',
-                    confidence: 0.95,
-                    severity: 'critical',
-                    frame_number: localFrame,
-                    timestamp: parseFloat((localFrame / 30).toFixed(2)),
-                    latitude: currentGps.lat,
-                    longitude: currentGps.lng,
-                    image_url: canvas.toDataURL('image/jpeg', 0.5)
-                  },
-                  ...prev.slice(0, 49)
-                ]);
-              }
-            }
-
-            // 2. CRACK DEFECT DETECTION [best.pt]
-            if (cycle >= 34 && cycle <= 48) {
-              const cx = Math.round(w * 0.28);
-              const cy = Math.round(h * 0.56);
-              const cw = 115;
-              const ch = 95;
-
-              ctx.strokeStyle = '#0f172a';
-              ctx.lineWidth = 4;
-              ctx.beginPath();
-              ctx.moveTo(cx, cy);
-              ctx.lineTo(cx + 25, cy + 30);
-              ctx.lineTo(cx + 15, cy + 60);
-              ctx.lineTo(cx + 40, cy + 95);
-              ctx.stroke();
-
-              detectionsThisFrame.push({
-                id: `det-crk-${localFrame}`,
-                model: 'best.pt',
-                className: 'longitudinal_crack',
-                category: 'longitudinal_crack',
-                type: 'damage',
-                confidence: 0.91,
-                severity: 'high',
-                parentVehicleId: null,
-                bbox: {
-                  x: cx - 10,
-                  y: cy - 10,
-                  width: cw + 10,
-                  height: ch + 10,
-                  x_min: cx - 10,
-                  y_min: cy - 10,
-                  x_max: cx + cw,
-                  y_max: cy + ch
-                },
-                x_min: cx - 10,
-                y_min: cy - 10,
-                x_max: cx + cw,
-                y_max: cy + ch,
-                box: [cx - 10, cy - 10, cx + cw, cy + ch],
-                label: '[Long. Crack] 91%'
-              });
-
-              if (cycle === 36) {
-                setCrackCount((c) => c + 1);
-                setRoadDamageCount((c) => c + 1);
-                setRoadHealth((h) => Math.max(50, h - 1.2));
-              }
-            }
-
-            // 3. PEDESTRIAN / PERSON DETECTION ON FOOTPATH [yolov8n.pt Class 0]
-            const pedX = Math.round(w * 0.12);
-            const pedY = Math.round(h * 0.44);
-            const pedW = 38;
-            const pedH = 96;
-
-            // Draw pedestrian figure on roadside
-            ctx.fillStyle = '#1e293b'; // Coat
-            ctx.fillRect(pedX + 6, pedY + 24, pedW - 12, pedH - 46);
-            ctx.fillStyle = '#f87171'; // Face/Head
-            ctx.beginPath();
-            ctx.arc(pedX + pedW / 2, pedY + 12, 10, 0, Math.PI * 2);
-            ctx.fill();
-            // Legs
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(pedX + 12, pedY + pedH - 24);
-            ctx.lineTo(pedX + 10, pedY + pedH);
-            ctx.moveTo(pedX + pedW - 12, pedY + pedH - 24);
-            ctx.lineTo(pedX + pedW - 8, pedY + pedH);
-            ctx.stroke();
-
-            detectionsThisFrame.push({
-              id: `det-ped-${localFrame}`,
-              model: 'yolov8n.pt',
-              className: 'person',
-              category: 'person',
-              type: 'pedestrian',
-              confidence: 0.94,
-              severity: 'low',
-              parentVehicleId: null,
-              bbox: {
-                x: pedX,
-                y: pedY,
-                width: pedW,
-                height: pedH,
-                x_min: pedX,
-                y_min: pedY,
-                x_max: pedX + pedW,
-                y_max: pedY + pedH
-              },
-              x_min: pedX,
-              y_min: pedY,
-              x_max: pedX + pedW,
-              y_max: pedY + pedH,
-              box: [pedX, pedY, pedX + pedW, pedY + pedH],
-              label: '[Person] 94%'
-            });
-
-            if (localFrame % 45 === 0) {
-              setPedestrianCount((c) => c + 1);
-            }
-
-            // 4. VEHICLE & NUMBER PLATE DETECTION [yolov8n.pt & numberplate-yolo-v26n.pt]
-            // Positioned in right lane (distinct from pedestrian and pothole zones)
-            const vx = Math.round(w * 0.54);
-            const vy = Math.round(h * 0.44);
-            const vw = 135;
-            const vh = 82;
-
-            // Draw sleek Sedan body
-            ctx.fillStyle = '#2563eb'; // Deep Blue metallic body
-            ctx.beginPath();
-            ctx.roundRect(vx, vy + 24, vw, vh - 24, 6);
-            ctx.fill();
-
-            // Cabin / Roof
-            ctx.fillStyle = '#1d4ed8';
-            ctx.beginPath();
-            ctx.moveTo(vx + 20, vy + 24);
-            ctx.lineTo(vx + 38, vy);
-            ctx.lineTo(vx + vw - 38, vy);
-            ctx.lineTo(vx + vw - 16, vy + 24);
-            ctx.closePath();
-            ctx.fill();
-
-            // Windshield glass
-            ctx.fillStyle = '#93c5fd';
-            ctx.fillRect(vx + 34, vy + 4, vw - 68, 18);
-
-            // Tail lights
-            ctx.fillStyle = '#ef4444';
-            ctx.fillRect(vx + 8, vy + vh - 22, 18, 10);
-            ctx.fillRect(vx + vw - 26, vy + vh - 22, 18, 10);
-
-            // Vehicle Bounding Box (Requirement 2 & 9)
-            const vehId = `det-veh-${localFrame}`;
-            detectionsThisFrame.push({
-              id: vehId,
-              model: 'yolov8n.pt',
-              className: 'car',
-              category: 'car',
-              type: 'vehicle',
-              confidence: 0.97,
-              severity: 'low',
-              parentVehicleId: null,
-              bbox: {
-                x: vx,
-                y: vy,
-                width: vw,
-                height: vh,
-                x_min: vx,
-                y_min: vy,
-                x_max: vx + vw,
-                y_max: vy + vh
-              },
-              x_min: vx,
-              y_min: vy,
-              x_max: vx + vw,
-              y_max: vy + vh,
-              box: [vx, vy, vx + vw, vy + vh],
-              label: '[yolov8n.pt] Car (Sedan)'
-            });
-
-            // License plate on vehicle rear bumper (Requirement 3, 4, 9, 13)
-            const plW = 54;
-            const plH = 18;
-            const plX = Math.round(vx + (vw - plW) / 2);
-            const plY = Math.round(vy + vh - 22);
-
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(plX, plY, plW, plH);
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(plX, plY, plW, plH);
-            ctx.fillStyle = '#000000';
-            ctx.font = 'bold 9px monospace';
-            ctx.fillText('HR26DQ', plX + 4, plY + 13);
-
-            // Plate Bounding Box (strictly associated with parentVehicleId)
-            detectionsThisFrame.push({
-              id: `det-pl-${localFrame}`,
-              model: 'numberplate-yolo-v26n.pt',
-              className: 'number_plate',
-              category: 'number_plate',
-              type: 'plate',
-              confidence: 0.95,
-              severity: 'low',
-              parentVehicleId: vehId,
-              plateNumber: 'HR 26 DQ 5541',
-              plateConfidence: 0.95,
-              bbox: {
-                x: plX,
-                y: plY,
-                width: plW,
-                height: plH,
-                x_min: plX,
-                y_min: plY,
-                x_max: plX + plW,
-                y_max: plY + plH
-              },
-              x_min: plX,
-              y_min: plY,
-              x_max: plX + plW,
-              y_max: plY + plH,
-              box: [plX, plY, plX + plW, plY + plH],
-              label: '[Plate] HR 26 DQ 5541 95%'
-            });
-
-            if (localFrame % 40 === 0) {
-              setVehicleCount((c) => c + 1);
-              setNumberPlateCount((c) => c + 1);
-            }
-          }
-
-          // Evaluate detected plates in this frame against Registered Stolen Vehicles
-          // STRICT RULE: If a stolen vehicle is detected, send the alert message ONLY ONE TIME
-          for (const det of detectionsThisFrame) {
-            if (det.category === 'number_plate' || det.type === 'plate') {
-              const rawText = (det.label || '').replace(/.*Plate\s*-\s*/i, '').trim() || (det as any).plateNumber || '';
-              if (rawText) {
-                const stolenMatch = stolenVehicleService.isPlateStolen(rawText);
-                if (stolenMatch) {
-                  const norm = stolenVehicleService.normalizePlate(stolenMatch.vehicle_number);
-                  const vehicleId = stolenMatch.id || null;
-                  const alreadyAlerted = (
-                    (norm && alertedStolenPlatesRef.current.has(norm)) ||
-                    (vehicleId && alertedStolenPlatesRef.current.has(vehicleId)) ||
-                    stolenVehicleService.hasPlateBeenAlerted(norm, vehicleId)
-                  );
-                  if (!alreadyAlerted) {
-                    if (norm) alertedStolenPlatesRef.current.add(norm);
-                    if (vehicleId) alertedStolenPlatesRef.current.add(vehicleId);
-                    stolenVehicleService.markPlateAlerted(norm, vehicleId);
-
-                    const oneTimeAlert: StolenVehicleAlert = {
-                      id: `sta-${Date.now()}-${norm}`,
-                      stolen_vehicle_id: stolenMatch.id,
-                      vehicle_number: stolenMatch.vehicle_number,
-                      display_number: stolenMatch.vehicle_number,
-                      owner_name: stolenMatch.owner_name,
-                      fir_number: stolenMatch.fir_number,
-                      camera_name: 'Live Video ANPR Stream',
-                      camera_location: 'Road Video Inspection Feed',
-                      latitude: currentGps.lat,
-                      longitude: currentGps.lng,
-                      timestamp: new Date().toISOString(),
-                      first_detected_at: new Date().toISOString(),
-                      last_detected_at: new Date().toISOString(),
-                      ocr_text: rawText,
-                      confidence: det.confidence || 0.96,
-                      status: 'ACTIVE',
-                      source: 'video',
-                      video_id: videoId,
-                      detection_count: 1,
-                      is_new_event: true,
-                      remarks: `🚨 STOLEN VEHICLE INTERCEPT: Registered vehicle '${stolenMatch.vehicle_number}' identified during video inspection (${stolenMatch.fir_number}).`
-                    };
-
-                    stolenVehicleService.recordLiveAlert(oneTimeAlert).catch(() => {});
-                    setLatestStolenAlert(oneTimeAlert);
-                    setIsAlertBannerDismissed(false);
-                    setLiveStolenAlerts(prev => [oneTimeAlert, ...prev]);
-
-                    try {
-                      window.dispatchEvent(new CustomEvent('stolen_vehicle_detected', { detail: oneTimeAlert }));
-                    } catch (e) {}
-                  }
-                }
-              }
-            }
-          }
-
-          setCurrentFrameDetections(detectionsThisFrame);
-          setCurrentFrameUrl(canvas.toDataURL('image/jpeg', 0.65));
-        }
-      }
-
-      // Update GPS coordinate & Leaflet trail
-      const newLat = 28.4595 + (localFrame * 0.00012);
-      const newLng = 77.0266 + (localFrame * 0.00015);
-      setCurrentGps({ lat: newLat, lng: newLng });
-      routePointsRef.current.push([newLat, newLng]);
-
-      if (polylineRef.current) {
-        polylineRef.current.setLatLngs(routePointsRef.current);
-      }
-      if (vehicleMarkerRef.current) {
-        vehicleMarkerRef.current.setLatLng([newLat, newLng]);
-      }
-      if (mapRef.current && routePointsRef.current.length % 6 === 0) {
-        mapRef.current.panTo([newLat, newLng], { animate: false });
-      }
-
-      // If finished 100%
-      if (pct >= 100) {
-        handleInstantComplete();
-      }
+      // Detections are strictly delivered by the FastAPI WebSocket stream.
+      // In-browser heuristic inference is disabled.
+      return;
     }, intervalMs);
 
     return () => {
@@ -3126,15 +2534,12 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               <span>FastAPI Backend YOLO (Port 8000)</span>
             </button>
             <button
-              onClick={() => handleSwitchInferenceEngine('client')}
-              className={`px-3 py-1 text-xs font-bold font-mono uppercase tracking-wider rounded transition-all flex items-center gap-1.5 ${
-                inferenceEngine === 'client'
-                  ? 'bg-emerald-600 text-black shadow-[0_0_10px_rgba(52,199,89,0.4)]'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              disabled
+              className="px-3 py-1 text-xs font-bold font-mono uppercase tracking-wider rounded transition-all flex items-center gap-1.5 opacity-50 cursor-not-allowed text-slate-500 bg-slate-900 border border-slate-800"
+              title="In-Browser Client Vision is disabled. RoadVision requires FastAPI Backend YOLO on port 8000."
             >
-              <Zap className="w-3.5 h-3.5" />
-              <span>In-Browser Client Vision</span>
+              <Zap className="w-3.5 h-3.5 text-slate-500" />
+              <span>In-Browser Client Vision (Disabled)</span>
             </button>
           </div>
         </div>
@@ -3168,7 +2573,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
       </div>
 
       {/* 🛑 Critical Warning: Backend Stopped (When Backend Mode is Active) */}
-      {inferenceEngine === 'backend' && backendStatus === 'stopped' && (
+      {backendStatus === 'stopped' && (
         <div className="bg-gradient-to-r from-red-950/80 via-[#1F0E0E] to-red-950/80 border-2 border-red-500 p-4 text-white shadow-[0_0_25px_rgba(239,68,68,0.3)]">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
@@ -3183,7 +2588,7 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   <span className="text-red-300 text-xs font-mono font-bold">AI DETECTION HALTED</span>
                 </div>
                 <p className="text-xs text-red-200">
-                  The backend server is offline on port 8000. Detection has been strictly paused to prevent fake or ghost detections.
+                  The backend server is offline on port 8000. Detection has been strictly paused and counters cleared to prevent fake detections.
                 </p>
                 <p className="text-[11px] text-slate-300 font-mono">
                   Start backend: <code className="bg-black/60 px-1.5 py-0.5 rounded text-emerald-300">cd backend &amp;&amp; python -m uvicorn app.main:app --port 8000 --reload</code>
@@ -3198,13 +2603,6 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Retry Port 8000</span>
-              </button>
-              <button
-                onClick={() => handleSwitchInferenceEngine('client')}
-                className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-mono font-bold uppercase rounded shadow-md flex items-center gap-1.5"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Switch to Client Vision</span>
               </button>
             </div>
           </div>
@@ -3365,8 +2763,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   </div>
                 )}
 
-                {/* SVG-based Dynamic Detection Overlay */}
-                {enableSvgOverlay && currentFrameDetections.length > 0 && (
+                {/* SVG-based Dynamic Detection Overlay: ONLY rendered when backend is ONLINE */}
+                {enableSvgOverlay && currentFrameDetections.length > 0 && backendStatus === 'online' && backendConnected && (
                   <DetectionSvgOverlay
                     detections={currentFrameDetections}
                     frameWidth={frameWidth}
@@ -3381,6 +2779,30 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                     selectedDetectionId={selectedOverlayDetection?.id || null}
                     onSelectDetection={(det) => setSelectedOverlayDetection(det)}
                   />
+                )}
+
+                {/* Prominent Overlay when Backend is Offline (Requirements 1, 2, 3) */}
+                {(backendStatus !== 'online' || !backendConnected) && (
+                  <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                    <div className="w-14 h-14 rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-red-400 mb-3 shadow-[0_0_25px_rgba(239,68,68,0.5)]">
+                      <AlertCircle className="w-7 h-7" />
+                    </div>
+                    <div className="bg-red-600 text-white font-mono font-black text-xs px-3 py-1 uppercase tracking-widest rounded mb-2">
+                      BACKEND OFFLINE — DETECTION DISABLED
+                    </div>
+                    <p className="text-xs text-red-200 max-w-md font-mono mt-1">
+                      FastAPI backend on port 8000 is stopped. No simulated, heuristic, or fallback detections are displayed.
+                    </p>
+                    <div className="flex items-center gap-3 mt-4">
+                      <button
+                        onClick={checkBackendHealth}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold uppercase rounded border border-slate-600 flex items-center gap-2"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Retry Port 8000</span>
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {/* Active Detection Inspector Overlay Pill */}
@@ -3440,8 +2862,8 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   }}
                 />
 
-                {/* SVG-based Dynamic Detection Overlay */}
-                {enableSvgOverlay && currentFrameDetections.length > 0 && !(inferenceEngine === 'backend' && backendStatus !== 'online') && (
+                {/* SVG-based Dynamic Detection Overlay: ONLY rendered when backend is ONLINE */}
+                {enableSvgOverlay && currentFrameDetections.length > 0 && backendStatus === 'online' && backendConnected && (
                   <DetectionSvgOverlay
                     detections={currentFrameDetections}
                     frameWidth={frameWidth}
@@ -3458,30 +2880,25 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                   />
                 )}
 
-                {/* Watermark overlay when backend is offline and selected as engine */}
-                {inferenceEngine === 'backend' && backendStatus === 'stopped' && (
-                  <div className="absolute inset-0 bg-black/75 backdrop-blur-[2px] flex flex-col items-center justify-center p-6 text-center z-20">
-                    <div className="w-12 h-12 rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-red-400 mb-3 shadow-[0_0_20px_rgba(239,68,68,0.4)]">
-                      <AlertCircle className="w-6 h-6" />
+                {/* Watermark overlay when backend is offline */}
+                {(backendStatus !== 'online' || !backendConnected) && (
+                  <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                    <div className="w-14 h-14 rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-red-400 mb-3 shadow-[0_0_25px_rgba(239,68,68,0.5)]">
+                      <AlertCircle className="w-7 h-7" />
                     </div>
-                    <h4 className="text-base font-bold text-white uppercase font-mono tracking-wider">FastAPI Backend Stopped</h4>
-                    <p className="text-xs text-red-300 max-w-md mt-1 font-mono">
-                      YOLO multi-model detection is paused because the backend server on port 8000 is unreachable. Detections will not run until the backend is active or you switch engines.
+                    <div className="bg-red-600 text-white font-mono font-black text-xs px-3 py-1 uppercase tracking-widest rounded mb-2">
+                      BACKEND OFFLINE — DETECTION DISABLED
+                    </div>
+                    <p className="text-xs text-red-200 max-w-md font-mono mt-1">
+                      FastAPI backend on port 8000 is stopped. No simulated, heuristic, or fallback detections are displayed.
                     </p>
                     <div className="flex items-center gap-3 mt-4">
                       <button
                         onClick={checkBackendHealth}
-                        className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold uppercase rounded border border-slate-600 flex items-center gap-1.5"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold uppercase rounded border border-slate-600 flex items-center gap-2"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Check Connection</span>
-                      </button>
-                      <button
-                        onClick={() => handleSwitchInferenceEngine('client')}
-                        className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-mono font-bold uppercase rounded flex items-center gap-1.5 shadow"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>Switch to Client Engine</span>
+                        <span>Retry Port 8000</span>
                       </button>
                     </div>
                   </div>
@@ -4159,12 +3576,6 @@ export const LiveProcessing: React.FC<LiveProcessingProps> = ({
                       className="px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white font-bold uppercase rounded text-[9px]"
                     >
                       Check Again
-                    </button>
-                    <button
-                      onClick={() => handleSwitchInferenceEngine('client')}
-                      className="px-2.5 py-1 bg-blue-700 hover:bg-blue-600 text-white font-bold uppercase rounded text-[9px]"
-                    >
-                      Switch to Client Vision
                     </button>
                   </div>
                 </div>

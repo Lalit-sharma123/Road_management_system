@@ -795,74 +795,10 @@ class YOLODamageDetector:
         except Exception:
             pass
 
-        # Computer vision heuristic fallback if no models or zero results returned
-        if not merged_detections and self.damage_model is None:
-            return self._heuristic_fallback(frame, conf_threshold)
-
+        # Requirement 3: Strictly disable CV heuristic fallback for potholes
+        # If best.pt model weights are unavailable, return actual inference results only (zero damage detections)
+        # NEVER manufacture fake detections from thresholded contours
         return merged_detections
-
-    def _heuristic_fallback(self, frame: np.ndarray, conf_threshold: float) -> List[Dict[str, Any]]:
-        """CV fallback heuristics when PyTorch model weights are uninitialized"""
-        import cv2
-        height, width = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        roi_y_start = int(height * 0.3)
-        roi = gray[roi_y_start:, :]
-
-        thresh = cv2.adaptiveThreshold(
-            roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 8
-        )
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        detections = []
-
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if 300 < area < (width * height * 0.15):
-                x, y, w, h = cv2.boundingRect(cnt)
-                y += roi_y_start
-                aspect_ratio = float(w) / h if h > 0 else 1.0
-                conf = min(0.92, max(conf_threshold + 0.05, area / 5000.0))
-
-                if aspect_ratio > 3.0 or aspect_ratio < 0.3:
-                    cat = "longitudinal_crack" if aspect_ratio < 0.3 else "transverse_crack"
-                    dtype = "damage"
-                elif area > 3000:
-                    cat = "pothole"
-                    dtype = "damage"
-                else:
-                    cat = "alligator_crack"
-                    dtype = "damage"
-
-                p_title = "Pothole" if cat == "pothole" else cat.replace("_", " ").title()
-                detections.append({
-                    "id": f"dam_fallback_{len(detections) + 1}",
-                    "model": "best.pt",
-                    "className": cat,
-                    "category": cat,
-                    "confidence": round(conf, 4),
-                    "type": dtype,
-                    "label": f"[{p_title}] {int(round(conf * 100))}%",
-                    "parentVehicleId": None,
-                    "bbox": {
-                        "x": float(x),
-                        "y": float(y),
-                        "width": float(w),
-                        "height": float(h),
-                        "x_min": float(x),
-                        "y_min": float(y),
-                        "x_max": float(x + w),
-                        "y_max": float(y + h)
-                    },
-                    "x_min": float(x),
-                    "y_min": float(y),
-                    "x_max": float(x + w),
-                    "y_max": float(y + h),
-                    "area_pixels": float(area)
-                })
-                if len(detections) >= 25:
-                    break
-
-        return detections
 
     def _apply_strict_nms(self, detections: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str, Any]]:
         """

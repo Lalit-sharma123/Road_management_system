@@ -264,6 +264,15 @@ async function runE2ETests() {
   const hasAllReq9Fields = req9Fields.every(f => f in testPlate);
   assert(hasAllReq9Fields, 'Detection record adheres strictly to Requirement 9 specification');
 
+  // Test 5.4: In-Browser Heuristic Fallback Disabled (Requirements 1, 2, 4, 5)
+  const { realtimeVisionEngine } = await import('../src/utils/realtimeVisionEngine');
+  const mockDummy = {} as any;
+  const visionOutput = realtimeVisionEngine.processFrame(mockDummy, 1280, 720, 1, 0.25);
+  assert(visionOutput.detections.length === 0, 'In-browser heuristic detection strictly disabled: 0 detections produced');
+  assert(visionOutput.potholeCount === 0, 'No fake or heuristic potholes manufactured: potholeCount === 0');
+  assert(visionOutput.crackCount === 0, 'No fake or heuristic cracks manufactured: crackCount === 0');
+  assert(visionOutput.roadDamageCount === 0, 'Road damage count is strictly 0 without server-side YOLO inference');
+
   // ----------------------------------------------------
   // TEST SUITE 6: Summary Results
   // ----------------------------------------------------

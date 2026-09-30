@@ -561,11 +561,27 @@ async def execute_video_processing_task(
                 )
 
                 det_record = {
+                    "id": det.get("id") or f"det_{frame_num}_{len(frame_detections)+1}",
+                    "model": det.get("model") or ("best.pt" if det_type == "damage" else "yolov8n.pt"),
+                    "className": det.get("className") or cat_raw,
                     "category": cat_raw,
                     "type": det_type,
                     "confidence": float(det["confidence"]),
                     "severity": sev_level.value if hasattr(sev_level, "value") else str(sev_level),
                     "severity_score": float(sev_score),
+                    "parentVehicleId": det.get("parentVehicleId"),
+                    "plateNumber": det.get("plateNumber") or det.get("plate_number") or det.get("vehicle_number"),
+                    "plateConfidence": det.get("plateConfidence"),
+                    "bbox": {
+                        "x": float(det["x_min"]),
+                        "y": float(det["y_min"]),
+                        "width": float(det["x_max"] - det["x_min"]),
+                        "height": float(det["y_max"] - det["y_min"]),
+                        "x_min": float(det["x_min"]),
+                        "y_min": float(det["y_min"]),
+                        "x_max": float(det["x_max"]),
+                        "y_max": float(det["y_max"])
+                    },
                     "x_min": float(det["x_min"]),
                     "y_min": float(det["y_min"]),
                     "x_max": float(det["x_max"]),
@@ -654,10 +670,26 @@ async def execute_video_processing_task(
                 x2 = int(det.get("x_max", 0))
                 y2 = int(det.get("y_max", 0))
                 formatted_detections.append({
+                    "id": det.get("id") or f"det_{frame_num}_{len(formatted_detections)+1}",
+                    "model": det.get("model") or ("best.pt" if det.get("type") == "damage" else "yolov8n.pt"),
+                    "className": det.get("className") or det.get("category", "damage"),
                     "category": det["category"],
                     "type": det.get("type", "damage"),
-                    "confidence": round(float(det["confidence"]), 2),
+                    "confidence": round(float(det["confidence"]), 4),
                     "severity": det.get("severity", "high").upper(),
+                    "parentVehicleId": det.get("parentVehicleId"),
+                    "plateNumber": det.get("plateNumber") or det.get("plate_number"),
+                    "plateConfidence": det.get("plateConfidence"),
+                    "bbox": {
+                        "x": x1,
+                        "y": y1,
+                        "width": max(0, x2 - x1),
+                        "height": max(0, y2 - y1),
+                        "x_min": x1,
+                        "y_min": y1,
+                        "x_max": x2,
+                        "y_max": y2
+                    },
                     "x_min": x1,
                     "y_min": y1,
                     "x_max": x2,
@@ -688,6 +720,12 @@ async def execute_video_processing_task(
             processing_progress_state["crack_count"] = crack_count
             processing_progress_state["road_health_index"] = live_road_health
             processing_progress_state["status"] = f"Detecting frame {frame_num}/{total_expected_frames}"
+
+            cur_potholes = len([d for d in frame_detections if "pothole" in str(d.get("category", "")).lower()])
+            cur_cracks = len([d for d in frame_detections if "crack" in str(d.get("category", "")).lower()])
+            cur_vehicles = len([d for d in frame_detections if str(d.get("type", "")) == "vehicle" or str(d.get("category", "")) in ["car", "truck", "bus", "motorcycle"]])
+            cur_plates = len([d for d in frame_detections if "plate" in str(d.get("category", "")).lower() or str(d.get("type", "")) == "plate"])
+            cur_people = len([d for d in frame_detections if "person" in str(d.get("category", "")).lower() or str(d.get("type", "")) == "pedestrian"])
 
             ws_frame_msg = {
                 "type": "frame",
@@ -721,7 +759,36 @@ async def execute_video_processing_task(
                     "longitude": round(base_lon, 6)
                 },
                 "detections": formatted_detections,
+                "current_frame_counts": {
+                    "pothole": cur_potholes,
+                    "crack": cur_cracks,
+                    "vehicle": cur_vehicles,
+                    "number_plate": cur_plates,
+                    "person": cur_people,
+                    "total": len(frame_detections)
+                },
                 "counts": {
+                    "current_frame": {
+                        "pothole": cur_potholes,
+                        "crack": cur_cracks,
+                        "vehicle": cur_vehicles,
+                        "number_plate": cur_plates,
+                        "person": cur_people,
+                        "total": len(frame_detections)
+                    },
+                    "cumulative": {
+                        "pothole": pothole_count,
+                        "crack": crack_count,
+                        "broken_road": broken_road_count,
+                        "missing_asphalt": missing_asphalt_count,
+                        "road_damage": road_damage_count,
+                        "vehicle": vehicle_count,
+                        "helmet": helmet_count,
+                        "number_plate": number_plate_count,
+                        "helmet_violations": helmet_violations_count,
+                        "stolen_vehicle": stolen_vehicle_count,
+                        "total": len(all_detections_list)
+                    },
                     "pothole": pothole_count,
                     "crack": crack_count,
                     "broken_road": broken_road_count,
