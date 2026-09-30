@@ -422,6 +422,16 @@ const devMockStolenAlerts: any[] = [
   }
 ];
 
+let devMockStolenSettings: any = {
+  alert_cooldown_seconds: 10,
+  min_ocr_confidence: 0.70,
+  min_plate_confidence: 0.50,
+  confirmation_frames: 2,
+  cache_seconds: 30,
+  auto_dispatch_squad: true,
+  sms_alert_enabled: true
+};
+
 function parseJsonBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let body = '';
@@ -468,7 +478,13 @@ export function devApiPlugin(): Plugin {
         if (
           url.includes('/cameras/ws/live/') || 
           url.includes('/api/v1/cameras/ws/live/') ||
-          url.includes('/ws/live/')
+          url.includes('/ws/live/') ||
+          url.includes('/ws/dashboard') ||
+          url.includes('/ws/live-detections') ||
+          url.includes('/process/ws') ||
+          url.includes('/api/v1/process/ws') ||
+          url === '/ws' ||
+          url.startsWith('/ws?')
         ) {
           wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
@@ -478,6 +494,70 @@ export function devApiPlugin(): Plugin {
 
       wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         const url = req.url || '';
+        const isDashboard = url.includes('/ws/dashboard') || url.includes('/ws/live-detections') || url === '/ws' || url.startsWith('/ws?');
+        const isProcessStream = url.includes('/process/ws') || url.includes('/api/v1/process/ws');
+
+        if (isDashboard) {
+          ws.send(JSON.stringify({
+            type: 'connection_established',
+            message: 'Connected to Smart Road Damage Telemetry Stream (dashboard)',
+            status: 'online',
+            camera_active: true,
+            processing_active: false,
+            timestamp: Date.now() / 1000
+          }));
+
+          const dashHeartbeat = setInterval(() => {
+            if (ws.readyState !== WebSocket.OPEN) {
+              clearInterval(dashHeartbeat);
+              return;
+            }
+            ws.send(JSON.stringify({
+              type: 'telemetry_heartbeat',
+              status: 'online',
+              potholes_today: 14,
+              active_cameras: memoryCameras.length,
+              timestamp: Date.now() / 1000
+            }));
+          }, 15000);
+
+          ws.on('message', (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
+              }
+            } catch {}
+          });
+
+          ws.on('close', () => clearInterval(dashHeartbeat));
+          ws.on('error', () => clearInterval(dashHeartbeat));
+          return;
+        }
+
+        if (isProcessStream) {
+          const clientIdMatch = url.match(/\/process\/ws\/([^\/\?]+)/);
+          const clientId = clientIdMatch ? clientIdMatch[1] : 'client';
+          ws.send(JSON.stringify({
+            type: 'connection_established',
+            message: `Connected to Smart Road Damage Telemetry Stream (${clientId})`,
+            session_id: `sess_${Date.now()}`,
+            status: 'ready',
+            processing_active: false,
+            timestamp: Date.now() / 1000
+          }));
+
+          ws.on('message', (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() / 1000 }));
+              }
+            } catch {}
+          });
+          return;
+        }
+
         const match = url.match(/\/cameras\/ws\/live\/([^\/\?]+)/) || url.match(/\/ws\/live\/([^\/\?]+)/);
         const camId = match ? match[1] : 'cam_live';
         const cam = memoryCameras.find(c => c.id === camId) || { camera_name: 'Live CCTV Camera', stream_url: 'rtsp://nhai-traffic.in/live' };
@@ -1101,7 +1181,24 @@ export function devApiPlugin(): Plugin {
           return sendJson(res, 200, newVehicle);
         }
 
-        if (normalized.startsWith('/stolen-vehicles/') && !normalized.startsWith('/stolen-vehicles/alerts') && !normalized.startsWith('/stolen-vehicles/stats')) {
+        // Stolen Vehicles Configuration Settings
+        if (normalized === '/stolen-vehicles/config/settings') {
+          if (method === 'GET') {
+            return sendJson(res, 200, devMockStolenSettings);
+          }
+          if (method === 'PUT') {
+            const body = await parseJsonBody(req);
+            devMockStolenSettings = { ...devMockStolenSettings, ...body };
+            return sendJson(res, 200, devMockStolenSettings);
+          }
+        }
+
+        if (
+          normalized.startsWith('/stolen-vehicles/') && 
+          !normalized.startsWith('/stolen-vehicles/alerts') && 
+          !normalized.startsWith('/stolen-vehicles/stats') &&
+          !normalized.startsWith('/stolen-vehicles/config')
+        ) {
           const id = normalized.replace('/stolen-vehicles/', '');
           if (method === 'GET') {
             const found = devMockStolenVehicles.find(v => v.id === id);
@@ -1131,6 +1228,53 @@ export function devApiPlugin(): Plugin {
           return sendJson(res, 200, devMockStolenAlerts);
         }
 
+        if (normalized === '/stolen-alerts/live' && method === 'GET') {
+          const live = devMockStolenAlerts.filter(a => a.status === 'ACTIVE' || a.status === 'INVESTIGATING');
+          return sendJson(res, 200, live);
+        }
+
+        if (normalized === '/stolen-alerts/resolve' && method === 'POST') {
+          const body = await parseJsonBody(req);
+          const target = devMockStolenAlerts.find(a => a.id === body.alert_id || a.stolen_vehicle_id === body.alert_id);
+          if (target) {
+            target.status = body.status || 'RESOLVED';
+            target.resolved_by = body.resolved_by || 'Officer In-Charge';
+            if (body.remarks) target.remarks = body.remarks;
+            target.updated_at = new Date().toISOString();
+            return sendJson(res, 200, target);
+          }
+          return sendJson(res, 404, { error: 'Alert not found' });
+        }
+
+        if (normalized === '/stolen-alerts/simulate' && method === 'POST') {
+          const simPlates = ['HR26DQ5519', 'DL01AB1234', 'MH12DE1432'];
+          const randomPlate = simPlates[Math.floor(Math.random() * simPlates.length)];
+          const matchedVeh = devMockStolenVehicles.find(v => v.vehicle_number === randomPlate) || devMockStolenVehicles[0];
+          const newAlert = {
+            id: `sta-${Date.now().toString(36)}`,
+            stolen_vehicle_id: matchedVeh.id,
+            vehicle_number: randomPlate,
+            owner_name: matchedVeh.owner_name,
+            fir_number: matchedVeh.fir_number,
+            camera_id: 'cam-001',
+            camera_name: 'NH-48 Sirhaul Gateway - ANPR Cam 01',
+            camera_location: 'NH-48 Sirhaul Gateway, Delhi-Gurugram Border',
+            latitude: 28.5080,
+            longitude: 77.1020,
+            timestamp: new Date().toISOString(),
+            vehicle_snapshot_url: '/processed/violations/sample_vehicle.jpg',
+            plate_crop_url: '/processed/violations/sample_plate.jpg',
+            ocr_text: randomPlate,
+            confidence: 0.98,
+            status: 'ACTIVE',
+            remarks: 'Real-time ANPR match simulated from highway intercept gateway.',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          devMockStolenAlerts.unshift(newAlert);
+          return sendJson(res, 200, newAlert);
+        }
+
         if ((normalized === '/stolen-vehicles/alerts' || normalized === '/stolen-alerts') && method === 'POST') {
           const body = await parseJsonBody(req);
           const newAlert = {
@@ -1158,7 +1302,7 @@ export function devApiPlugin(): Plugin {
           return sendJson(res, 200, newAlert);
         }
 
-        if (normalized === '/stolen-vehicles/stats' && method === 'GET') {
+        if ((normalized === '/stolen-vehicles/stats' || normalized === '/stolen-alerts/stats') && method === 'GET') {
           const totalVehicles = devMockStolenVehicles.length;
           const activeAlerts = devMockStolenAlerts.filter(a => a.status === 'ACTIVE').length;
           const recovered = devMockStolenVehicles.filter(v => v.status === 'RECOVERED').length;

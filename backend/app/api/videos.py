@@ -114,6 +114,7 @@ async def upload_video(
     return new_video
 
 
+@router.get("", response_model=List[VideoUploadResponse])
 @router.get("/", response_model=List[VideoUploadResponse])
 async def list_videos(
     skip: int = 0,

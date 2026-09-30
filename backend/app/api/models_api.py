@@ -247,9 +247,10 @@ async def create_ai_model(
 
 
 @router.patch("/{model_id}/activate", response_model=AIModelResponse)
+@router.post("/{model_id}/activate", response_model=AIModelResponse)
 async def activate_ai_model(model_id: str, db: AsyncSession = Depends(get_db)):
     """
-    PATCH /api/v1/models/{id}/activate
+    POST / PATCH /api/v1/models/{id}/activate
     Set active weights for inference pipeline. Deactivates other models.
     """
     result = await db.execute(select(AIModel).where(AIModel.id == model_id))

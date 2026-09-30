@@ -84,22 +84,6 @@ async def get_dashboard_summary(
                 damage_by_type["pothole"] += cnt
                 road_damage_count += cnt
 
-        # Real detection counts from database (without dummy data fallbacks)
-        damage_by_type = {
-            "pothole": categories_count.get("pothole", 0),
-            "longitudinal_crack": categories_count.get("longitudinal_crack", 0),
-            "transverse_crack": categories_count.get("transverse_crack", 0),
-            "alligator_crack": categories_count.get("alligator_crack", 0),
-            "missing_asphalt": categories_count.get("missing_asphalt", 0),
-            "broken_road": categories_count.get("broken_road", 0)
-        }
-        vehicles_by_type = {
-            "car": vehicles_count.get("car", 0),
-            "truck": vehicles_count.get("truck", 0),
-            "bus": vehicles_count.get("bus", 0),
-            "motorcycle": vehicles_count.get("motorcycle", 0),
-            "bicycle": vehicles_count.get("bicycle", 0)
-        }
 
         # Latest Detections History
         latest_det_stmt = select(Detection).order_by(Detection.id.desc()).limit(10)

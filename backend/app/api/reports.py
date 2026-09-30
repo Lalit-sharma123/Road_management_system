@@ -1,5 +1,4 @@
-import os
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.database import get_db
 from app.models.models import User, Video, Detection, Report, UserRole
 from app.schemas.schemas import ReportGenerateRequest, ReportResponse
-from app.auth.jwt import get_current_user, require_role
+from app.auth.jwt import get_current_user, get_current_user_optional, require_role
 from app.services.report_service import ReportGenerationService
 from app.services.severity_service import SeverityAnalysisService
 
@@ -18,7 +17,7 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 @router.post("/generate", response_model=ReportResponse)
 async def generate_report(
     req: ReportGenerateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -75,7 +74,7 @@ async def generate_report(
         title=f"Road Damage Audit ({fmt.upper()})",
         report_type=fmt.upper(),
         file_path=path,
-        created_by=current_user.id
+        created_by=current_user.id if current_user else None
     )
     db.add(db_report)
     await db.commit()
@@ -87,7 +86,7 @@ async def generate_report(
 @router.get("/download/{report_id}")
 async def download_report_file(
     report_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
     """Download a generated report file."""

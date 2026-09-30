@@ -202,3 +202,19 @@ async def root_health_check():
         "timestamp": time.time(),
         "docs": "/docs"
     }
+
+
+@app.get("/system/backend-status", tags=["Health Check"])
+@app.get(f"{settings.API_V1_STR}/system/backend-status", tags=["Health Check"])
+async def system_backend_status():
+    """Detailed backend status endpoint queried by the frontend."""
+    return {
+        "online": True,
+        "status": "online",
+        "port": 8000,
+        "system": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "timestamp": time.time(),
+        "message": "FastAPI Backend is ONLINE"
+    }
+

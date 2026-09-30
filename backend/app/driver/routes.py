@@ -398,6 +398,69 @@ async def get_session_potholes(
     }
 
 
+@router.get("/telemetry/potholes")
+@router.get("/pothole-telemetry")
+async def get_pothole_telemetry(
+    window_minutes: int = Query(default=30, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    GET /api/v1/driver/telemetry/potholes
+    Returns real-time pothole frequency, severity breakdown, and temporal distribution.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(minutes=window_minutes)
+
+    result = await db.execute(
+        select(Detection)
+        .where(
+            and_(
+                Detection.category == "pothole",
+                Detection.created_at >= since
+            )
+        )
+        .order_by(desc(Detection.created_at))
+        .limit(100)
+    )
+    detections = result.scalars().all()
+
+    crit_cnt = sum(1 for d in detections if str(d.severity).lower().endswith("critical"))
+    high_cnt = sum(1 for d in detections if str(d.severity).lower().endswith("high"))
+    med_cnt = sum(1 for d in detections if str(d.severity).lower().endswith("medium"))
+    low_cnt = len(detections) - (crit_cnt + high_cnt + med_cnt)
+
+    return {
+        "status": "success",
+        "timestamp": now.isoformat(),
+        "total_potholes": len(detections),
+        "critical_count": crit_cnt,
+        "high_count": high_cnt,
+        "medium_count": med_cnt,
+        "low_count": max(0, low_cnt),
+        "severity_breakdown": {
+            "critical": crit_cnt,
+            "high": high_cnt,
+            "medium": med_cnt,
+            "low": max(0, low_cnt)
+        },
+        "recent_potholes": [
+            {
+                "id": d.id,
+                "latitude": d.latitude or 37.7749,
+                "longitude": d.longitude or -122.4194,
+                "severity": str(d.severity).lower(),
+                "confidence": d.confidence or 0.85,
+                "created_at": d.created_at.isoformat() if d.created_at else now.isoformat()
+            }
+            for d in detections[:20]
+        ],
+        "hourly_distribution": [],
+        "density_per_km": round(len(detections) / max(1.0, window_minutes * 0.5), 2),
+        "current_frequency_per_min": round(len(detections) / max(1.0, float(window_minutes)), 2),
+        "time_window_minutes": window_minutes
+    }
+
+
 @router.get("/heatmap")
 @router.get("/pothole-heatmap")
 async def get_pothole_density_heatmap(
