@@ -314,3 +314,26 @@ async def configure_adaptive_frame_skip(
         "message": f"Adaptive Frame-Skip Controller configured to {mode} mode (skip={adaptive_frame_controller.get_frame_skip()}).",
         "telemetry": adaptive_frame_controller.get_telemetry()
     }
+
+
+@router.get("/debug/damage-model")
+async def get_damage_model_debug():
+    """
+    GET /api/v1/models/debug/damage-model
+    Returns real-time status of best.pt: loaded status, resolved weights path,
+    configured classes, inference device, confidence threshold, and last live frame debug info.
+    """
+    from app.services.camera_manager import detector_instance
+    return {
+        "status": "online" if detector_instance.damage_model is not None else "unavailable",
+        "model_filename": getattr(settings, "DAMAGE_MODEL_NAME", "best.pt"),
+        "model_path": getattr(detector_instance, "damage_model_path", None),
+        "source": getattr(detector_instance, "damage_model_source", "UNKNOWN"),
+        "classes": getattr(detector_instance, "road_damage_classes", detector_instance.ROAD_DAMAGE_CLASSES),
+        "device": getattr(detector_instance, "device", "cpu"),
+        "confidence_threshold": getattr(settings, "DAMAGE_CONF_THRESHOLD", 0.20),
+        "iou_threshold": getattr(settings, "DAMAGE_IOU_THRESHOLD", 0.40),
+        "input_size": getattr(settings, "DAMAGE_MODEL_IMGSZ", 640),
+        "tiled_inference": getattr(settings, "USE_TILED_INFERENCE", True),
+        "last_debug": getattr(detector_instance, "last_damage_debug", {})
+    }

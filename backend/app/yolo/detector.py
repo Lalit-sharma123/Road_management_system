@@ -57,6 +57,12 @@ class YOLODamageDetector:
         self.vehicle_model = None
         self.helmet_model = None
         self.plate_model = None
+        self.damage_model_path = None
+        self.vehicle_model_path = None
+        self.helmet_model_path = None
+        self.plate_model_path = None
+        self._inference_frame_count = 0
+        self.last_damage_debug: Dict[str, Any] = {}
         
         # Thread pool executor for parallel inference of full-frame models
         self.executor = concurrent.futures.ThreadPoolExecutor(
@@ -206,6 +212,7 @@ class YOLODamageDetector:
 
             # 1. Road Damage Model (best.pt)
             best_path = Path(self.model_path) if self.model_path and Path(self.model_path).is_file() else settings.resolve_model_path(settings.DAMAGE_MODEL_NAME)
+            self.damage_model_path = str(best_path)
             if best_path.is_file():
                 try:
                     self.damage_model = YOLO(str(best_path))
@@ -238,6 +245,7 @@ class YOLODamageDetector:
 
             # 2. Vehicle Model (yolov8n.pt)
             veh_path = settings.resolve_model_path(settings.VEHICLE_MODEL_NAME)
+            self.vehicle_model_path = str(veh_path)
             if veh_path.is_file():
                 try:
                     self.vehicle_model = YOLO(str(veh_path))
@@ -254,6 +262,7 @@ class YOLODamageDetector:
             helmet_path = settings.resolve_model_path(getattr(settings, "HELMET_MODEL_NAME", "helmet.pt"))
             if not helmet_path.is_file():
                 helmet_path = settings.resolve_model_path("helmet_numberplate.pt")
+            self.helmet_model_path = str(helmet_path)
 
             if helmet_path.is_file():
                 try:
@@ -271,6 +280,7 @@ class YOLODamageDetector:
             plate_path = settings.resolve_model_path(getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate-yolo-v26n.pt"))
             if not plate_path.is_file():
                 plate_path = settings.resolve_model_path("helmet_numberplate.pt")
+            self.plate_model_path = str(plate_path)
 
             if plate_path.is_file():
                 try:
@@ -294,21 +304,27 @@ class YOLODamageDetector:
         iou_threshold: float,
         horizon_y_limit: float,
         min_area: float,
-        max_area: float
+        max_area: float,
+        frame_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Run best.pt road damage detection with multi-scale tiled inference:
         1. Full-frame inference
         2. Tiled inference over road pavement (quadrants with overlap)
         3. Class-specific NMS deduplication to preserve separate potholes
-        4. Structured per-frame logging
+        4. Structured per-frame diagnostic logging
         """
         detections: List[Dict[str, Any]] = []
         if self.damage_model is None or frame is None or frame.size == 0:
             return detections
 
-        conf_threshold = conf_threshold or getattr(settings, "DAMAGE_CONF_THRESHOLD", 0.25)
+        # Use dedicated damage model confidence threshold.
+        # Custom-trained road damage / pothole models produce scores around 0.15 - 0.30.
+        # Never let a generic vehicle threshold (e.g. 0.35) silence the damage model!
+        config_damage_conf = getattr(settings, "DAMAGE_CONF_THRESHOLD", 0.20)
+        damage_conf = min(conf_threshold, config_damage_conf) if conf_threshold else config_damage_conf
         iou_threshold = iou_threshold or getattr(settings, "DAMAGE_IOU_THRESHOLD", 0.40)
+        imgsz = getattr(settings, "DAMAGE_MODEL_IMGSZ", 640)
 
         raw_candidates: List[Dict[str, Any]] = []
 
@@ -323,25 +339,29 @@ class YOLODamageDetector:
                 inf_ctx = None
 
             def run_predict(img_input: np.ndarray, offset_x: float = 0.0, offset_y: float = 0.0):
-                if inf_ctx is not None:
-                    with inf_ctx:
+                try:
+                    if inf_ctx is not None:
+                        with inf_ctx:
+                            res = self.damage_model.predict(
+                                source=img_input,
+                                conf=damage_conf,
+                                iou=iou_threshold,
+                                imgsz=imgsz,
+                                half=(getattr(self, "device", "cpu") != "cpu"),
+                                verbose=False
+                            )
+                    else:
                         res = self.damage_model.predict(
                             source=img_input,
-                            conf=conf_threshold,
+                            conf=damage_conf,
                             iou=iou_threshold,
-                            imgsz=640,
+                            imgsz=imgsz,
                             half=(getattr(self, "device", "cpu") != "cpu"),
                             verbose=False
                         )
-                else:
-                    res = self.damage_model.predict(
-                        source=img_input,
-                        conf=conf_threshold,
-                        iou=iou_threshold,
-                        imgsz=640,
-                        half=(getattr(self, "device", "cpu") != "cpu"),
-                        verbose=False
-                    )
+                except Exception as pred_err:
+                    print(f"⚠️ [YOLO Predict Error on Road Damage]: {pred_err}")
+                    res = None
 
                 if res and len(res) > 0:
                     for box in res[0].boxes:
@@ -352,25 +372,27 @@ class YOLODamageDetector:
                         y_min = xyxy[1] + offset_y
                         x_max = xyxy[2] + offset_x
                         y_max = xyxy[3] + offset_y
-                        w = x_max - x_min
-                        h = y_max - y_min
+                        w = max(0.0, x_max - x_min)
+                        h = max(0.0, y_max - y_min)
                         area = w * h
 
-                        # Horizon & boundary bounds check
-                        if y_min < horizon_y_limit and y_max < horizon_y_limit + 15:
+                        # Horizon check: only discard if the entire bounding box is above the horizon (in sky)
+                        if y_max <= horizon_y_limit:
                             continue
-                        if area < 30 or area > max_area:
+                        if area < 20 or area > max_area:
                             continue
 
                         # Resolve class name from model.names (Requirement 4)
-                        if hasattr(self, "road_damage_classes") and self.road_damage_classes:
-                            category = self.road_damage_classes.get(cls_id, self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole"))
-                        elif hasattr(self.damage_model, "names") and self.damage_model.names:
-                            category = self.damage_model.names.get(cls_id, self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole"))
+                        if hasattr(self, "road_damage_classes") and isinstance(self.road_damage_classes, dict):
+                            category = self.road_damage_classes.get(cls_id, "pothole")
+                        elif hasattr(self.damage_model, "names") and isinstance(self.damage_model.names, dict):
+                            category = self.damage_model.names.get(cls_id, "pothole")
                         else:
                             category = self.ROAD_DAMAGE_CLASSES.get(cls_id % 6, "pothole")
 
-                        category_str = str(category).lower()
+                        category_str = str(category).lower().strip()
+                        if not category_str or category_str == "0":
+                            category_str = "pothole"
                         p_title = "Pothole" if "pothole" in category_str else category_str.replace("_", " ").title()
                         det_label = f"[{p_title}] {int(round(conf * 100))}%"
 
@@ -472,20 +494,46 @@ class YOLODamageDetector:
             dt_ms = (time.perf_counter() - t0) * 1000.0
             self._update_telemetry("damage", dt_ms, len(detections))
 
-            # Requirement 5: Structured Per-Frame Debug Logging
-            if getattr(settings, "DEBUG_YOLO_LOGGING", True):
-                raw_potholes = len([c for c in raw_candidates if "pothole" in c["className"]])
-                final_potholes = len([d for d in detections if "pothole" in d["className"]])
-                print(f"\n--- [YOLO INFERENCE FRAME] ---")
-                print(f"MODEL: best.pt")
-                print(f"SOURCE: {getattr(self, 'damage_model_source', 'YOLO')}")
-                print("RAW DETECTIONS:")
-                for d in detections:
-                    b = d["bbox"]
-                    print(f"  class={d['className']} confidence={d['confidence']:.2f} bbox=({b['x']:.1f}, {b['y']:.1f}, {b['x']+b['width']:.1f}, {b['y']+b['height']:.1f})")
-                print(f"RAW POTHOLES: {raw_potholes}")
-                print(f"FINAL POTHOLES: {final_potholes}")
-                print("------------------------------\n")
+            # Diagnostic frame accounting
+            self._inference_frame_count += 1
+            curr_frame_id = frame_id if frame_id is not None else self._inference_frame_count
+            raw_potholes = len([c for c in raw_candidates if "pothole" in c["className"]])
+            final_potholes = len([d for d in detections if "pothole" in d["className"]])
+
+            self.last_damage_debug = {
+                "frame_id": curr_frame_id,
+                "frame_shape": list(frame.shape),
+                "model": getattr(self, "damage_model_path", "backend/weights/best.pt"),
+                "model_input_size": imgsz,
+                "conf_threshold": damage_conf,
+                "raw_detections": len(raw_candidates),
+                "raw_potholes": raw_potholes,
+                "classes": [c["className"] for c in raw_candidates[:10]],
+                "confidences": [c["confidence"] for c in raw_candidates[:10]],
+                "boxes_before_filtering": len(raw_candidates),
+                "filtered_detections": len(detections),
+                "final_potholes": final_potholes
+            }
+
+            # Requirement 2 & 5: Controlled Structured Diagnostic Logging
+            should_log = (curr_frame_id <= 3) or (curr_frame_id % 10 == 0) or (len(raw_candidates) > 0)
+            if should_log:
+                print(f"\n[DAMAGE DEBUG]")
+                print(f"frame_id={curr_frame_id}")
+                print(f"frame_shape={frame.shape}")
+                print(f"model={getattr(self, 'damage_model_path', 'backend/weights/best.pt')}")
+                print(f"model_input_size={imgsz}")
+                print(f"conf_threshold={damage_conf}")
+                print(f"raw_detections={len(raw_candidates)}")
+                print(f"classes={[c['className'] for c in raw_candidates[:10]]}")
+                print(f"confidences={[c['confidence'] for c in raw_candidates[:10]]}")
+                print(f"boxes_before_filtering={len(raw_candidates)}")
+                print(f"filtered_detections={len(detections)}")
+                if len(detections) > 0:
+                    for idx, d in enumerate(detections[:5]):
+                        b = d["bbox"]
+                        print(f"  det_{idx+1}: class={d['className']} conf={d['confidence']:.2f} bbox=({b['x_min']:.1f}, {b['y_min']:.1f}, {b['x_max']:.1f}, {b['y_max']:.1f})")
+                print(f"[END DAMAGE DEBUG]\n")
 
         except Exception as err:
             print(f"[Damage Model Inference Exception]: {err}")
@@ -666,21 +714,15 @@ class YOLODamageDetector:
             except Exception as err:
                 print(f"[Plate ROI Inference Exception]: {err}")
 
-        # High-precision heuristic plate crop (bottom rear of vehicle)
-        fallback_bbox = {
-            "x_min": vw * 0.20,
-            "y_min": vh * 0.65,
-            "x_max": vw * 0.80,
-            "y_max": vh * 0.95
-        }
-        return True, 0.88, fallback_bbox
+        return False, 0.0, None
 
     def detect(
         self,
         frame: np.ndarray,
         conf_threshold: float = settings.CONFIDENCE_THRESHOLD,
         iou_threshold: float = settings.IOU_THRESHOLD,
-        roi_horizon_cutoff: float = 0.30
+        roi_horizon_cutoff: float = 0.15,
+        frame_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Main Detection Pipeline (Real-Time Parallel Execution):
@@ -688,7 +730,7 @@ class YOLODamageDetector:
         STEP 1 & STEP 2: Concurrently executes best.pt (road damage) and yolov8n.pt (vehicles)
         using ThreadPoolExecutor to achieve maximum FPS and zero blocking.
         
-        STEP 3: Integrates with Helmet and Plate models for complete detection.
+        STEP 3: Integrates real license plate detection on vehicle ROIs using the dedicated plate model.
         
         Returns unified merged detection list compatible with all downstream endpoints.
         """
@@ -697,8 +739,8 @@ class YOLODamageDetector:
 
         height, width = frame.shape[:2]
         horizon_y_limit = height * roi_horizon_cutoff
-        min_area_pixels = 100
-        max_area_pixels = height * width * 0.85
+        min_area_pixels = 20
+        max_area_pixels = height * width * 0.90
 
         merged_detections: List[Dict[str, Any]] = []
 
@@ -710,7 +752,8 @@ class YOLODamageDetector:
             iou_threshold,
             horizon_y_limit,
             min_area_pixels,
-            max_area_pixels
+            max_area_pixels,
+            frame_id
         )
         
         future_vehicles = self.executor.submit(
@@ -720,61 +763,78 @@ class YOLODamageDetector:
             iou_threshold
         )
 
-        # Collect parallel inference results
+        # Collect parallel inference results with safe timeout
+        timeout_sec = getattr(settings, "INFERENCE_TIMEOUT_SECONDS", 20.0)
+        damage_dets: List[Dict[str, Any]] = []
+        vehicle_dets: List[Dict[str, Any]] = []
+
         try:
-            damage_dets = future_damage.result(timeout=1.5)
+            damage_dets = future_damage.result(timeout=timeout_sec)
             merged_detections.extend(damage_dets)
+        except concurrent.futures.TimeoutError:
+            print(f"⚠️ [YOLO Engine] Damage model inference timed out after {timeout_sec}s.")
         except Exception as err:
             print(f"[Parallel Damage Inference Notice]: {err}")
 
         try:
-            vehicle_dets = future_vehicles.result(timeout=1.5)
+            vehicle_dets = future_vehicles.result(timeout=timeout_sec)
             merged_detections.extend(vehicle_dets)
+        except concurrent.futures.TimeoutError:
+            print(f"⚠️ [YOLO Engine] Vehicle model inference timed out after {timeout_sec}s.")
         except Exception as err:
             print(f"[Parallel Vehicle Inference Notice]: {err}")
 
-        # Attach license plates on detected vehicles with explicit parentVehicleId
+        # Real License Plate Detection on Detected Vehicles using infer_plate_on_vehicle_roi
+        # Never fabricate fake plate coordinates or manually hardcode bounding boxes
         plates = []
-        for idx, v in enumerate(vehicle_dets):
-            if v.get("type") == "vehicle" and v.get("category") in ["car", "truck", "bus", "motorcycle"]:
-                vx1, vy1 = v.get("x_min", 0), v.get("y_min", 0)
-                vx2, vy2 = v.get("x_max", 0), v.get("y_max", 0)
-                vw, vh = vx2 - vx1, vy2 - vy1
-                if vw >= 25 and vh >= 20:
-                    pw = max(36.0, vw * 0.40)
-                    ph = max(14.0, vh * 0.18)
-                    px = vx1 + (vw - pw) / 2.0
-                    py = vy1 + vh * 0.74
-                    plate_num = v.get("plate_number") or ""
-                    plate_conf = 0.95
-                    plate_label = f"[Plate] {plate_num} {int(round(plate_conf * 100))}%" if plate_num else f"[Plate] {int(round(plate_conf * 100))}%"
-                    plates.append({
-                        "id": f"det-plate-{v.get('id', f'veh_{idx+1}')}",
-                        "model": "numberplate-yolo-v26n.pt",
-                        "className": "number_plate",
-                        "category": "number_plate",
-                        "confidence": plate_conf,
-                        "type": "plate",
-                        "label": plate_label,
-                        "parentVehicleId": v.get("id"),
-                        "plateNumber": plate_num,
-                        "plateConfidence": plate_conf,
-                        "bbox": {
-                            "x": round(px, 2),
-                            "y": round(py, 2),
-                            "width": round(pw, 2),
-                            "height": round(ph, 2),
-                            "x_min": round(px, 2),
-                            "y_min": round(py, 2),
-                            "x_max": round(px + pw, 2),
-                            "y_max": round(py + ph, 2)
-                        },
-                        "x_min": round(px, 2),
-                        "y_min": round(py, 2),
-                        "x_max": round(px + pw, 2),
-                        "y_max": round(py + ph, 2),
-                        "area_pixels": round(pw * ph, 2)
-                    })
+        if self.plate_model is not None and vehicle_dets:
+            for idx, v in enumerate(vehicle_dets):
+                if v.get("type") == "vehicle" and v.get("category") in ["car", "truck", "bus", "motorcycle"]:
+                    vx1 = max(0, int(v.get("x_min", 0)))
+                    vy1 = max(0, int(v.get("y_min", 0)))
+                    vx2 = min(width, int(v.get("x_max", 0)))
+                    vy2 = min(height, int(v.get("y_max", 0)))
+                    vw, vh = vx2 - vx1, vy2 - vy1
+                    if vw >= 30 and vh >= 25:
+                        veh_roi = frame[vy1:vy2, vx1:vx2]
+                        if veh_roi.size > 0:
+                            plate_found, plate_conf, rel_bbox = self.infer_plate_on_vehicle_roi(veh_roi, conf_threshold=0.25)
+                            if plate_found and rel_bbox:
+                                px1 = round(vx1 + rel_bbox["x_min"], 2)
+                                py1 = round(vy1 + rel_bbox["y_min"], 2)
+                                px2 = round(vx1 + rel_bbox["x_max"], 2)
+                                py2 = round(vy1 + rel_bbox["y_max"], 2)
+                                pw = round(px2 - px1, 2)
+                                ph = round(py2 - py1, 2)
+                                plate_num = v.get("plate_number") or ""
+                                p_label = f"[Plate] {plate_num} {int(round(plate_conf * 100))}%" if plate_num else f"[Plate] {int(round(plate_conf * 100))}%"
+                                plates.append({
+                                    "id": f"det-plate-{v.get('id', f'veh_{idx+1}')}",
+                                    "model": getattr(settings, "NUMBERPLATE_MODEL_NAME", "numberplate-yolo-v26n.pt"),
+                                    "className": "number_plate",
+                                    "category": "number_plate",
+                                    "confidence": plate_conf,
+                                    "type": "plate",
+                                    "label": p_label,
+                                    "parentVehicleId": v.get("id"),
+                                    "plateNumber": plate_num,
+                                    "plateConfidence": plate_conf,
+                                    "bbox": {
+                                        "x": px1,
+                                        "y": py1,
+                                        "width": pw,
+                                        "height": ph,
+                                        "x_min": px1,
+                                        "y_min": py1,
+                                        "x_max": px2,
+                                        "y_max": py2
+                                    },
+                                    "x_min": px1,
+                                    "y_min": py1,
+                                    "x_max": px2,
+                                    "y_max": py2,
+                                    "area_pixels": round(pw * ph, 2)
+                                })
         merged_detections.extend(plates)
 
         # Apply strict NMS and cross-class spatial exclusion
@@ -795,17 +855,15 @@ class YOLODamageDetector:
         except Exception:
             pass
 
-        # Requirement 3: Strictly disable CV heuristic fallback for potholes
-        # If best.pt model weights are unavailable, return actual inference results only (zero damage detections)
-        # NEVER manufacture fake detections from thresholded contours
         return merged_detections
 
     def _apply_strict_nms(self, detections: List[Dict[str, Any]], iou_thresh: float = 0.45) -> List[Dict[str, Any]]:
         """
-        Strict Non-Maximum Suppression (NMS) and Cross-Category Spatial Exclusion:
+        Non-Maximum Suppression (NMS) and Category-Specific Filtering:
         1. Suppresses duplicate bounding boxes of the same category with IoU > iou_thresh.
-        2. Drops road damage (potholes, cracks) that fall inside vehicles or persons.
-        3. Drops persons that fall heavily inside cars/trucks.
+        2. Road damage (potholes, cracks) is handled INDEPENDENTLY from vehicles and riders.
+           Never suppress road surface defects because of passing vehicles or persons.
+        3. Excludes pedestrians that fall heavily inside cars/trucks.
         """
         if not detections or len(detections) <= 1:
             return detections
@@ -837,15 +895,13 @@ class YOLODamageDetector:
         # Sort by confidence descending
         sorted_dets = sorted(detections, key=lambda d: d.get("confidence", 0), reverse=True)
         kept = []
-
         vehicles = []
-        persons = []
 
         for d in sorted_dets:
             cat = str(d.get("category", "")).lower()
             dtype = str(d.get("type", "")).lower()
 
-            # Check intra-class NMS against already kept items of same category
+            # Check intra-class NMS against already kept items of the same category
             is_dup = False
             for k in kept:
                 k_cat = str(k.get("category", "")).lower()
@@ -858,37 +914,20 @@ class YOLODamageDetector:
             if is_dup:
                 continue
 
-            # Cross-class spatial exclusions:
-            # A defect (pothole/crack) cannot overlap with a vehicle or person
-            if dtype == "damage" or "pothole" in cat or "crack" in cat:
-                overlap_entity = False
-                for v in vehicles:
-                    if inter_ratio(d, v) > 0.08:
-                        overlap_entity = True
-                        break
-                if not overlap_entity:
-                    for p in persons:
-                        if inter_ratio(d, p) > 0.08:
-                            overlap_entity = True
-                            break
-                if overlap_entity:
-                    continue
-
             # A person cannot be inside a car or truck
             if cat == "person" or dtype == "pedestrian":
                 inside_car = False
                 for v in vehicles:
                     if str(v.get("category", "")).lower() in ["car", "truck", "bus"]:
-                        if inter_ratio(d, v) > 0.30:
+                        if inter_ratio(d, v) > 0.40:
                             inside_car = True
                             break
                 if inside_car:
                     continue
 
+            # Road damage defects (potholes, cracks) are NEVER suppressed by vehicles/persons
             kept.append(d)
             if dtype == "vehicle" or cat in ["car", "truck", "bus", "motorcycle"]:
                 vehicles.append(d)
-            elif cat == "person" or dtype == "pedestrian":
-                persons.append(d)
 
         return kept

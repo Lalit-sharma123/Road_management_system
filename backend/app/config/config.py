@@ -67,8 +67,11 @@ class Settings(BaseSettings):
     NUM_INFERENCE_THREADS: int = 4
     CONFIDENCE_THRESHOLD: float = 0.35
     IOU_THRESHOLD: float = 0.45
-    DAMAGE_CONF_THRESHOLD: float = 0.25
-    DAMAGE_IOU_THRESHOLD: float = 0.40
+    DAMAGE_CONF_THRESHOLD: float = float(os.getenv("DAMAGE_CONF_THRESHOLD", "0.20"))
+    DAMAGE_IOU_THRESHOLD: float = float(os.getenv("DAMAGE_IOU_THRESHOLD", "0.40"))
+    DAMAGE_MODEL_IMGSZ: int = int(os.getenv("DAMAGE_MODEL_IMGSZ", "640"))
+    INFERENCE_TIMEOUT_SECONDS: float = float(os.getenv("INFERENCE_TIMEOUT_SECONDS", "20.0"))
+    ROI_HORIZON_CUTOFF: float = float(os.getenv("ROI_HORIZON_CUTOFF", "0.15"))
     USE_TILED_INFERENCE: bool = True
     TILE_OVERLAP: float = 0.20
     DEBUG_YOLO_LOGGING: bool = True

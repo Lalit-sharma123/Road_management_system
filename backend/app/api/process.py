@@ -458,7 +458,8 @@ async def execute_video_processing_task(
             # Multi-Model YOLO detection on preprocessed frame
             raw_detections = detector_instance.detect(
                 preprocessed_frame,
-                conf_threshold=confidence_threshold
+                conf_threshold=confidence_threshold,
+                frame_id=frame_num
             )
             has_damage = len(raw_detections) > 0
 
